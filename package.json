@@ -1,0 +1,49 @@
+{
+    "name": "wuwa-gacha-tool",
+    "private": true,
+    "version": "0.1.0",
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "tauri:dev": "tauri dev",
+        "build": "tsc -b && vite build",
+        "lint": "eslint .",
+        "preview": "vite preview",
+        "check": "tsc -b --noEmit",
+        "tauri": "tauri"
+    },
+    "dependencies": {
+        "@tauri-apps/api": "^2.3.0",
+        "@tauri-apps/plugin-dialog": "^2.7.2",
+        "@tauri-apps/plugin-shell": "^2.3.5",
+        "clsx": "^2.1.1",
+        "echarts": "^6.1.0",
+        "echarts-for-react": "^3.0.6",
+        "framer-motion": "^12.42.0",
+        "lucide-react": "^0.511.0",
+        "react": "^18.3.1",
+        "react-dom": "^18.3.1",
+        "react-router-dom": "^7.18.0",
+        "tailwind-merge": "^3.0.2",
+        "zustand": "^5.0.14"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.25.0",
+        "@tauri-apps/cli": "^2.3.0",
+        "@types/node": "^22.15.30",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.4.1",
+        "autoprefixer": "^10.4.21",
+        "eslint": "^9.25.0",
+        "eslint-plugin-react-hooks": "^5.2.0",
+        "eslint-plugin-react-refresh": "^0.4.19",
+        "globals": "^16.0.0",
+        "postcss": "^8.5.3",
+        "tailwindcss": "^3.4.17",
+        "typescript": "~5.8.3",
+        "typescript-eslint": "^8.30.1",
+        "vite": "^6.3.5",
+        "vite-tsconfig-paths": "^5.1.4"
+    }
+}
