@@ -32,6 +32,17 @@ pub struct GachaRecord {
     pub is_off_rate: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GachaImportResult {
+    pub player_id: String,
+    pub records: Vec<GachaRecord>,
+    pub imported_count: usize,
+    pub added_count: usize,
+    pub duplicate_count: usize,
+    pub total_count: usize,
+    pub failed_pools: Vec<String>,
+}
+
 impl GachaRecord {
     pub fn from_api(
         info: &fetcher::ApiCardInfo,

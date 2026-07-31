@@ -98,11 +98,11 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   scanGacha: async (gameDir: string) => {
     set({ scanning: true, error: null });
     try {
-      const records = await gachaApi.fetchGachaData(gameDir);
-      const playerId = records[0]?.player_id;
+      const result = await gachaApi.fetchGachaData(gameDir);
+      const playerId = result.player_id;
 
       set({
-        records,
+        records: result.records,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
       });
@@ -112,7 +112,13 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         await get().fetchStats(playerId);
       }
 
-      get().addToast('success', `扫描完成，共获取 ${records.length} 条记录`);
+      get().addToast(
+        'success',
+        `扫描完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
+      );
+      if (result.failed_pools.length > 0) {
+        get().addToast('info', `${result.failed_pools.length} 个卡池获取失败，已保留原有数据`);
+      }
     } catch (e) {
       set({ error: String(e), scanning: false });
       get().addToast('error', String(e));
@@ -122,11 +128,11 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   scanGachaByUrl: async (url: string) => {
     set({ scanning: true, error: null });
     try {
-      const records = await gachaApi.fetchGachaDataByUrl(url);
-      const playerId = records[0]?.player_id;
+      const result = await gachaApi.fetchGachaDataByUrl(url);
+      const playerId = result.player_id;
 
       set({
-        records,
+        records: result.records,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
       });
@@ -136,7 +142,13 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         await get().fetchStats(playerId);
       }
 
-      get().addToast('success', `扫描完成，共获取 ${records.length} 条记录`);
+      get().addToast(
+        'success',
+        `扫描完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
+      );
+      if (result.failed_pools.length > 0) {
+        get().addToast('info', `${result.failed_pools.length} 个卡池获取失败，已保留原有数据`);
+      }
     } catch (e) {
       set({ error: String(e), scanning: false });
       get().addToast('error', String(e));
@@ -146,11 +158,11 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   importJson: async (filePath: string) => {
     set({ scanning: true, error: null });
     try {
-      const records = await gachaApi.importGachaJson(filePath);
-      const playerId = records[0]?.player_id;
+      const result = await gachaApi.importGachaJson(filePath);
+      const playerId = result.player_id;
 
       set({
-        records,
+        records: result.records,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
       });
@@ -160,7 +172,10 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         await get().fetchStats(playerId);
       }
 
-      get().addToast('success', `导入完成，共 ${records.length} 条记录`);
+      get().addToast(
+        'success',
+        `导入完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
+      );
     } catch (e) {
       set({ error: String(e), scanning: false });
       get().addToast('error', String(e));

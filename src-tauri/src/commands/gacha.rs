@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::gacha::decoder;
 use crate::gacha::fetcher::{self, build_pool_name_to_id, get_display_pool_name, ApiCardInfo, GachaParams, POOL_TYPES};
-use crate::gacha::parser::{GachaRecord, GachaStats, GameSettings};
+use crate::gacha::parser::{GachaImportResult, GachaRecord, GachaStats, GameSettings};
 use crate::AppState;
 
 /// 解码日志文件并提取 URL
@@ -21,7 +21,7 @@ pub fn decode_log(game_dir: String) -> Result<String, String> {
 async fn fetch_gacha_data_internal(
     state: &State<'_, AppState>,
     url: &str,
-) -> Result<Vec<GachaRecord>, String> {
+) -> Result<GachaImportResult, String> {
     let params = GachaParams::from_url(url)?;
     let client = reqwest::Client::new();
     let name_to_id = build_pool_name_to_id();
@@ -60,16 +60,29 @@ async fn fetch_gacha_data_internal(
         return Err(format!("所有卡池请求均失败，首个错误: {}", errors[0]));
     }
 
-    // 按时间排序
-    all_records.sort_by(|a, b| b.time.cmp(&a.time));
+    merge_and_load_player(state, &params.player_id, &all_records, errors)
+}
 
-    // 保存到数据库（先删后插，全量替换）
-    {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.replace_records(&all_records)?;
-    }
+fn merge_and_load_player(
+    state: &State<'_, AppState>,
+    player_id: &str,
+    imported_records: &[GachaRecord],
+    failed_pools: Vec<String>,
+) -> Result<GachaImportResult, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let stats = db.merge_records(imported_records)?;
+    let records = db.get_all_records(Some(player_id))?;
+    let total_count = records.len();
 
-    Ok(all_records)
+    Ok(GachaImportResult {
+        player_id: player_id.to_string(),
+        records,
+        imported_count: stats.imported_count,
+        added_count: stats.added_count,
+        duplicate_count: stats.duplicate_count,
+        total_count,
+        failed_pools,
+    })
 }
 
 /// 从游戏目录解码日志并获取抽卡数据
@@ -77,7 +90,7 @@ async fn fetch_gacha_data_internal(
 pub async fn fetch_gacha_data(
     state: State<'_, AppState>,
     game_dir: String,
-) -> Result<Vec<GachaRecord>, String> {
+) -> Result<GachaImportResult, String> {
     // 解码日志获取 URL
     let log_path = decoder::get_log_path(&game_dir);
     let decoded = decoder::decode_client_log(&log_path)?;
@@ -92,7 +105,7 @@ pub async fn fetch_gacha_data(
 pub async fn fetch_gacha_data_by_url(
     state: State<'_, AppState>,
     url: String,
-) -> Result<Vec<GachaRecord>, String> {
+) -> Result<GachaImportResult, String> {
     fetch_gacha_data_internal(&state, &url).await
 }
 
@@ -102,7 +115,7 @@ pub async fn fetch_gacha_data_by_url(
 pub fn import_gacha_json(
     state: State<'_, AppState>,
     file_path: String,
-) -> Result<Vec<GachaRecord>, String> {
+) -> Result<GachaImportResult, String> {
     let content = std::fs::read_to_string(&file_path)
         .map_err(|e| format!("读取文件失败: {}", e))?;
 
@@ -145,16 +158,7 @@ pub fn import_gacha_json(
         return Err("JSON 文件中没有有效的抽卡记录".to_string());
     }
 
-    // 按时间排序
-    all_records.sort_by(|a, b| b.time.cmp(&a.time));
-
-    // 保存到数据库（先删后插，全量替换）
-    {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.replace_records(&all_records)?;
-    }
-
-    Ok(all_records)
+    merge_and_load_player(&state, &player_id, &all_records, Vec::new())
 }
 
 /// 获取所有抽卡记录

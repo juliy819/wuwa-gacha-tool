@@ -13,6 +13,16 @@ export interface GachaRecord {
   is_off_rate: boolean;
 }
 
+export interface GachaImportResult {
+  player_id: string;
+  records: GachaRecord[];
+  imported_count: number;
+  added_count: number;
+  duplicate_count: number;
+  total_count: number;
+  failed_pools: string[];
+}
+
 export interface PoolInfo {
   pool_type: string;
   pool_name: string;

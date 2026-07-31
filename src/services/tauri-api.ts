@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { GachaRecord, GachaStats, GameSettings } from '../types';
+import type { GachaImportResult, GachaRecord, GachaStats, GameSettings } from '../types';
 
 export const gachaApi = {
   // 解码日志获取 URL
@@ -8,17 +8,17 @@ export const gachaApi = {
   },
 
   // 从游戏目录解码获取抽卡数据
-  fetchGachaData: (gameDir: string): Promise<GachaRecord[]> => {
+  fetchGachaData: (gameDir: string): Promise<GachaImportResult> => {
     return invoke('fetch_gacha_data', { gameDir });
   },
 
   // 直接通过抽卡链接获取抽卡数据
-  fetchGachaDataByUrl: (url: string): Promise<GachaRecord[]> => {
+  fetchGachaDataByUrl: (url: string): Promise<GachaImportResult> => {
     return invoke('fetch_gacha_data_by_url', { url });
   },
 
   // 从本地 JSON 文件导入抽卡数据
-  importGachaJson: (filePath: string): Promise<GachaRecord[]> => {
+  importGachaJson: (filePath: string): Promise<GachaImportResult> => {
     return invoke('import_gacha_json', { filePath });
   },
 
