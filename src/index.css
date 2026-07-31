@@ -192,6 +192,121 @@ input[type="number"]::-webkit-outer-spin-button {
   animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* ===== 数字扫光 ===== */
+@layer components {
+  .number-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--mist) 0%,
+      var(--foam) 40%,
+      var(--mist) 80%
+    );
+    background-size: 200% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: textShimmer 4s ease-in-out infinite;
+  }
+}
+
+@keyframes textShimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* ===== 数字脉冲（数值变化时的白色光晕） ===== */
+.number-pulse {
+  display: inline-block;
+  transform-origin: center center;
+  animation: numberPulse 2.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes numberPulse {
+  0% {
+    text-shadow: 0 0 0 rgba(232, 232, 232, 0);
+    color: #d4d4d4;
+    transform: scale(1);
+  }
+  8% {
+    text-shadow: 0 0 26px rgba(232, 232, 232, 0.85),
+                 0 0 6px rgba(232, 232, 232, 0.6);
+    color: #ffffff;
+    transform: scale(1.06);
+  }
+  35% {
+    text-shadow: 0 0 24px rgba(232, 232, 232, 0.75),
+                 0 0 5px rgba(232, 232, 232, 0.55);
+    color: #f8f8f8;
+    transform: scale(1.05);
+  }
+  65% {
+    text-shadow: 0 0 20px rgba(232, 232, 232, 0.55),
+                 0 0 4px rgba(232, 232, 232, 0.4);
+    color: #f0f0f0;
+    transform: scale(1.03);
+  }
+  100% {
+    text-shadow: 0 0 0 rgba(232, 232, 232, 0);
+    color: #d4d4d4;
+    transform: scale(1);
+  }
+}
+
+/* ===== 里程碑庆祝（金色脉冲） ===== */
+.number-milestone {
+  animation: numberMilestone 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes numberMilestone {
+  0%   { transform: scale(1); color: #d4d4d4; text-shadow: 0 0 0 rgba(184, 153, 104, 0); }
+  35%  { transform: scale(1.15); color: #e8d4a8; text-shadow: 0 0 16px rgba(184, 153, 104, 0.55); }
+  70%  { transform: scale(1.05); color: #d4d4d4; text-shadow: 0 0 4px rgba(184, 153, 104, 0.2); }
+  100% { transform: scale(1); color: #d4d4d4; text-shadow: 0 0 0 rgba(184, 153, 104, 0); }
+}
+
+/* ===== 点击波纹 ===== */
+.click-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.click-ripple .ripple-wave {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(212, 212, 212, 0.18) 0%, transparent 70%);
+  transform: scale(0);
+  animation: rippleExpand 0.6s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes rippleExpand {
+  0% { transform: scale(0); opacity: 0.5; }
+  100% { transform: scale(4); opacity: 0; }
+}
+
+/* ===== 导航栏活动标签扫描线 ===== */
+.navbar-scan-line {
+  animation: navbarScan 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes navbarScan {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(250%); }
+  100% { transform: translateX(250%); }
+}
+
+/* ===== Toast 倒计时进度条 ===== */
+.toast-progress {
+  width: 100%;
+  transform-origin: left center;
+  animation: toastProgressShrink 3000ms linear forwards;
+}
+
+@keyframes toastProgressShrink {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

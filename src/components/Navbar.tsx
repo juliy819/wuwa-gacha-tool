@@ -69,7 +69,15 @@ export default function Navbar() {
             }}
             animate={{ left: indicatorStyle.left, width: indicatorStyle.width }}
             transition={{ type: 'spring', stiffness: 400, damping: 35 }}
-          />
+          >
+            <div
+              className="navbar-scan-line absolute inset-y-0"
+              style={{
+                width: '40%',
+                background: 'linear-gradient(90deg, transparent, rgba(212, 212, 212, 0.08), transparent)',
+              }}
+            />
+          </motion.div>
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.Icon;

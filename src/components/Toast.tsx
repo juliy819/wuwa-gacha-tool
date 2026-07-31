@@ -19,7 +19,7 @@ export default function Toast({ messages, onRemove }: ToastProps) {
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: 100, scale: 0.9 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl min-w-[250px] ${
+            className={`relative overflow-hidden flex items-center gap-3 px-4 py-3 rounded-lg shadow-xl min-w-[250px] ${
               msg.type === 'success'
                 ? 'bg-[#2a3a2e] border border-[#3a5a3f]'
                 : msg.type === 'error'
@@ -43,6 +43,12 @@ export default function Toast({ messages, onRemove }: ToastProps) {
             >
               <X size={14} />
             </button>
+            <div
+              className="toast-progress absolute bottom-0 left-0 h-0.5"
+              style={{
+                background: msg.type === 'success' ? '#7ab88a' : msg.type === 'error' ? '#b87a7a' : '#7a8ab8',
+              }}
+            />
           </motion.div>
         ))}
       </AnimatePresence>

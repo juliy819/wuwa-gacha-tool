@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { Folder, Link, Scan, Sparkles, Upload } from 'lucide-react';
 import HomeDashboard from '../components/HomeDashboard';
 import PageTransition from '../components/PageTransition';
+import { useClickRipple } from '../hooks/useClickRipple';
 import { useGachaStore } from '../store/useGachaStore';
 
 type ScanMode = 'dir' | 'url' | 'json';
@@ -23,6 +24,7 @@ export default function Home() {
     settings,
     stats,
   } = useGachaStore();
+  const createRipple = useClickRipple();
   const [showScanModal, setShowScanModal] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('dir');
   const [gameDirInput, setGameDirInput] = useState('');
@@ -82,7 +84,7 @@ export default function Home() {
               <h1 className="text-xl font-semibold text-tide">抽卡概览</h1>
               <p className="mt-1 text-xs text-wave">重点数据按卡池独立统计</p>
             </div>
-            <button onClick={openScanModal} className="tide-btn flex items-center gap-2 px-4 py-2">
+            <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple flex items-center gap-2 px-4 py-2">
               <Scan size={16} />
               扫描抽卡
             </button>
@@ -99,7 +101,7 @@ export default function Home() {
                 <h2 className="text-base font-medium text-tide">暂无抽卡数据</h2>
                 <p className="mt-1 text-sm text-wave">扫描游戏记录或导入已有 JSON 文件</p>
               </div>
-              <button onClick={openScanModal} className="tide-btn mt-1 flex items-center gap-2 px-4 py-2">
+              <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple mt-1 flex items-center gap-2 px-4 py-2">
                 <Scan size={16} />
                 开始扫描
               </button>

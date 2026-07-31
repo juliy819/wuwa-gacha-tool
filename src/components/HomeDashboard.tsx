@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import type { GachaRecord, GachaStats, PoolInfo } from '../types';
 import { QUALITY } from '../types';
+import AnimatedCounter from './AnimatedCounter';
+import GlowCard from './GlowCard';
 import ResourceIcon from './ResourceIcon';
 
 interface HomeDashboardProps {
@@ -32,10 +34,6 @@ interface FiveStarResult {
 }
 
 const CORE_POOL_TYPES = new Set(['1', '2', '3', '4']);
-
-function formatValue(value: number, suffix = '') {
-  return value > 0 ? `${value.toFixed(1)}${suffix}` : '-';
-}
 
 function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
   const pityByPool = new Map<string, number>();
@@ -75,13 +73,13 @@ function SummaryMetric({
   accent = false,
 }: {
   label: string;
-  value: string | number;
+  value: React.ReactNode;
   detail: string;
   icon: React.ReactNode;
   accent?: boolean;
 }) {
   return (
-    <div className="min-w-0 bg-[#242424] px-4 py-3.5">
+    <div className="min-w-0 bg-[#242424] px-4 py-3.5 transition-colors duration-200 hover:bg-[#252525]">
       <div className="flex items-center gap-2 text-xs text-wave">
         {icon}
         <span>{label}</span>
@@ -165,12 +163,12 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
         animate={{ opacity: 1, y: 0 }}
         className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.06] md:grid-cols-3 xl:grid-cols-6"
       >
-        <SummaryMetric label="累计唤取" value={stats.total_draws} detail={`${stats.total_four_star} 个四星`} icon={<Sparkles size={13} />} />
-        <SummaryMetric label="五星数量" value={stats.total_five_star} detail="已导入记录中的五星" icon={<Trophy size={13} />} accent />
-        <SummaryMetric label="五星概率" value={`${stats.five_star_rate.toFixed(2)}%`} detail="占全部已导入记录" icon={<CircleDot size={13} />} />
-        <SummaryMetric label="平均五星抽数" value={formatValue(stats.avg_five_star_pity, ' 抽')} detail="各卡池分别计算后汇总" icon={<BarChart3 size={13} />} />
-        <SummaryMetric label="每个 UP 角色" value={formatValue(stats.avg_up_role_pulls, ' 抽')} detail="UP 角色池整体投入" icon={<UserRoundCheck size={13} />} accent />
-        <SummaryMetric label="每把 UP 武器" value={formatValue(stats.avg_up_weapon_pulls, ' 抽')} detail="UP 武器池整体投入" icon={<Swords size={13} />} accent />
+        <SummaryMetric label="累计唤取" value={<AnimatedCounter value={stats.total_draws} shimmer pulse milestone />} detail={`${stats.total_four_star} 个四星`} icon={<Sparkles size={13} />} />
+        <SummaryMetric label="五星数量" value={<AnimatedCounter value={stats.total_five_star} pulse milestone />} detail="已导入记录中的五星" icon={<Trophy size={13} />} accent />
+        <SummaryMetric label="五星概率" value={<AnimatedCounter value={stats.five_star_rate} formatter={(v) => `${v.toFixed(2)}%`} pulse />} detail="占全部已导入记录" icon={<CircleDot size={13} />} />
+        <SummaryMetric label="平均五星抽数" value={<AnimatedCounter value={stats.avg_five_star_pity} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="各卡池分别计算后汇总" icon={<BarChart3 size={13} />} />
+        <SummaryMetric label="每个 UP 角色" value={<AnimatedCounter value={stats.avg_up_role_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 角色池整体投入" icon={<UserRoundCheck size={13} />} accent />
+        <SummaryMetric label="每把 UP 武器" value={<AnimatedCounter value={stats.avg_up_weapon_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 武器池整体投入" icon={<Swords size={13} />} accent />
       </motion.section>
 
       <motion.section
@@ -198,7 +196,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
       </motion.section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
-        <motion.section
+        <GlowCard
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.06 }}
@@ -216,9 +214,9 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
           <div className="mt-2">
             {visiblePools.map((pool) => <PityRow key={pool.pool_type} pool={pool} />)}
           </div>
-        </motion.section>
+        </GlowCard>
 
-        <motion.section
+        <GlowCard
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
@@ -249,10 +247,10 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
               <div className="mt-1 text-xl font-semibold text-[#d99a9a]">{stats.off_rate_count}</div>
             </div>
           </div>
-        </motion.section>
+        </GlowCard>
       </div>
 
-      <motion.section
+      <GlowCard
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.14 }}
@@ -305,7 +303,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
             暂无五星记录
           </div>
         )}
-      </motion.section>
+      </GlowCard>
     </div>
   );
 }
