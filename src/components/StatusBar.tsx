@@ -7,7 +7,7 @@ export default function StatusBar() {
       style={{ background: '#1a1a1a' }}
     >
       <div className="flex items-center gap-4">
-        <span>鸣潮抽卡分析工具 v0.1.0</span>
+        <span>Wuwa Gacha Tool v0.1.0</span>
       </div>
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">

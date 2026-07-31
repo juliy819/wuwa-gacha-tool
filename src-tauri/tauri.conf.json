@@ -1,5 +1,5 @@
 {
-  "productName": "鸣潮抽卡分析",
+  "productName": "Wuwa Gacha Tool",
   "version": "0.1.0",
   "identifier": "com.wuwa.gachatool",
   "build": {
@@ -11,7 +11,7 @@
   "app": {
     "windows": [
       {
-        "title": "鸣潮抽卡分析",
+        "title": "Wuwa Gacha Tool",
         "width": 1200,
         "height": 800,
         "minWidth": 1000,

@@ -1,7 +1,7 @@
 [package]
 name = "wuwa-gacha-tool"
 version = "0.1.0"
-description = "鸣潮抽卡分析工具"
+description = "Wuwa Gacha Tool"
 authors = ["juliy"]
 edition = "2021"
 

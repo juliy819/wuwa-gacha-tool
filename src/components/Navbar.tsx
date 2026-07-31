@@ -52,7 +52,7 @@ export default function Navbar() {
       <div className="flex items-center h-full">
         <div className="flex items-center gap-2.5 pl-5 pr-3 h-full">
           <span className="text-sm font-medium text-tide tracking-wide whitespace-nowrap">
-            鸣潮抽卡分析
+            Wuwa Gacha Tool - BY Juliy
           </span>
         </div>
 
