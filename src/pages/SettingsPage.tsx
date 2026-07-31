@@ -2,13 +2,21 @@ import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useGachaStore } from '../store/useGachaStore';
+import { gachaApi } from '../services/tauri-api';
 import PageTransition from '../components/PageTransition';
-import { Save, FolderOpen, Info, Trash2 } from 'lucide-react';
+import { Save, FolderOpen, Info, Trash2, AlertTriangle, X } from 'lucide-react';
+import type { RecordSummary } from '../types';
+
+type DeleteTarget = { playerId: string | null };
 
 export default function SettingsPage() {
-  const { settings, fetchSettings, saveGameDir, clearRecords, fetchPools, pools } = useGachaStore();
+  const { settings, fetchSettings, saveGameDir, clearRecords, pools } = useGachaStore();
   const [gameDirInput, setGameDirInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [summaries, setSummaries] = useState<RecordSummary[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [confirmationText, setConfirmationText] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -19,6 +27,14 @@ export default function SettingsPage() {
       setGameDirInput(settings.game_dir);
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (pools.length === 0) {
+      setSummaries([]);
+      return;
+    }
+    gachaApi.getRecordSummaries().then(setSummaries).catch(() => setSummaries([]));
+  }, [pools]);
 
   const handleSelectFolder = async () => {
     try {
@@ -47,12 +63,41 @@ export default function SettingsPage() {
     }
   };
 
-  const handleClearAll = () => {
-    if (confirm('确定要清空所有玩家的全部抽卡记录吗？此操作不可撤销。')) {
-      clearRecords();
-      fetchPools();
+  const openDeleteDialog = (playerId: string | null) => {
+    setConfirmationText('');
+    setDeleteTarget({ playerId });
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleting) return;
+    setDeleteTarget(null);
+    setConfirmationText('');
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const result = await clearRecords(deleteTarget.playerId ?? undefined);
+    setDeleting(false);
+    if (result) {
+      setDeleteTarget(null);
+      setConfirmationText('');
     }
   };
+
+  const selectedSummary = deleteTarget?.playerId
+    ? summaries.find((summary) => summary.player_id === deleteTarget.playerId)
+    : null;
+  const totalRecords = summaries.reduce((sum, summary) => sum + summary.record_count, 0);
+  const expectedConfirmation = deleteTarget?.playerId ?? '清空全部数据';
+  const targetRecordCount = deleteTarget?.playerId
+    ? selectedSummary?.record_count ?? 0
+    : totalRecords;
+  const targetTimeRange = selectedSummary
+    ? `${selectedSummary.earliest_time} 至 ${selectedSummary.latest_time}`
+    : summaries.length > 0
+      ? `${summaries.reduce((min, item) => item.earliest_time < min ? item.earliest_time : min, summaries[0].earliest_time)} 至 ${summaries.reduce((max, item) => item.latest_time > max ? item.latest_time : max, summaries[0].latest_time)}`
+      : '';
 
   return (
     <PageTransition>
@@ -134,17 +179,21 @@ export default function SettingsPage() {
                   key={poolId}
                   className="flex items-center justify-between p-3 rounded-lg bg-[rgba(212,212,212,0.03)]"
                 >
-                  <span className="text-sm text-tide">{poolId}</span>
+                  <div className="min-w-0">
+                    <div className="text-sm text-tide">UID {poolId}</div>
+                    {summaries.find((summary) => summary.player_id === poolId) && (
+                      <div className="text-xs text-wave mt-1">
+                        {summaries.find((summary) => summary.player_id === poolId)?.record_count} 条
+                        <span className="mx-1.5 text-[rgba(212,212,212,0.2)]">|</span>
+                        {summaries.find((summary) => summary.player_id === poolId)?.earliest_time.slice(0, 10)} 至 {summaries.find((summary) => summary.player_id === poolId)?.latest_time.slice(0, 10)}
+                      </div>
+                    )}
+                  </div>
                   <button
-                    onClick={() => {
-                      if (confirm(`确定要清空玩家 ${poolId} 的记录吗？`)) {
-                        clearRecords(poolId);
-                        fetchPools();
-                      }
-                    }}
-                    className="text-xs text-[#e8a8a8] hover:text-[#e8c8c8] transition-colors"
+                    onClick={() => openDeleteDialog(poolId)}
+                    className="flex items-center gap-1.5 text-xs text-[#e8a8a8] hover:text-[#e8c8c8] transition-colors"
                   >
-                    清空
+                    <Trash2 size={12} /> 删除记录
                   </button>
                 </div>
               ))}
@@ -152,7 +201,7 @@ export default function SettingsPage() {
           )}
 
           <button
-            onClick={handleClearAll}
+            onClick={() => openDeleteDialog(null)}
             disabled={pools.length === 0}
             className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[rgba(255,100,100,0.3)] text-[#e8a8a8] hover:bg-[rgba(255,100,100,0.1)] transition-colors text-sm disabled:opacity-30"
           >
@@ -177,6 +226,74 @@ export default function SettingsPage() {
         </motion.div>
         </div>
       </div>
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
+          <div className="w-full max-w-md rounded-lg border border-[rgba(255,100,100,0.28)] bg-[#242424] shadow-2xl">
+            <div className="flex items-start justify-between border-b border-[rgba(255,255,255,0.06)] p-5">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-md bg-[rgba(255,100,100,0.1)] p-2 text-[#e8a8a8]">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h2 id="delete-dialog-title" className="text-base font-medium text-tide">
+                    {deleteTarget.playerId ? `删除 UID ${deleteTarget.playerId} 的记录` : '清空所有抽卡记录'}
+                  </h2>
+                  <p className="mt-1 text-xs text-wave">删除前会自动创建完整数据库备份</p>
+                </div>
+              </div>
+              <button onClick={closeDeleteDialog} disabled={deleting} className="p-1 text-wave hover:text-tide disabled:opacity-40" title="关闭">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div className="grid grid-cols-2 gap-3 border-y border-[rgba(255,255,255,0.06)] py-3 text-sm">
+                <div>
+                  <div className="text-xs text-wave">记录数量</div>
+                  <div className="mt-1 font-medium text-tide">{targetRecordCount} 条</div>
+                </div>
+                <div>
+                  <div className="text-xs text-wave">涉及玩家</div>
+                  <div className="mt-1 font-medium text-tide">{deleteTarget.playerId ? 1 : pools.length} 位</div>
+                </div>
+                {targetTimeRange && (
+                  <div className="col-span-2">
+                    <div className="text-xs text-wave">记录范围</div>
+                    <div className="mt-1 text-tide">{targetTimeRange}</div>
+                  </div>
+                )}
+              </div>
+
+              <label className="block">
+                <span className="mb-2 block text-xs text-wave">
+                  输入 <span className="font-medium text-[#e8a8a8]">{expectedConfirmation}</span> 确认删除
+                </span>
+                <input
+                  autoFocus
+                  value={confirmationText}
+                  onChange={(event) => setConfirmationText(event.target.value)}
+                  className="glass-input w-full px-3 py-2 text-sm"
+                />
+              </label>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={closeDeleteDialog} disabled={deleting} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">
+                  取消
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deleting || confirmationText !== expectedConfirmation}
+                  className="flex items-center gap-2 rounded-md bg-[#a64f4f] px-4 py-2 text-sm text-white hover:bg-[#b85a5a] disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  <Trash2 size={14} />
+                  {deleting ? '备份并删除中...' : '备份并删除'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </PageTransition>
   );
 }

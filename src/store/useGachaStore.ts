@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { gachaApi } from '../services/tauri-api';
-import type { GachaRecord, GachaStats, GameSettings, ToastMessage } from '../types';
+import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, ToastMessage } from '../types';
 
 interface GachaStore {
   records: GachaRecord[];
@@ -22,7 +22,7 @@ interface GachaStore {
   scanGacha: (gameDir: string) => Promise<void>;
   scanGachaByUrl: (url: string) => Promise<void>;
   importJson: (filePath: string) => Promise<void>;
-  clearRecords: (playerId?: string) => Promise<void>;
+  clearRecords: (playerId?: string) => Promise<ClearRecordsResult | null>;
   setActivePlayer: (playerId: string | null) => void;
   refreshAll: () => Promise<void>;
   addToast: (type: ToastMessage['type'], message: string) => void;
@@ -66,8 +66,9 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
     try {
       const pools = await gachaApi.getPools();
       set({ pools, initialized: true });
-      if (pools.length > 0 && !get().activePlayerId) {
-        set({ activePlayerId: pools[0] });
+      const { activePlayerId } = get();
+      if (!activePlayerId || !pools.includes(activePlayerId)) {
+        set({ activePlayerId: pools[0] ?? null });
       }
     } catch {
       set({ initialized: true });
@@ -184,12 +185,20 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
 
   clearRecords: async (playerId?: string) => {
     try {
-      await gachaApi.clearRecords(playerId);
-      set({ records: [], stats: null });
-      get().addToast('success', '记录已清空');
+      const result = await gachaApi.clearRecords(playerId);
+      const { activePlayerId } = get();
+      if (!playerId || playerId === activePlayerId) {
+        set({ records: [], stats: null });
+      }
+      get().addToast('success', `已清空 ${result.deleted_count} 条记录`);
+      if (result.backup_path) {
+        get().addToast('info', `删除前备份已保存：${result.backup_path}`);
+      }
       await get().fetchPools();
+      return result;
     } catch (e) {
       get().addToast('error', `清空记录失败: ${String(e)}`);
+      return null;
     }
   },
 

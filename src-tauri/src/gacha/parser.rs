@@ -43,6 +43,20 @@ pub struct GachaImportResult {
     pub failed_pools: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordSummary {
+    pub player_id: String,
+    pub record_count: usize,
+    pub earliest_time: String,
+    pub latest_time: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClearRecordsResult {
+    pub deleted_count: usize,
+    pub backup_path: Option<String>,
+}
+
 impl GachaRecord {
     pub fn from_api(
         info: &fetcher::ApiCardInfo,

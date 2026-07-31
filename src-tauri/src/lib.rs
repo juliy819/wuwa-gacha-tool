@@ -32,6 +32,7 @@ pub fn run() {
             commands::gacha::import_gacha_json,
             commands::gacha::get_all_records,
             commands::gacha::get_pools,
+            commands::gacha::get_record_summaries,
             commands::gacha::get_stats,
             commands::gacha::clear_records,
             commands::gacha::save_game_dir,

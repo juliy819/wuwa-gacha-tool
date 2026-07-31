@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { GachaImportResult, GachaRecord, GachaStats, GameSettings } from '../types';
+import type { ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameSettings, RecordSummary } from '../types';
 
 export const gachaApi = {
   // 解码日志获取 URL
@@ -32,13 +32,18 @@ export const gachaApi = {
     return invoke('get_pools');
   },
 
+  // 获取玩家记录摘要
+  getRecordSummaries: (): Promise<RecordSummary[]> => {
+    return invoke('get_record_summaries');
+  },
+
   // 获取统计数据
   getStats: (playerId?: string): Promise<GachaStats> => {
     return invoke('get_stats', { playerId });
   },
 
   // 清空记录
-  clearRecords: (playerId?: string): Promise<void> => {
+  clearRecords: (playerId?: string): Promise<ClearRecordsResult> => {
     return invoke('clear_records', { playerId });
   },
 

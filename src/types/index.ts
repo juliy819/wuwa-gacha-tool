@@ -23,6 +23,18 @@ export interface GachaImportResult {
   failed_pools: string[];
 }
 
+export interface RecordSummary {
+  player_id: string;
+  record_count: number;
+  earliest_time: string;
+  latest_time: string;
+}
+
+export interface ClearRecordsResult {
+  deleted_count: number;
+  backup_path: string | null;
+}
+
 export interface PoolInfo {
   pool_type: string;
   pool_name: string;

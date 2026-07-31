@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::gacha::decoder;
 use crate::gacha::fetcher::{self, build_pool_name_to_id, get_display_pool_name, ApiCardInfo, GachaParams, POOL_TYPES};
-use crate::gacha::parser::{GachaImportResult, GachaRecord, GachaStats, GameSettings};
+use crate::gacha::parser::{ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameSettings, RecordSummary};
 use crate::AppState;
 
 /// 解码日志文件并提取 URL
@@ -178,6 +178,13 @@ pub fn get_pools(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     db.get_player_ids()
 }
 
+/// 获取每个玩家的记录数量和时间范围
+#[tauri::command]
+pub fn get_record_summaries(state: State<'_, AppState>) -> Result<Vec<RecordSummary>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.get_record_summaries()
+}
+
 /// 获取统计数据
 #[tauri::command]
 pub fn get_stats(
@@ -194,7 +201,7 @@ pub fn get_stats(
 pub fn clear_records(
     state: State<'_, AppState>,
     player_id: Option<String>,
-) -> Result<(), String> {
+) -> Result<ClearRecordsResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.clear_records(player_id.as_deref())
 }

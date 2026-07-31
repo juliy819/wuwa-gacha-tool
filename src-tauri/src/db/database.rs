@@ -1,11 +1,13 @@
 use rusqlite::{params, Connection};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::gacha::parser::{GachaRecord, GameSettings};
+use crate::gacha::parser::{ClearRecordsResult, GachaRecord, GameSettings, RecordSummary};
 
 pub struct Database {
     conn: Connection,
+    path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +20,10 @@ pub struct MergeStats {
 impl Database {
     pub fn new(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| e.to_string())?;
-        let db = Self { conn };
+        let db = Self {
+            conn,
+            path: Some(path.to_path_buf()),
+        };
         db.init_tables()?;
         db.migrate()?;
         Ok(db)
@@ -333,18 +338,88 @@ impl Database {
         Ok(ids)
     }
 
-    /// 清空指定玩家的记录
-    pub fn clear_records(&self, player_id: Option<&str>) -> Result<(), String> {
-        if let Some(pid) = player_id {
+    pub fn get_record_summaries(&self) -> Result<Vec<RecordSummary>, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT player_id, COUNT(*), MIN(time), MAX(time)
+             FROM gacha_records
+             GROUP BY player_id
+             ORDER BY player_id",
+        ).map_err(|e| e.to_string())?;
+        let summaries = stmt
+            .query_map([], |row| {
+                Ok(RecordSummary {
+                    player_id: row.get(0)?,
+                    record_count: row.get::<_, i64>(1)? as usize,
+                    earliest_time: row.get(2)?,
+                    latest_time: row.get(3)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .filter_map(|result| result.ok())
+            .collect();
+        Ok(summaries)
+    }
+
+    fn create_backup(&self) -> Result<Option<String>, String> {
+        let Some(db_path) = &self.path else {
+            return Ok(None);
+        };
+        let app_data_dir = db_path
+            .parent()
+            .ok_or_else(|| "无法确定数据库备份目录".to_string())?;
+        let backup_dir = app_data_dir.join("backups");
+        std::fs::create_dir_all(&backup_dir)
+            .map_err(|e| format!("创建备份目录失败: {e}"))?;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("生成备份时间戳失败: {e}"))?
+            .as_millis();
+        let backup_path = backup_dir.join(format!("gacha-before-delete-{timestamp}.db"));
+        let backup_path_text = backup_path.to_string_lossy().into_owned();
+        self.conn
+            .execute("VACUUM main INTO ?1", params![backup_path_text])
+            .map_err(|e| format!("删除前备份失败，未清空任何数据: {e}"))?;
+        Ok(Some(backup_path.to_string_lossy().into_owned()))
+    }
+
+    /// 删除前创建完整数据库备份，再清空指定玩家或全部记录。
+    pub fn clear_records(&self, player_id: Option<&str>) -> Result<ClearRecordsResult, String> {
+        let record_count: usize = if let Some(pid) = player_id {
             self.conn
-                .execute("DELETE FROM gacha_records WHERE player_id = ?1", params![pid])
-                .map_err(|e| e.to_string())?;
+                .query_row(
+                    "SELECT COUNT(*) FROM gacha_records WHERE player_id = ?1",
+                    params![pid],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|e| e.to_string())? as usize
         } else {
             self.conn
-                .execute("DELETE FROM gacha_records", [])
-                .map_err(|e| e.to_string())?;
+                .query_row("SELECT COUNT(*) FROM gacha_records", [], |row| row.get::<_, i64>(0))
+                .map_err(|e| e.to_string())? as usize
+        };
+
+        if record_count == 0 {
+            return Ok(ClearRecordsResult {
+                deleted_count: 0,
+                backup_path: None,
+            });
         }
-        Ok(())
+
+        let backup_path = self.create_backup()?;
+        let tx = self.conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let deleted_count = if let Some(pid) = player_id {
+            tx.execute("DELETE FROM gacha_records WHERE player_id = ?1", params![pid])
+                .map_err(|e| e.to_string())?
+        } else {
+            tx.execute("DELETE FROM gacha_records", [])
+                .map_err(|e| e.to_string())?
+        };
+        tx.commit().map_err(|e| e.to_string())?;
+
+        Ok(ClearRecordsResult {
+            deleted_count,
+            backup_path,
+        })
     }
 
     /// 保存游戏设置
@@ -384,6 +459,7 @@ mod tests {
     fn test_database() -> Database {
         let db = Database {
             conn: Connection::open_in_memory().unwrap(),
+            path: None,
         };
         db.init_tables().unwrap();
         db.migrate().unwrap();
@@ -478,5 +554,50 @@ mod tests {
         assert_eq!(result.added_count, 1);
         assert_eq!(result.duplicate_count, 2);
         assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn clearing_one_player_preserves_other_players() {
+        let db = test_database();
+        let first = record("1", 101, "2026-01-01 12:00:00");
+        let mut second = record("1", 102, "2026-02-01 12:00:00");
+        second.player_id = "20002".to_string();
+        db.merge_records(&[first]).unwrap();
+        db.merge_records(&[second]).unwrap();
+
+        let result = db.clear_records(Some("10001")).unwrap();
+
+        assert_eq!(result.deleted_count, 1);
+        assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 0);
+        assert_eq!(db.get_all_records(Some("20002")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn file_database_is_backed_up_before_records_are_deleted() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_dir = std::env::temp_dir().join(format!("wuwa-gacha-backup-test-{unique}"));
+        std::fs::create_dir_all(&test_dir).unwrap();
+        let db_path = test_dir.join("gacha.db");
+        let db = Database::new(&db_path).unwrap();
+        db.merge_records(&[record("1", 101, "2026-01-01 12:00:00")]).unwrap();
+
+        let result = db.clear_records(None).unwrap();
+        let backup_path = PathBuf::from(result.backup_path.unwrap());
+
+        assert_eq!(result.deleted_count, 1);
+        assert_eq!(db.get_all_records(None).unwrap().len(), 0);
+        assert!(backup_path.exists());
+        let backup = Connection::open(&backup_path).unwrap();
+        let backup_count: i64 = backup
+            .query_row("SELECT COUNT(*) FROM gacha_records", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(backup_count, 1);
+
+        drop(backup);
+        drop(db);
+        std::fs::remove_dir_all(test_dir).unwrap();
     }
 }

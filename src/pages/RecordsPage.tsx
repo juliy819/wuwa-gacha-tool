@@ -4,14 +4,14 @@ import { useGachaStore } from '../store/useGachaStore';
 import PageTransition from '../components/PageTransition';
 import Tooltip from '../components/Tooltip';
 import { QUALITY, QUALITY_COLORS, POOL_TYPES, GachaRecord } from '../types';
-import { Trash2, Search, ChevronLeft, ChevronRight, LayoutGrid, AlignJustify, Rows3 } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, LayoutGrid, AlignJustify, Rows3 } from 'lucide-react';
 
 type ViewMode = 'bar' | 'grid' | 'table';
 
 type RecordWithPity = { record: GachaRecord; pity: number };
 
 export default function RecordsPage() {
-  const { records, activePlayerId, fetchRecords, clearRecords } = useGachaStore();
+  const { records, activePlayerId, fetchRecords } = useGachaStore();
   const [activePoolType, setActivePoolType] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
@@ -129,10 +129,6 @@ export default function RecordsPage() {
     });
   }, [records]);
 
-  const handleClearAll = () => {
-    if (confirm('确定要清空所有记录吗？此操作不可撤销。')) clearRecords();
-  };
-
   const getImgSrc = (resourceId: number) => `/header/${resourceId}.png`;
 
   // 进度条颜色：低=绿，中=橙，高=红
@@ -183,11 +179,6 @@ export default function RecordsPage() {
                   <Rows3 size={14} />
                 </button>
               </div>
-              {records.length > 0 && (
-                <button onClick={handleClearAll} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[rgba(255,100,100,0.3)] text-[#e8a8a8] hover:bg-[rgba(255,100,100,0.1)] transition-colors text-xs">
-                  <Trash2 size={12} /> 清空
-                </button>
-              )}
             </div>
           </div>
         </div>
