@@ -1,11 +1,16 @@
+mod assets;
 mod commands;
 mod db;
 mod gacha;
 
 use std::sync::Mutex;
+use std::path::PathBuf;
 
 pub struct AppState {
     pub db: Mutex<db::Database>,
+    pub http: reqwest::Client,
+    pub asset_cache_dir: PathBuf,
+    pub asset_catalog_refresh: tokio::sync::Mutex<()>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,14 +23,23 @@ pub fn run() {
 
     let db_path = app_data_dir.join("gacha.db");
     let database = db::Database::new(&db_path).expect("Failed to initialize database");
+    let asset_cache_dir = app_data_dir.join("assets");
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .expect("Failed to initialize HTTP client");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState {
             db: Mutex::new(database),
+            http,
+            asset_cache_dir,
+            asset_catalog_refresh: tokio::sync::Mutex::new(()),
         })
         .invoke_handler(tauri::generate_handler![
+            commands::gacha::get_resource_icon,
             commands::gacha::decode_log,
             commands::gacha::fetch_gacha_data,
             commands::gacha::fetch_gacha_data_by_url,

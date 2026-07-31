@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import type { GachaRecord, GachaStats, PoolInfo } from '../types';
 import { QUALITY } from '../types';
+import ResourceIcon from './ResourceIcon';
 
 interface HomeDashboardProps {
   stats: GachaStats;
@@ -274,20 +275,16 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
             {recentFiveStars.map((item) => (
               <div key={item.id} className="flex min-w-0 items-center gap-3 bg-[#202020] px-4 py-3">
                 <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-[#d8bd84]/25 bg-[#d8bd84]/[0.07]">
-                  <img
-                    src={`/header/${item.resourceId}.png`}
+                  <ResourceIcon
+                    resourceId={item.resourceId}
                     alt={item.name}
                     className="h-full w-full object-cover"
-                    loading="lazy"
-                    onError={(event) => {
-                      event.currentTarget.style.display = 'none';
-                      const fallback = event.currentTarget.nextElementSibling as HTMLElement | null;
-                      if (fallback) fallback.style.display = 'flex';
-                    }}
+                    fallback={(
+                      <div className="absolute inset-0 flex items-center justify-center text-[#d8bd84]">
+                        <Trophy size={17} />
+                      </div>
+                    )}
                   />
-                  <div className="absolute inset-0 hidden items-center justify-center text-[#d8bd84]">
-                    <Trophy size={17} />
-                  </div>
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

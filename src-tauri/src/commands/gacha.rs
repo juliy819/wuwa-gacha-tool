@@ -7,6 +7,14 @@ use crate::gacha::fetcher::{self, build_pool_name_to_id, get_display_pool_name, 
 use crate::gacha::parser::{ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameDirValidation, GameSettings, RecordSummary};
 use crate::AppState;
 
+#[tauri::command]
+pub async fn get_resource_icon(
+    state: State<'_, AppState>,
+    resource_id: i64,
+) -> Result<String, String> {
+    crate::assets::get_resource_icon(&state, resource_id).await
+}
+
 /// 解码日志文件并提取 URL
 #[tauri::command]
 pub fn decode_log(game_dir: String) -> Result<String, String> {

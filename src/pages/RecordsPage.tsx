@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import PageTransition from '../components/PageTransition';
+import ResourceIcon from '../components/ResourceIcon';
 import { useGachaStore } from '../store/useGachaStore';
 import {
   POOL_TYPES,
@@ -53,20 +54,16 @@ function RecordAvatar({ record, size = 'md' }: { record: GachaRecord; size?: 'sm
       className={`relative shrink-0 overflow-hidden rounded-md border ${dimensions}`}
       style={{ borderColor: record.is_off_rate ? 'rgba(216,72,72,0.65)' : `${color}55`, background: `${color}10` }}
     >
-      <img
-        src={`/header/${record.resource_id}.png`}
+      <ResourceIcon
+        resourceId={record.resource_id}
         alt={record.name}
         className="h-full w-full object-cover"
-        loading="lazy"
-        onError={(event) => {
-          event.currentTarget.style.display = 'none';
-          const fallback = event.currentTarget.nextElementSibling as HTMLElement | null;
-          if (fallback) fallback.style.display = 'flex';
-        }}
+        fallback={(
+          <div className="absolute inset-0 flex items-center justify-center text-sm font-medium" style={{ color }}>
+            {record.name.charAt(0)}
+          </div>
+        )}
       />
-      <div className="absolute inset-0 hidden items-center justify-center text-sm font-medium" style={{ color }}>
-        {record.name.charAt(0)}
-      </div>
     </div>
   );
 }

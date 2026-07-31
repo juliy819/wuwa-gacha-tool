@@ -17,6 +17,12 @@ pub struct MergeStats {
     pub duplicate_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedJson {
+    pub json: String,
+    pub updated_at: i64,
+}
+
 impl Database {
     pub fn new(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| e.to_string())?;
@@ -52,6 +58,12 @@ impl Database {
                 CREATE TABLE IF NOT EXISTS game_settings (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     game_dir TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS nanoka_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    json TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
                 );
                 ",
             )
@@ -450,6 +462,52 @@ impl Database {
             .unwrap_or_default();
         Ok(settings)
     }
+
+    pub fn get_nanoka_cache(&self, cache_key: &str) -> Result<Option<CachedJson>, String> {
+        match self.conn.query_row(
+            "SELECT json, updated_at FROM nanoka_cache WHERE cache_key = ?1",
+            params![cache_key],
+            |row| {
+                Ok(CachedJson {
+                    json: row.get(0)?,
+                    updated_at: row.get(1)?,
+                })
+            },
+        ) {
+            Ok(entry) => Ok(Some(entry)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub fn get_latest_nanoka_cache(&self, prefix: &str) -> Result<Option<CachedJson>, String> {
+        let pattern = format!("{prefix}%");
+        match self.conn.query_row(
+            "SELECT json, updated_at FROM nanoka_cache WHERE cache_key LIKE ?1 ORDER BY updated_at DESC LIMIT 1",
+            params![pattern],
+            |row| {
+                Ok(CachedJson {
+                    json: row.get(0)?,
+                    updated_at: row.get(1)?,
+                })
+            },
+        ) {
+            Ok(entry) => Ok(Some(entry)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
+    pub fn set_nanoka_cache(&self, cache_key: &str, json: &str, updated_at: i64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO nanoka_cache (cache_key, json, updated_at) VALUES (?1, ?2, ?3)\
+                 ON CONFLICT(cache_key) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at",
+                params![cache_key, json, updated_at],
+            )
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -599,5 +657,24 @@ mod tests {
         drop(backup);
         drop(db);
         std::fs::remove_dir_all(test_dir).unwrap();
+    }
+
+    #[test]
+    fn nanoka_cache_round_trips_and_returns_latest_prefix_entry() {
+        let db = test_database();
+        db.set_nanoka_cache("catalog:3.5", "{\"version\":\"3.5\"}", 10).unwrap();
+        db.set_nanoka_cache("catalog:3.6", "{\"version\":\"3.6\"}", 20).unwrap();
+
+        assert_eq!(
+            db.get_nanoka_cache("catalog:3.5").unwrap(),
+            Some(CachedJson {
+                json: "{\"version\":\"3.5\"}".to_string(),
+                updated_at: 10,
+            })
+        );
+        assert_eq!(
+            db.get_latest_nanoka_cache("catalog:").unwrap().unwrap().json,
+            "{\"version\":\"3.6\"}"
+        );
     }
 }

@@ -2,6 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameDirValidation, GameSettings, RecordSummary } from '../types';
 
 export const gachaApi = {
+  getResourceIcon: (resourceId: number): Promise<string> => {
+    return invoke('get_resource_icon', { resourceId });
+  },
+
   // 解码日志获取 URL
   decodeLog: (gameDir: string): Promise<string> => {
     return invoke('decode_log', { gameDir });

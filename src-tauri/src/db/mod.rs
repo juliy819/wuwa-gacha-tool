@@ -1,2 +1,2 @@
 pub mod database;
-pub use database::Database;
+pub use database::{CachedJson, Database};
