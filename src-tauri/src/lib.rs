@@ -37,6 +37,7 @@ pub fn run() {
             commands::gacha::clear_records,
             commands::gacha::save_game_dir,
             commands::gacha::get_game_dir,
+            commands::gacha::validate_game_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

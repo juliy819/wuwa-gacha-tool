@@ -43,6 +43,7 @@ export interface PoolInfo {
   four_star_count: number;
   current_pity: number;
   avg_pity: number;
+  max_pity: number;
   off_rate_count: number;
 }
 
@@ -55,8 +56,6 @@ export interface GachaStats {
   four_star_rate: number;
   limited_five_star: number;
   standard_five_star: number;
-  limited_four_star: number;
-  standard_four_star: number;
   current_pity: number;
   max_pity: number;
   avg_five_star_pity: number;
@@ -69,6 +68,12 @@ export interface GachaStats {
 
 export interface GameSettings {
   game_dir: string;
+}
+
+export interface GameDirValidation {
+  valid: boolean;
+  log_path: string;
+  message: string;
 }
 
 export interface ToastMessage {

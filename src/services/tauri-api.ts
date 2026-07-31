@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameSettings, RecordSummary } from '../types';
+import type { ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameDirValidation, GameSettings, RecordSummary } from '../types';
 
 export const gachaApi = {
   // 解码日志获取 URL
@@ -55,5 +55,9 @@ export const gachaApi = {
   // 获取游戏目录
   getGameDir: (): Promise<GameSettings> => {
     return invoke('get_game_dir');
+  },
+
+  validateGameDir: (gameDir: string): Promise<GameDirValidation> => {
+    return invoke('validate_game_dir', { gameDir });
   },
 };

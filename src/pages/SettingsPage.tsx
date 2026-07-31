@@ -1,63 +1,161 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
-import { useGachaStore } from '../store/useGachaStore';
-import { gachaApi } from '../services/tauri-api';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clipboard,
+  Database,
+  FolderOpen,
+  Info,
+  LoaderCircle,
+  Save,
+  Trash2,
+  X,
+  XCircle,
+} from 'lucide-react';
+import packageInfo from '../../package.json';
 import PageTransition from '../components/PageTransition';
-import { Save, FolderOpen, Info, Trash2, AlertTriangle, X } from 'lucide-react';
-import type { RecordSummary } from '../types';
+import { gachaApi } from '../services/tauri-api';
+import { useGachaStore } from '../store/useGachaStore';
+import type { GameDirValidation, RecordSummary } from '../types';
 
 type DeleteTarget = { playerId: string | null };
 
 export default function SettingsPage() {
-  const { settings, fetchSettings, saveGameDir, clearRecords, pools } = useGachaStore();
+  const { settings, fetchSettings, saveGameDir, clearRecords, pools, addToast } = useGachaStore();
   const [gameDirInput, setGameDirInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validation, setValidation] = useState<GameDirValidation | null>(null);
   const [summaries, setSummaries] = useState<RecordSummary[]>([]);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [confirmationText, setConfirmationText] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [lastBackupPath, setLastBackupPath] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchSettings();
   }, []);
 
   useEffect(() => {
-    if (settings) {
-      setGameDirInput(settings.game_dir);
-    }
+    if (settings) setGameDirInput(settings.game_dir);
   }, [settings]);
+
+  useEffect(() => {
+    const path = gameDirInput.trim();
+    if (!path) {
+      setValidation(null);
+      setValidating(false);
+      return;
+    }
+
+    let cancelled = false;
+    setValidating(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await gachaApi.validateGameDir(path);
+        if (!cancelled) setValidation(result);
+      } catch {
+        if (!cancelled) {
+          setValidation({ valid: false, log_path: '', message: '目录校验失败，请重新选择' });
+        }
+      } finally {
+        if (!cancelled) setValidating(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [gameDirInput]);
 
   useEffect(() => {
     if (pools.length === 0) {
       setSummaries([]);
+      setSummaryLoading(false);
+      setSummaryError(false);
       return;
     }
-    gachaApi.getRecordSummaries().then(setSummaries).catch(() => setSummaries([]));
+
+    let cancelled = false;
+    setSummaryLoading(true);
+    setSummaryError(false);
+    gachaApi.getRecordSummaries()
+      .then((result) => {
+        if (!cancelled) setSummaries(result);
+      })
+      .catch(() => {
+        if (!cancelled) setSummaryError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setSummaryLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [pools]);
+
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !deleting) {
+        setDeleteTarget(null);
+        setConfirmationText('');
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])'));
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteTarget, deleting]);
+
+  const summaryByPlayer = useMemo(
+    () => new Map(summaries.map((summary) => [summary.player_id, summary])),
+    [summaries],
+  );
+  const totalRecords = summaries.reduce((sum, summary) => sum + summary.record_count, 0);
+  const savedPath = settings?.game_dir.trim() ?? '';
+  const isDirty = gameDirInput.trim() !== savedPath;
+
+  const selectedSummary = deleteTarget?.playerId ? summaryByPlayer.get(deleteTarget.playerId) : null;
+  const expectedConfirmation = deleteTarget?.playerId ?? '清空全部数据';
+  const targetRecordCount = deleteTarget?.playerId ? selectedSummary?.record_count ?? 0 : totalRecords;
+  const targetTimeRange = selectedSummary
+    ? `${selectedSummary.earliest_time.slice(0, 10)} 至 ${selectedSummary.latest_time.slice(0, 10)}`
+    : summaries.length > 0
+      ? `${summaries.reduce((min, item) => item.earliest_time < min ? item.earliest_time : min, summaries[0].earliest_time).slice(0, 10)} 至 ${summaries.reduce((max, item) => item.latest_time > max ? item.latest_time : max, summaries[0].latest_time).slice(0, 10)}`
+      : '';
 
   const handleSelectFolder = async () => {
     try {
-      const selected = await open({
-        directory: true,
-        multiple: false,
-        title: '选择鸣潮游戏目录',
-      });
-      if (selected) {
-        setGameDirInput(selected);
-      }
-    } catch (e) {
-      console.error('选择目录失败', e);
+      const selected = await open({ directory: true, multiple: false, title: '选择鸣潮游戏目录' });
+      if (selected) setGameDirInput(selected);
+    } catch {
+      addToast('error', '无法打开目录选择器');
     }
   };
 
   const handleSave = async () => {
-    if (!gameDirInput.trim()) return;
+    if (!isDirty || !validation?.valid) return;
     setSaving(true);
     try {
       await saveGameDir(gameDirInput.trim());
     } catch {
-      // toast 已在 store 中处理
+      // Store 已显示失败提示。
     } finally {
       setSaving(false);
     }
@@ -79,221 +177,219 @@ export default function SettingsPage() {
     setDeleting(true);
     const result = await clearRecords(deleteTarget.playerId ?? undefined);
     setDeleting(false);
-    if (result) {
-      setDeleteTarget(null);
-      setConfirmationText('');
-    }
+    if (!result) return;
+    setLastBackupPath(result.backup_path);
+    setDeleteTarget(null);
+    setConfirmationText('');
   };
 
-  const selectedSummary = deleteTarget?.playerId
-    ? summaries.find((summary) => summary.player_id === deleteTarget.playerId)
-    : null;
-  const totalRecords = summaries.reduce((sum, summary) => sum + summary.record_count, 0);
-  const expectedConfirmation = deleteTarget?.playerId ?? '清空全部数据';
-  const targetRecordCount = deleteTarget?.playerId
-    ? selectedSummary?.record_count ?? 0
-    : totalRecords;
-  const targetTimeRange = selectedSummary
-    ? `${selectedSummary.earliest_time} 至 ${selectedSummary.latest_time}`
-    : summaries.length > 0
-      ? `${summaries.reduce((min, item) => item.earliest_time < min ? item.earliest_time : min, summaries[0].earliest_time)} 至 ${summaries.reduce((max, item) => item.latest_time > max ? item.latest_time : max, summaries[0].latest_time)}`
-      : '';
+  const copyBackupPath = async () => {
+    if (!lastBackupPath) return;
+    try {
+      await navigator.clipboard.writeText(lastBackupPath);
+      addToast('success', '备份路径已复制');
+    } catch {
+      addToast('error', '复制失败');
+    }
+  };
 
   return (
     <PageTransition>
       <div className="h-full overflow-y-auto overflow-x-hidden">
-        <div className="p-6 max-w-2xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-semibold text-tide">设置</h1>
-          <p className="text-sm text-wave mt-1">配置应用选项</p>
-        </div>
+        <div className="mx-auto max-w-5xl space-y-5 p-6">
+          <header>
+            <h1 className="text-xl font-semibold text-tide">设置</h1>
+            <p className="mt-1 text-xs text-wave">管理扫描目录与本地数据</p>
+          </header>
 
-        {/* 游戏目录设置 */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="glass-card p-5"
-        >
-          <h3 className="text-base font-medium text-tide mb-2 flex items-center gap-2">
-            <FolderOpen size={18} />
-            游戏目录
-          </h3>
-          <p className="text-sm text-wave mb-4">
-            设置鸣潮游戏的安装目录，用于扫描 Client.log 文件获取抽卡链接。
-          </p>
+          <div className="grid items-start gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)]">
+            <div className="space-y-4">
+              <motion.section
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-lg border border-white/[0.06] bg-[#242424] p-5"
+              >
+                <div className="flex items-center gap-2 text-sm font-medium text-tide">
+                  <FolderOpen size={16} />游戏目录
+                </div>
+                <p className="mt-1 text-xs text-wave">扫描抽卡记录时读取此目录中的 Client.log</p>
 
-          <div className="space-y-3">
-            <div>
-              <label className="block text-sm text-wave mb-2">游戏目录路径</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={gameDirInput}
-                  onChange={(e) => setGameDirInput(e.target.value)}
-                  placeholder="例如: E:\Wuthering Waves\Wuthering Waves"
-                  className="flex-1 glass-input px-4 py-2.5 text-sm"
-                />
-                <button
-                  onClick={handleSelectFolder}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg glass-input hover:text-tide transition-colors text-sm whitespace-nowrap"
-                >
-                  <FolderOpen size={14} />
-                  选择
-                </button>
-              </div>
-              <p className="text-xs text-wave mt-1">
-                目录下需要包含 <code className="text-tide">Client\Saved\Logs\Client.log</code> 文件
-              </p>
-            </div>
-
-            <button
-              onClick={handleSave}
-              disabled={saving || !gameDirInput.trim()}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg tide-btn disabled:opacity-50"
-            >
-              <Save size={14} />
-              {saving ? '保存中...' : '保存设置'}
-            </button>
-          </div>
-        </motion.div>
-
-        {/* 数据管理 */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="glass-card p-5"
-        >
-          <h3 className="text-base font-medium text-tide mb-2 flex items-center gap-2">
-            <Info size={18} />
-            数据管理
-          </h3>
-          <p className="text-sm text-wave mb-4">
-            当前已保存 <span className="text-tide font-medium">{pools.length}</span> 位玩家的抽卡记录
-          </p>
-
-          {pools.length > 0 && (
-            <div className="space-y-2 mb-4">
-              {pools.map((poolId) => (
-                <div
-                  key={poolId}
-                  className="flex items-center justify-between p-3 rounded-lg bg-[rgba(212,212,212,0.03)]"
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm text-tide">UID {poolId}</div>
-                    {summaries.find((summary) => summary.player_id === poolId) && (
-                      <div className="text-xs text-wave mt-1">
-                        {summaries.find((summary) => summary.player_id === poolId)?.record_count} 条
-                        <span className="mx-1.5 text-[rgba(212,212,212,0.2)]">|</span>
-                        {summaries.find((summary) => summary.player_id === poolId)?.earliest_time.slice(0, 10)} 至 {summaries.find((summary) => summary.player_id === poolId)?.latest_time.slice(0, 10)}
-                      </div>
-                    )}
+                <label className="mt-5 block">
+                  <span className="mb-2 block text-xs text-wave">安装目录</span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={gameDirInput}
+                      onChange={(event) => setGameDirInput(event.target.value)}
+                      placeholder="例如: E:\Wuthering Waves\Wuthering Waves"
+                      className="glass-input min-w-0 flex-1 px-3 py-2.5 text-sm"
+                    />
+                    <button onClick={handleSelectFolder} className="glass-input flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm text-wave hover:text-tide">
+                      <FolderOpen size={14} />选择
+                    </button>
                   </div>
+                </label>
+
+                <div className="mt-2 min-h-5">
+                  {!gameDirInput.trim() ? (
+                    <div className="flex items-center gap-2 text-[11px] text-wave"><Info size={12} />尚未设置游戏目录</div>
+                  ) : validating ? (
+                    <div className="flex items-center gap-2 text-[11px] text-wave"><LoaderCircle size={12} className="animate-spin" />正在检查 Client.log</div>
+                  ) : validation?.valid ? (
+                    <div className="flex items-center gap-2 text-[11px] text-[#8fc8be]"><CheckCircle2 size={12} />{validation.message}</div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-[11px] text-[#d99a9a]"><XCircle size={12} />{validation?.message}</div>
+                  )}
+                </div>
+
+                <div className="mt-4 flex items-center gap-3">
                   <button
-                    onClick={() => openDeleteDialog(poolId)}
-                    className="flex items-center gap-1.5 text-xs text-[#e8a8a8] hover:text-[#e8c8c8] transition-colors"
+                    onClick={handleSave}
+                    disabled={saving || validating || !isDirty || !validation?.valid}
+                    className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40"
                   >
-                    <Trash2 size={12} /> 删除记录
+                    {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                    {saving ? '保存中' : '保存目录'}
                   </button>
+                  {isDirty && validation?.valid && <span className="text-[11px] text-[#c9ab78]">有未保存的修改</span>}
+                  {!isDirty && savedPath && <span className="text-[11px] text-wave">当前设置已保存</span>}
                 </div>
-              ))}
+              </motion.section>
+
+              <section className="border-t border-white/[0.06] px-1 pt-4 text-xs text-wave">
+                <div className="flex items-center justify-between">
+                  <span className="text-tide-dim">Wuwa Gacha Tool</span>
+                  <span>v{packageInfo.version}</span>
+                </div>
+                <p className="mt-2 leading-5">数据仅保存在本机，不会上传到服务器。</p>
+              </section>
             </div>
-          )}
 
-          <button
-            onClick={() => openDeleteDialog(null)}
-            disabled={pools.length === 0}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-[rgba(255,100,100,0.3)] text-[#e8a8a8] hover:bg-[rgba(255,100,100,0.1)] transition-colors text-sm disabled:opacity-30"
-          >
-            <Trash2 size={14} />
-            清空所有数据
-          </button>
-        </motion.div>
-
-        {/* 关于 */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="glass-card p-5"
-        >
-          <h3 className="text-base font-medium text-tide mb-2">关于</h3>
-          <div className="text-sm text-wave space-y-2">
-            <p>鸣潮抽卡分析工具 v0.1.0</p>
-            <p>本工具用于扫描和分析鸣潮游戏的抽卡记录数据。</p>
-            <p>所有数据均存储在本地，不会上传到任何服务器。</p>
-          </div>
-        </motion.div>
-        </div>
-      </div>
-
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
-          <div className="w-full max-w-md rounded-lg border border-[rgba(255,100,100,0.28)] bg-[#242424] shadow-2xl">
-            <div className="flex items-start justify-between border-b border-[rgba(255,255,255,0.06)] p-5">
-              <div className="flex items-start gap-3">
-                <div className="mt-0.5 rounded-md bg-[rgba(255,100,100,0.1)] p-2 text-[#e8a8a8]">
-                  <AlertTriangle size={18} />
-                </div>
+            <motion.section
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.05 }}
+              className="rounded-lg border border-white/[0.06] bg-[#242424] p-5"
+            >
+              <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 id="delete-dialog-title" className="text-base font-medium text-tide">
-                    {deleteTarget.playerId ? `删除 UID ${deleteTarget.playerId} 的记录` : '清空所有抽卡记录'}
-                  </h2>
-                  <p className="mt-1 text-xs text-wave">删除前会自动创建完整数据库备份</p>
+                  <div className="flex items-center gap-2 text-sm font-medium text-tide"><Database size={16} />本地数据</div>
+                  <p className="mt-1 text-xs text-wave">{pools.length} 位玩家 · {totalRecords.toLocaleString()} 条记录</p>
                 </div>
               </div>
-              <button onClick={closeDeleteDialog} disabled={deleting} className="p-1 text-wave hover:text-tide disabled:opacity-40" title="关闭">
-                <X size={16} />
-              </button>
-            </div>
 
-            <div className="space-y-4 p-5">
-              <div className="grid grid-cols-2 gap-3 border-y border-[rgba(255,255,255,0.06)] py-3 text-sm">
-                <div>
-                  <div className="text-xs text-wave">记录数量</div>
-                  <div className="mt-1 font-medium text-tide">{targetRecordCount} 条</div>
+              <div className="mt-4 flex items-start gap-2 rounded-md border border-[#c9ab78]/15 bg-[#c9ab78]/[0.05] px-3 py-2.5 text-[11px] leading-5 text-[#c9ab78]">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                <span>官方抽卡链接仅保留近约 6 个月。建议至少每半年同步一次，超期缺口无法自动补回。</span>
+              </div>
+
+              {lastBackupPath && (
+                <div className="mt-3 flex items-center gap-3 rounded-md border border-[#6faaa0]/15 bg-[#6faaa0]/[0.05] px-3 py-2.5">
+                  <CheckCircle2 size={14} className="shrink-0 text-[#8fc8be]" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] text-[#8fc8be]">删除前备份已创建</div>
+                    <div className="mt-0.5 truncate text-[10px] text-wave" title={lastBackupPath}>{lastBackupPath}</div>
+                  </div>
+                  <button onClick={copyBackupPath} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title="复制备份路径"><Clipboard size={13} /></button>
                 </div>
-                <div>
-                  <div className="text-xs text-wave">涉及玩家</div>
-                  <div className="mt-1 font-medium text-tide">{deleteTarget.playerId ? 1 : pools.length} 位</div>
-                </div>
-                {targetTimeRange && (
-                  <div className="col-span-2">
-                    <div className="text-xs text-wave">记录范围</div>
-                    <div className="mt-1 text-tide">{targetTimeRange}</div>
+              )}
+
+              <div className="mt-4 overflow-hidden rounded-md border border-white/[0.06]">
+                {summaryLoading ? (
+                  <div className="flex items-center justify-center gap-2 py-10 text-xs text-wave"><LoaderCircle size={14} className="animate-spin" />正在读取数据摘要</div>
+                ) : summaryError ? (
+                  <div className="py-10 text-center text-xs text-[#d99a9a]">数据摘要读取失败</div>
+                ) : pools.length === 0 ? (
+                  <div className="py-10 text-center">
+                    <Database size={19} className="mx-auto text-wave" />
+                    <div className="mt-2 text-xs text-wave">尚未保存抽卡记录</div>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-white/[0.05]">
+                    {pools.map((playerId) => {
+                      const summary = summaryByPlayer.get(playerId);
+                      return (
+                        <div key={playerId} className="flex items-center justify-between gap-3 px-3 py-3">
+                          <div className="min-w-0">
+                            <div className="text-sm text-tide">UID {playerId}</div>
+                            {summary && (
+                              <div className="mt-1 text-[11px] text-wave">
+                                {summary.record_count.toLocaleString()} 条 · {summary.earliest_time.slice(0, 10)} 至 {summary.latest_time.slice(0, 10)}
+                              </div>
+                            )}
+                          </div>
+                          <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><Trash2 size={14} /></button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
 
-              <label className="block">
-                <span className="mb-2 block text-xs text-wave">
-                  输入 <span className="font-medium text-[#e8a8a8]">{expectedConfirmation}</span> 确认删除
-                </span>
-                <input
-                  autoFocus
-                  value={confirmationText}
-                  onChange={(event) => setConfirmationText(event.target.value)}
-                  className="glass-input w-full px-3 py-2 text-sm"
-                />
-              </label>
-
-              <div className="flex justify-end gap-2 pt-1">
-                <button onClick={closeDeleteDialog} disabled={deleting} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">
-                  取消
-                </button>
+              <div className="mt-4 flex items-center justify-between border-t border-white/[0.05] pt-4">
+                <span className="text-[11px] text-wave">删除前会自动备份数据库</span>
                 <button
-                  onClick={handleConfirmDelete}
-                  disabled={deleting || confirmationText !== expectedConfirmation}
-                  className="flex items-center gap-2 rounded-md bg-[#a64f4f] px-4 py-2 text-sm text-white hover:bg-[#b85a5a] disabled:cursor-not-allowed disabled:opacity-35"
+                  onClick={() => openDeleteDialog(null)}
+                  disabled={pools.length === 0}
+                  className="flex items-center gap-2 rounded-md border border-[#d84848]/25 px-3 py-2 text-xs text-[#d99a9a] hover:bg-[#d84848]/10 disabled:cursor-not-allowed disabled:opacity-30"
                 >
-                  <Trash2 size={14} />
-                  {deleting ? '备份并删除中...' : '备份并删除'}
+                  <Trash2 size={13} />清空全部
                 </button>
+              </div>
+            </motion.section>
+          </div>
+        </div>
+
+        {deleteTarget && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-dialog-title"
+            onMouseDown={(event) => { if (event.currentTarget === event.target) closeDeleteDialog(); }}
+          >
+            <div ref={dialogRef} className="w-full max-w-md rounded-lg border border-[#d84848]/30 bg-[#242424] shadow-2xl">
+              <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><AlertTriangle size={18} /></div>
+                  <div>
+                    <h2 id="delete-dialog-title" className="text-base font-medium text-tide">
+                      {deleteTarget.playerId ? `删除 UID ${deleteTarget.playerId} 的记录` : '清空所有抽卡记录'}
+                    </h2>
+                    <p className="mt-1 text-xs text-wave">操作前会自动创建完整数据库备份</p>
+                  </div>
+                </div>
+                <button onClick={closeDeleteDialog} disabled={deleting} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="grid grid-cols-2 gap-3 border-y border-white/[0.06] py-3 text-sm">
+                  <div><div className="text-xs text-wave">记录数量</div><div className="mt-1 font-medium text-tide">{targetRecordCount.toLocaleString()} 条</div></div>
+                  <div><div className="text-xs text-wave">涉及玩家</div><div className="mt-1 font-medium text-tide">{deleteTarget.playerId ? 1 : pools.length} 位</div></div>
+                  {targetTimeRange && <div className="col-span-2"><div className="text-xs text-wave">记录范围</div><div className="mt-1 text-tide">{targetTimeRange}</div></div>}
+                </div>
+
+                <label className="block">
+                  <span className="mb-2 block text-xs text-wave">输入 <span className="font-medium text-[#d99a9a]">{expectedConfirmation}</span> 确认删除</span>
+                  <input autoFocus value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} className="glass-input w-full px-3 py-2 text-sm" />
+                </label>
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={closeDeleteDialog} disabled={deleting} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">取消</button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    disabled={deleting || confirmationText !== expectedConfirmation}
+                    className="flex items-center gap-2 rounded-md bg-[#a64f4f] px-4 py-2 text-sm text-white hover:bg-[#b85a5a] disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    {deleting ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    {deleting ? '备份并删除中' : '备份并删除'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </PageTransition>
   );
 }

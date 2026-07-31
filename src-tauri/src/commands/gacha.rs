@@ -4,7 +4,7 @@ use tauri::State;
 
 use crate::gacha::decoder;
 use crate::gacha::fetcher::{self, build_pool_name_to_id, get_display_pool_name, ApiCardInfo, GachaParams, POOL_TYPES};
-use crate::gacha::parser::{ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameSettings, RecordSummary};
+use crate::gacha::parser::{ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameDirValidation, GameSettings, RecordSummary};
 use crate::AppState;
 
 /// 解码日志文件并提取 URL
@@ -221,4 +221,34 @@ pub fn save_game_dir(
 pub fn get_game_dir(state: State<'_, AppState>) -> Result<GameSettings, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     db.get_settings()
+}
+
+/// 检查游戏目录及 Client.log 是否存在。
+#[tauri::command]
+pub fn validate_game_dir(game_dir: String) -> GameDirValidation {
+    let trimmed = game_dir.trim();
+    let log_path = decoder::get_log_path(trimmed);
+
+    if trimmed.is_empty() {
+        return GameDirValidation {
+            valid: false,
+            log_path,
+            message: "尚未设置游戏目录".to_string(),
+        };
+    }
+
+    let path = std::path::Path::new(&log_path);
+    if path.is_file() {
+        GameDirValidation {
+            valid: true,
+            log_path,
+            message: "已找到 Client.log".to_string(),
+        }
+    } else {
+        GameDirValidation {
+            valid: false,
+            log_path,
+            message: "未找到 Client\\Saved\\Logs\\Client.log".to_string(),
+        }
+    }
 }
