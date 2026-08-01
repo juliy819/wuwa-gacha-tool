@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
   AlignJustify,
+  AlertTriangle,
   CalendarRange,
   Check,
   ChevronDown,
@@ -102,6 +103,7 @@ export default function RecordsPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<GachaRecord | null>(null);
   const [mutating, setMutating] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<GachaRecord | null>(null);
   const contentRef = useRef<HTMLElement>(null);
   const previousGridPageSizeRef = useRef(gridColumns * GRID_ROWS_PER_PAGE);
 
@@ -178,13 +180,15 @@ export default function RecordsPage() {
     }
   };
 
-  const deleteMockRecord = async (record: GachaRecord) => {
+  const handleDeleteClick = (record: GachaRecord) => {
     if (!record.id || !record.is_mock) return;
-    const cascade = record.quality_level === QUALITY.FIVE_STAR;
-    const confirmed = window.confirm(cascade
-      ? `删除 ${record.name} 及其同批次全部补足记录？`
-      : `删除这条 ${record.name} 模拟记录？`);
-    if (!confirmed) return;
+    setDeleteConfirm(record);
+  };
+
+  const confirmDeleteMockRecord = async () => {
+    const record = deleteConfirm;
+    if (!record?.id || !record.is_mock) return;
+    setDeleteConfirm(null);
     setMutating(true);
     try {
       const result = await gachaApi.deleteMockGacha(record.id);
@@ -537,7 +541,7 @@ export default function RecordsPage() {
                               {record.is_mock ? (
                                 <div className="flex items-center justify-center gap-1">
                                   <button type="button" onClick={() => openEditDialog(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="编辑模拟记录"><Pencil size={13} /></button>
-                                  <button type="button" onClick={() => void deleteMockRecord(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><Trash2 size={13} /></button>
+                                  <button type="button" onClick={() => handleDeleteClick(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><Trash2 size={13} /></button>
                                 </div>
                               ) : <div className="text-center text-white/15">-</div>}
                             </td>
@@ -628,6 +632,43 @@ export default function RecordsPage() {
         onClose={() => { setDialogOpen(false); setEditingRecord(null); }}
         onSubmit={submitMockRecord}
       />
+
+      {deleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
+          role="dialog"
+          aria-modal="true"
+          onMouseDown={(event) => { if (event.currentTarget === event.target && !mutating) setDeleteConfirm(null); }}
+        >
+          <div className="w-full max-w-sm rounded-lg border border-[#d84848]/30 bg-[#242424] shadow-2xl">
+            <div className="flex items-start gap-3 p-5">
+              <div className="mt-0.5 shrink-0 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><AlertTriangle size={18} /></div>
+              <div className="min-w-0">
+                <h2 className="text-base font-medium text-tide">
+                  {deleteConfirm.quality_level === QUALITY.FIVE_STAR ? '删除整批模拟记录' : '删除模拟记录'}
+                </h2>
+                <p className="mt-1.5 text-xs leading-5 text-wave">
+                  {deleteConfirm.quality_level === QUALITY.FIVE_STAR
+                    ? `将删除 ${deleteConfirm.name} 及其同批次的全部补足记录，此操作不可撤销。`
+                    : `确定删除这条 ${deleteConfirm.name} 模拟记录？此操作不可撤销。`}
+                </p>
+              </div>
+              <button onClick={() => setDeleteConfirm(null)} disabled={mutating} className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-4">
+              <button onClick={() => setDeleteConfirm(null)} disabled={mutating} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">取消</button>
+              <button
+                onClick={() => void confirmDeleteMockRecord()}
+                disabled={mutating}
+                className="flex items-center gap-2 rounded-md bg-[#a64f4f] px-4 py-2 text-sm text-white hover:bg-[#b85a5a] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {mutating ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageTransition>
   );
 }
