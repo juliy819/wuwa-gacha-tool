@@ -48,6 +48,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::gacha::get_resource_icon,
+            commands::gacha::get_gacha_resources,
+            commands::gacha::insert_mock_gacha,
+            commands::gacha::update_mock_gacha,
+            commands::gacha::delete_mock_gacha,
             commands::gacha::decode_log,
             commands::gacha::fetch_gacha_data,
             commands::gacha::fetch_gacha_data_by_url,

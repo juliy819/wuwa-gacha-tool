@@ -1,9 +1,25 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameDirValidation, GameSettings, RecordSummary } from '../types';
+import type { ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, RecordSummary, UpdateMockGachaRequest } from '../types';
 
 export const gachaApi = {
   getResourceIcon: (resourceId: number): Promise<string> => {
     return invoke('get_resource_icon', { resourceId });
+  },
+
+  getGachaResources: (): Promise<GachaResource[]> => {
+    return invoke('get_gacha_resources');
+  },
+
+  insertMockGacha: (request: InsertMockGachaRequest): Promise<GachaRecord[]> => {
+    return invoke('insert_mock_gacha', { request });
+  },
+
+  updateMockGacha: (request: UpdateMockGachaRequest): Promise<void> => {
+    return invoke('update_mock_gacha', { request });
+  },
+
+  deleteMockGacha: (id: number): Promise<DeleteMockResult> => {
+    return invoke('delete_mock_gacha', { id });
   },
 
   // 解码日志获取 URL

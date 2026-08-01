@@ -30,6 +30,10 @@ pub struct GachaRecord {
     pub count: i32,
     pub time: String,
     pub is_off_rate: bool,
+    #[serde(default)]
+    pub is_mock: bool,
+    #[serde(default)]
+    pub mock_batch_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +98,8 @@ impl GachaRecord {
             count: info.count,
             time: info.time.clone(),
             is_off_rate,
+            is_mock: false,
+            mock_batch_id: None,
         }
     }
 
@@ -314,6 +320,8 @@ mod tests {
             count: 1,
             time: time.to_string(),
             is_off_rate: false,
+            is_mock: false,
+            mock_batch_id: None,
         }
     }
 

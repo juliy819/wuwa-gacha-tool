@@ -25,13 +25,39 @@ struct WuwaManifest {
 
 #[derive(Debug, Deserialize)]
 struct NanokaResource {
+    #[serde(default)]
     icon: String,
+    #[serde(default)]
+    rank: i32,
+    #[serde(default)]
+    zh: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct GachaResource {
+    pub resource_id: i64,
+    pub name: String,
+    pub quality_level: i32,
+    pub resource_type: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct AssetCatalog {
     version: String,
     icons: HashMap<i64, String>,
+    #[serde(default)]
+    resources: Vec<GachaResource>,
+}
+
+pub async fn get_gacha_resources(state: &AppState) -> Result<Vec<GachaResource>, String> {
+    let mut catalog = load_catalog(state).await?;
+    catalog.resources.sort_by(|a, b| {
+        b.quality_level
+            .cmp(&a.quality_level)
+            .then_with(|| a.resource_type.cmp(&b.resource_type))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(catalog.resources)
 }
 
 pub async fn get_resource_icon(state: &AppState, resource_id: i64) -> Result<String, String> {
@@ -140,8 +166,11 @@ async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
         let db = state.db.lock().map_err(|error| error.to_string())?;
         db.get_nanoka_cache(&cache_key)?
     } {
-        return serde_json::from_str(&cached.json)
-            .map_err(|error| format!("解析素材目录缓存失败: {error}"));
+        let catalog: AssetCatalog = serde_json::from_str(&cached.json)
+            .map_err(|error| format!("解析素材目录缓存失败: {error}"))?;
+        if !catalog.resources.is_empty() {
+            return Ok(catalog);
+        }
     }
 
     match fetch_catalog(&state.http, &version).await {
@@ -177,10 +206,21 @@ async fn fetch_catalog(client: &reqwest::Client, version: &str) -> Result<AssetC
     )?;
 
     let mut icons = HashMap::with_capacity(characters.len() + weapons.len());
-    for (id, resource) in characters.into_iter().chain(weapons) {
-        if let Ok(resource_id) = id.parse::<i64>() {
-            if !resource.icon.is_empty() {
-                icons.insert(resource_id, resource.icon);
+    let mut resources = Vec::with_capacity(characters.len() + weapons.len());
+    for (resource_type, entries) in [("role", characters), ("weapon", weapons)] {
+        for (id, resource) in entries {
+            if let Ok(resource_id) = id.parse::<i64>() {
+                if !resource.icon.is_empty() {
+                    icons.insert(resource_id, resource.icon.clone());
+                }
+                if (3..=5).contains(&resource.rank) && !resource.zh.is_empty() {
+                    resources.push(GachaResource {
+                        resource_id,
+                        name: resource.zh,
+                        quality_level: resource.rank,
+                        resource_type: resource_type.to_string(),
+                    });
+                }
             }
         }
     }
@@ -191,6 +231,7 @@ async fn fetch_catalog(client: &reqwest::Client, version: &str) -> Result<AssetC
     Ok(AssetCatalog {
         version: version.to_string(),
         icons,
+        resources,
     })
 }
 

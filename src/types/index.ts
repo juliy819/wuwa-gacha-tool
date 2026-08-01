@@ -11,6 +11,34 @@ export interface GachaRecord {
   count: number;
   time: string;
   is_off_rate: boolean;
+  is_mock: boolean;
+  mock_batch_id: string | null;
+}
+
+export interface GachaResource {
+  resource_id: number;
+  name: string;
+  quality_level: number;
+  resource_type: 'role' | 'weapon';
+}
+
+export interface InsertMockGachaRequest {
+  player_id: string;
+  card_pool_type: string;
+  resource_id: number;
+  pulls: number;
+  time: string;
+}
+
+export interface UpdateMockGachaRequest {
+  id: number;
+  card_pool_type: string;
+  resource_id: number;
+  time: string;
+}
+
+export interface DeleteMockResult {
+  deleted_count: number;
 }
 
 export interface GachaImportResult {

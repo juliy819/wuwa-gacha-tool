@@ -67,7 +67,7 @@ pub fn get_pool_group(pool_type: &str) -> &str {
 
 /// pool type 中文名 → 是否为限定角色池（有 50/50 保底）
 pub fn is_limited_char_pool(pool_type: &str) -> bool {
-    matches!(pool_type, "1" | "8" | "10")
+    matches!(pool_type, "1" | "8" | "10" | "12")
 }
 
 /// pool type ID → API 中文名（用于导出 JSON）

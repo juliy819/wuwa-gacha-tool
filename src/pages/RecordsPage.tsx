@@ -10,14 +10,19 @@ import {
   ChevronRight,
   LayoutGrid,
   LoaderCircle,
+  Pencil,
+  Plus,
   RefreshCw,
   Rows3,
   Search,
   Sparkles,
+  Trash2,
   X,
 } from 'lucide-react';
 import PageTransition from '../components/PageTransition';
+import MockGachaDialog from '../components/MockGachaDialog';
 import ResourceIcon from '../components/ResourceIcon';
+import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 import {
   POOL_TYPES,
@@ -25,6 +30,7 @@ import {
   QUALITY_COLORS,
   QUALITY_LABELS,
   type GachaRecord,
+  type GachaResource,
 } from '../types';
 
 type ViewMode = 'list' | 'grid' | 'table';
@@ -82,7 +88,7 @@ function PityBadge({ pity }: { pity: number }) {
 }
 
 export default function RecordsPage() {
-  const { records, activePlayerId, fetchRecords, loading, error } = useGachaStore();
+  const { records, activePlayerId, fetchRecords, fetchStats, loading, error, addToast } = useGachaStore();
   const [activePoolType, setActivePoolType] = useState('all');
   const [scope, setScope] = useState<RecordScope>('five');
   const [query, setQuery] = useState('');
@@ -91,6 +97,11 @@ export default function RecordsPage() {
   const [itemsPerPage, setItemsPerPage] = useState(50);
   const [pageSizeMenuOpen, setPageSizeMenuOpen] = useState(false);
   const [gridColumns, setGridColumns] = useState(10);
+  const [resources, setResources] = useState<GachaResource[]>([]);
+  const [resourcesLoading, setResourcesLoading] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<GachaRecord | null>(null);
+  const [mutating, setMutating] = useState(false);
   const contentRef = useRef<HTMLElement>(null);
   const previousGridPageSizeRef = useRef(gridColumns * GRID_ROWS_PER_PAGE);
 
@@ -99,6 +110,92 @@ export default function RecordsPage() {
     setCurrentPage(1);
     fetchRecords();
   }, [activePlayerId]);
+
+  const loadResources = async () => {
+    if (resources.length > 0 || resourcesLoading) return;
+    setResourcesLoading(true);
+    try {
+      setResources(await gachaApi.getGachaResources());
+    } catch (resourceError) {
+      addToast('error', `资源目录读取失败: ${String(resourceError)}`);
+    } finally {
+      setResourcesLoading(false);
+    }
+  };
+
+  const openInsertDialog = () => {
+    if (!activePlayerId) {
+      addToast('info', '请先导入记录或选择玩家 UID');
+      return;
+    }
+    setEditingRecord(null);
+    setDialogOpen(true);
+    void loadResources();
+  };
+
+  const openEditDialog = (record: GachaRecord) => {
+    setEditingRecord(record);
+    setDialogOpen(true);
+    void loadResources();
+  };
+
+  const refreshAfterMutation = async () => {
+    await Promise.all([
+      fetchRecords(),
+      activePlayerId ? fetchStats(activePlayerId) : Promise.resolve(),
+    ]);
+  };
+
+  const submitMockRecord = async (value: { card_pool_type: string; resource_id: number; time: string; pulls: number }) => {
+    if (!activePlayerId) return;
+    setMutating(true);
+    try {
+      if (editingRecord?.id) {
+        await gachaApi.updateMockGacha({
+          id: editingRecord.id,
+          card_pool_type: value.card_pool_type,
+          resource_id: value.resource_id,
+          time: value.time,
+        });
+        addToast('success', '模拟记录已更新');
+      } else {
+        const inserted = await gachaApi.insertMockGacha({
+          player_id: activePlayerId,
+          card_pool_type: value.card_pool_type,
+          resource_id: value.resource_id,
+          pulls: value.pulls,
+          time: value.time,
+        });
+        addToast('success', `已插入 ${inserted.length} 条模拟记录`);
+      }
+      setDialogOpen(false);
+      setEditingRecord(null);
+      await refreshAfterMutation();
+    } catch (mutationError) {
+      addToast('error', String(mutationError));
+    } finally {
+      setMutating(false);
+    }
+  };
+
+  const deleteMockRecord = async (record: GachaRecord) => {
+    if (!record.id || !record.is_mock) return;
+    const cascade = record.quality_level === QUALITY.FIVE_STAR;
+    const confirmed = window.confirm(cascade
+      ? `删除 ${record.name} 及其同批次全部补足记录？`
+      : `删除这条 ${record.name} 模拟记录？`);
+    if (!confirmed) return;
+    setMutating(true);
+    try {
+      const result = await gachaApi.deleteMockGacha(record.id);
+      addToast('success', `已删除 ${result.deleted_count} 条模拟记录`);
+      await refreshAfterMutation();
+    } catch (mutationError) {
+      addToast('error', String(mutationError));
+    } finally {
+      setMutating(false);
+    }
+  };
 
   useEffect(() => {
     const content = contentRef.current;
@@ -223,24 +320,29 @@ export default function RecordsPage() {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="记录布局">
-            {([
-              ['list', '列表视图', AlignJustify],
-              ['grid', '宫格视图', LayoutGrid],
-              ['table', '表格视图', Rows3],
-            ] as const).map(([mode, label, Icon]) => (
-              <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
-                  viewMode === mode ? 'bg-white/[0.1] text-tide' : 'text-wave hover:bg-white/[0.04] hover:text-tide'
-                }`}
-                title={label}
-                aria-label={label}
-              >
-                <Icon size={14} />
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <button onClick={openInsertDialog} disabled={!activePlayerId} className="tide-btn flex h-9 items-center gap-2 px-3 text-xs" title="插入五星记录">
+              <Plus size={14} />插入五星
+            </button>
+            <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="记录布局">
+              {([
+                ['list', '列表视图', AlignJustify],
+                ['grid', '宫格视图', LayoutGrid],
+                ['table', '表格视图', Rows3],
+              ] as const).map(([mode, label, Icon]) => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
+                    viewMode === mode ? 'bg-white/[0.1] text-tide' : 'text-wave hover:bg-white/[0.04] hover:text-tide'
+                  }`}
+                  title={label}
+                  aria-label={label}
+                >
+                  <Icon size={14} />
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
@@ -299,12 +401,11 @@ export default function RecordsPage() {
               )}
 
               <div className="relative min-w-[180px] flex-1 md:max-w-[320px]">
-                <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-wave" />
                 <input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="搜索名称、卡池或日期"
-                  className="glass-input h-8 w-full pl-8 pr-8 text-xs"
+                  className="glass-input h-8 w-full px-3 pr-8 text-xs"
                 />
                 {query && (
                   <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-wave hover:text-tide" title="清除搜索">
@@ -401,7 +502,7 @@ export default function RecordsPage() {
                 )}
 
                 {viewMode === 'table' && (
-                  <table className="w-full min-w-[720px] table-fixed text-xs">
+                  <table className="w-full min-w-[820px] table-fixed text-xs">
                     <thead className="sticky top-0 z-10 bg-[#1f1f1f] text-wave">
                       <tr className="border-b border-white/[0.05]">
                         <th className="w-[154px] px-3 py-2.5 text-left font-medium">时间</th>
@@ -410,6 +511,7 @@ export default function RecordsPage() {
                         <th className="w-[70px] px-3 py-2.5 text-left font-medium">类型</th>
                         <th className="w-[70px] px-3 py-2.5 text-center font-medium">品质</th>
                         <th className="w-[86px] px-3 py-2.5 text-center font-medium">池内抽数</th>
+                        <th className="w-[84px] px-3 py-2.5 text-center font-medium">操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
@@ -424,12 +526,21 @@ export default function RecordsPage() {
                               <div className="flex items-center gap-2">
                                 <RecordAvatar record={record} size="sm" />
                                 <span className="truncate text-tide">{record.name}</span>
+                                {record.is_mock && <span className="rounded bg-white/[0.07] px-1.5 py-0.5 text-[10px] text-wave">模拟</span>}
                                 {record.is_off_rate && <span className="text-[10px] text-[#d99a9a]">歪</span>}
                               </div>
                             </td>
                             <td className="px-3 py-2 text-wave">{record.resource_type === 'role' ? '角色' : '武器'}</td>
                             <td className="px-3 py-2 text-center" style={{ color }}>{QUALITY_LABELS[record.quality_level]}</td>
                             <td className="px-3 py-2 text-center">{isFive ? <PityBadge pity={pity} /> : <span className="text-wave">-</span>}</td>
+                            <td className="px-3 py-2">
+                              {record.is_mock ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button type="button" onClick={() => openEditDialog(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="编辑模拟记录"><Pencil size={13} /></button>
+                                  <button type="button" onClick={() => void deleteMockRecord(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><Trash2 size={13} /></button>
+                                </div>
+                              ) : <div className="text-center text-white/15">-</div>}
+                            </td>
                           </tr>
                         );
                       })}
@@ -507,6 +618,16 @@ export default function RecordsPage() {
           </main>
         </div>
       </div>
+      <MockGachaDialog
+        open={dialogOpen}
+        record={editingRecord}
+        initialPoolType={activePoolType === 'all' ? '1' : activePoolType}
+        resources={resources}
+        loadingResources={resourcesLoading}
+        submitting={mutating}
+        onClose={() => { setDialogOpen(false); setEditingRecord(null); }}
+        onSubmit={submitMockRecord}
+      />
     </PageTransition>
   );
 }
