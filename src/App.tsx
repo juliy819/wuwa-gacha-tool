@@ -9,6 +9,7 @@ import Home from './pages/Home';
 import RecordsPage from './pages/RecordsPage';
 import SettingsPage from './pages/SettingsPage';
 import { useGachaStore } from './store/useGachaStore';
+import { useUpdateStore } from './store/useUpdateStore';
 
 function AnimatedRoutes() {
   const location = useLocation();
@@ -25,10 +26,14 @@ function AnimatedRoutes() {
 
 export default function App() {
   const { toastMessages, removeToast, fetchPools, fetchSettings } = useGachaStore();
+  const autoCheckUpdate = useUpdateStore(s => s.autoCheck);
 
   useEffect(() => {
     fetchSettings();
     fetchPools();
+    // 延迟 3s 异步检查更新，避免与启动初始化抢资源
+    const timer = setTimeout(() => { autoCheckUpdate(); }, 3000);
+    return () => clearTimeout(timer);
   }, []);
 
   return (

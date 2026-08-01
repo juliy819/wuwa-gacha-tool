@@ -70,15 +70,6 @@ pub fn is_limited_char_pool(pool_type: &str) -> bool {
     matches!(pool_type, "1" | "8" | "10")
 }
 
-/// 从 API 返回的中文 cardPoolType 反查 pool type ID
-pub fn pool_type_from_api_name(name: &str) -> String {
-    POOL_TYPES
-        .iter()
-        .find(|(n, _)| *n == name)
-        .map(|(_, t)| t.to_string())
-        .unwrap_or_else(|| name.to_string())
-}
-
 /// pool type ID → API 中文名（用于导出 JSON）
 pub fn pool_type_to_api_name(pool_type: &str) -> &str {
     POOL_TYPES

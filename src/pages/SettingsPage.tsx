@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open, save } from '@tauri-apps/plugin-dialog';
+import { type Update } from '@tauri-apps/plugin-updater';
+import { relaunch } from '@tauri-apps/plugin-process';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { useUpdateStore } from '../store/useUpdateStore';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -10,6 +15,7 @@ import {
   FolderOpen,
   Info,
   LoaderCircle,
+  RefreshCw,
   Save,
   Trash2,
   X,
@@ -36,6 +42,10 @@ export default function SettingsPage() {
   const [confirmationText, setConfirmationText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [lastBackupPath, setLastBackupPath] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
+  const { availableUpdate, checking: checkingUpdate, manualCheck } = useUpdateStore();
+  const [updating, setUpdating] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState(0);
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -209,6 +219,52 @@ export default function SettingsPage() {
     }
   };
 
+  const handleCheckUpdate = async () => {
+    const update = await manualCheck();
+    if (update?.available) {
+      setUpdateInfo(update);
+    } else if (update) {
+      addToast('success', '已是最新版本');
+    } else {
+      addToast('error', '检查更新失败，请检查网络连接后重试');
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!updateInfo) return;
+    setUpdating(true);
+    setUpdateProgress(0);
+    try {
+      let totalSize = 0;
+      let downloaded = 0;
+      await updateInfo.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            totalSize = event.data.contentLength ?? 0;
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            if (totalSize > 0) {
+              setUpdateProgress(Math.min(Math.round((downloaded / totalSize) * 100), 99));
+            }
+            break;
+        }
+      });
+      setUpdateProgress(100);
+      await relaunch();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      addToast('error', `更新失败: ${msg}`);
+      setUpdating(false);
+    }
+  };
+
+  const closeUpdateModal = () => {
+    if (updating) return;
+    setUpdateInfo(null);
+    setUpdateProgress(0);
+  };
+
   return (
     <PageTransition>
       <div className="h-full overflow-y-auto overflow-x-hidden">
@@ -274,8 +330,22 @@ export default function SettingsPage() {
 
               <section className="border-t border-white/[0.06] px-1 pt-4 text-xs text-wave">
                 <div className="flex items-center justify-between">
-                  <span className="text-tide-dim">Wuwa Gacha Tool</span>
-                  <span>v{packageInfo.version}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-tide-dim">Wuwa Gacha Tool v{packageInfo.version}</span>
+                    {availableUpdate && !updateInfo && (
+                      <span className="rounded-sm bg-[#6faaa0]/10 px-1.5 py-0.5 text-[10px] text-[#8fc8be]">
+                        有新版本 v{availableUpdate.version}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleCheckUpdate}
+                    disabled={checkingUpdate}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide disabled:opacity-50"
+                  >
+                    {checkingUpdate ? <LoaderCircle size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    {checkingUpdate ? '检查中' : '检查更新'}
+                  </button>
                 </div>
                 <p className="mt-2 leading-5">数据仅保存在本机，不会上传到服务器。</p>
               </section>
@@ -402,6 +472,60 @@ export default function SettingsPage() {
                   >
                     {deleting ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
                     {deleting ? '备份并删除中' : '备份并删除'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {updateInfo && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(event) => { if (event.currentTarget === event.target) closeUpdateModal(); }}
+          >
+            <div className="w-full max-w-md rounded-lg border border-white/[0.08] bg-[#242424] shadow-2xl">
+              <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-md bg-[#6faaa0]/10 p-2 text-[#8fc8be]"><RefreshCw size={18} /></div>
+                  <div>
+                    <h2 className="text-base font-medium text-tide">发现新版本</h2>
+                    <p className="mt-1 text-xs text-wave">v{packageInfo.version} → v{updateInfo.version}</p>
+                  </div>
+                </div>
+                <button onClick={closeUpdateModal} disabled={updating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>
+              </div>
+
+              <div className="p-5">
+                {updateInfo.body && (
+                  <div className="update-notes mb-4 max-h-60 overflow-y-auto rounded-md border border-white/[0.06] bg-white/[0.02] p-3 text-xs leading-5 text-wave">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{updateInfo.body}</ReactMarkdown>
+                  </div>
+                )}
+
+                {updating && (
+                  <div className="mb-4">
+                    <div className="mb-1.5 flex items-center justify-between text-[11px] text-wave">
+                      <span>{updateProgress < 100 ? '下载中' : '安装中'}...</span>
+                      <span>{updateProgress}%</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-white/[0.06]">
+                      <div className="h-full rounded-full bg-[#6faaa0] transition-all" style={{ width: `${updateProgress}%` }} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-1">
+                  <button onClick={closeUpdateModal} disabled={updating} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">以后再说</button>
+                  <button
+                    onClick={handleInstallUpdate}
+                    disabled={updating}
+                    className="flex items-center gap-2 rounded-md bg-[#5a8a82] px-4 py-2 text-sm text-white hover:bg-[#6a9a92] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {updating ? <LoaderCircle size={14} className="animate-spin" /> : <Download size={14} />}
+                    {updating ? '更新中' : '立即更新'}
                   </button>
                 </div>
               </div>
