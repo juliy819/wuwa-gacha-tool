@@ -31,6 +31,11 @@ export const gachaApi = {
     return invoke('get_all_records', { playerId });
   },
 
+  // 导出指定玩家的抽卡数据为 JSON 文件
+  exportGachaJson: (playerId: string, filePath: string): Promise<void> => {
+    return invoke('export_gacha_json', { playerId, filePath });
+  },
+
   // 获取所有玩家 ID
   getPools: (): Promise<string[]> => {
     return invoke('get_pools');

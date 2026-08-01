@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, save } from '@tauri-apps/plugin-dialog';
 import {
   AlertTriangle,
   CheckCircle2,
   Clipboard,
   Database,
+  Download,
   FolderOpen,
   Info,
   LoaderCircle,
@@ -193,6 +194,21 @@ export default function SettingsPage() {
     }
   };
 
+  const handleExport = async (playerId: string) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const path = await save({
+        defaultPath: `uid_${playerId}_${today}.json`,
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!path) return;
+      await gachaApi.exportGachaJson(playerId, path);
+      addToast('success', '导出成功');
+    } catch (e) {
+      addToast('error', `导出失败: ${String(e)}`);
+    }
+  };
+
   return (
     <PageTransition>
       <div className="h-full overflow-y-auto overflow-x-hidden">
@@ -318,7 +334,10 @@ export default function SettingsPage() {
                               </div>
                             )}
                           </div>
-                          <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><Trash2 size={14} /></button>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button onClick={() => handleExport(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><Download size={14} /></button>
+                            <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><Trash2 size={14} /></button>
+                          </div>
                         </div>
                       );
                     })}

@@ -15,6 +15,7 @@
     "core:window:allow-unmaximize",
     "core:window:allow-is-maximized",
     "dialog:allow-open",
+    "dialog:allow-save",
     "shell:allow-open"
   ]
 }

@@ -79,6 +79,15 @@ pub fn pool_type_from_api_name(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+/// pool type ID → API 中文名（用于导出 JSON）
+pub fn pool_type_to_api_name(pool_type: &str) -> &str {
+    POOL_TYPES
+        .iter()
+        .find(|(_, t)| *t == pool_type)
+        .map(|(n, _)| *n)
+        .unwrap_or("")
+}
+
 /// 从 URL 解析出的参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GachaParams {
