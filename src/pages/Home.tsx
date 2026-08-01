@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Folder, Link, Scan, Sparkles, Upload } from 'lucide-react';
+import { Clipboard, Folder, Link, LoaderCircle, Scan, Sparkles, Upload } from 'lucide-react';
 import HomeDashboard from '../components/HomeDashboard';
 import PageTransition from '../components/PageTransition';
 import { useClickRipple } from '../hooks/useClickRipple';
+import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 
 type ScanMode = 'dir' | 'url' | 'json';
@@ -12,6 +13,7 @@ type ScanMode = 'dir' | 'url' | 'json';
 export default function Home() {
   const {
     activePlayerId,
+    addToast,
     fetchStats,
     fetchRecords,
     fetchPools,
@@ -30,6 +32,9 @@ export default function Home() {
   const [gameDirInput, setGameDirInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [jsonPath, setJsonPath] = useState('');
+  const [extractedUrl, setExtractedUrl] = useState('');
+  const [extractingUrl, setExtractingUrl] = useState(false);
+  const [urlExtractError, setUrlExtractError] = useState('');
 
   useEffect(() => {
     fetchSettings();
@@ -46,6 +51,8 @@ export default function Home() {
     setGameDirInput(settings?.game_dir || '');
     setUrlInput('');
     setJsonPath('');
+    setExtractedUrl('');
+    setUrlExtractError('');
     setScanMode('dir');
     setShowScanModal(true);
   };
@@ -73,6 +80,32 @@ export default function Home() {
     if (!jsonPath) return;
     await importJson(jsonPath);
     if (!useGachaStore.getState().error) setShowScanModal(false);
+  };
+
+  const handleExtractUrl = async () => {
+    const dir = gameDirInput.trim() || settings?.game_dir || '';
+    if (!dir) return;
+    setExtractingUrl(true);
+    setUrlExtractError('');
+    try {
+      const url = await gachaApi.decodeLog(dir);
+      setExtractedUrl(url);
+    } catch (e) {
+      setExtractedUrl('');
+      setUrlExtractError(String(e));
+    } finally {
+      setExtractingUrl(false);
+    }
+  };
+
+  const handleCopyUrl = async () => {
+    if (!extractedUrl) return;
+    try {
+      await navigator.clipboard.writeText(extractedUrl);
+      addToast('success', '抽卡链接已复制');
+    } catch {
+      addToast('error', '复制失败');
+    }
   };
 
   return (
@@ -158,6 +191,30 @@ export default function Home() {
                     />
                     <p className="mt-1 text-xs text-wave">目录下需要包含 Client/Saved/Logs/Client.log 文件</p>
                   </label>
+
+                  <div className="mt-3">
+                    <button
+                      onClick={handleExtractUrl}
+                      disabled={extractingUrl || !gameDirInput.trim()}
+                      className="flex items-center gap-2 rounded-lg border border-white/[0.1] px-3 py-1.5 text-xs text-wave transition-colors hover:text-tide disabled:opacity-50"
+                    >
+                      {extractingUrl ? <LoaderCircle size={12} className="animate-spin" /> : <Link size={12} />}
+                      {extractingUrl ? '提取中...' : '提取抽卡链接'}
+                    </button>
+
+                    {urlExtractError && (
+                      <p className="mt-2 text-xs text-[#d99a9a]">{urlExtractError}</p>
+                    )}
+
+                    {extractedUrl && (
+                      <div className="mt-2 flex items-center gap-2 rounded-md border border-white/[0.06] bg-white/[0.03] px-3 py-2">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-tide" title={extractedUrl}>{extractedUrl}</span>
+                        <button onClick={handleCopyUrl} className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-wave hover:bg-white/[0.05] hover:text-tide" title="复制链接">
+                          <Clipboard size={12} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
