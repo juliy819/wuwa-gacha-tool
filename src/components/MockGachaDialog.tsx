@@ -23,6 +23,22 @@ type Props = {
 
 const ROLE_FIVE_STAR_POOLS = new Set(['1', '3', '5', '6', '7', '8', '10', '12']);
 
+// 常驻五星角色（角色常驻唤取 / 新手自选唤取可选）
+const STANDARD_CHARACTERS = new Set(['维里奈', '白芷', '卡卡罗', '安可', '凌阳']);
+
+// 常驻五星武器（武器常驻唤取可选，武器活动唤取等排除）
+const STANDARD_WEAPONS = new Set([
+  '千古洑流', '浩境粼光', '停驻之烟', '擎渊怒涛', '漪澜浮录',
+  '镭射切变', '源能机锋', '相位涟漪', '脉冲协臂', '玻色星仪',
+]);
+
+// 角色常驻唤取 / 新手自选唤取：仅可选常驻五星角色
+const STANDARD_ROLE_POOLS = new Set(['3', '6', '7']);
+// 武器常驻唤取：仅可选常驻五星武器
+const STANDARD_WEAPON_POOLS = new Set(['4']);
+// 武器活动唤取 / 武器新旅唤取 / 武器联动唤取 / 武器忆旅唤取：排除常驻五星武器
+const EVENT_WEAPON_POOLS = new Set(['2', '9', '11', '13']);
+
 type TimeParts = {
   date: string;
   hour: string;
@@ -105,12 +121,21 @@ export default function MockGachaDialog({
   const availableResources = useMemo(() => {
     const quality = record?.quality_level ?? 5;
     const expectedType = ROLE_FIVE_STAR_POOLS.has(poolType) ? 'role' : 'weapon';
-    return resources.filter((resource) =>
-      resource.quality_level === quality
-      && (quality !== 5 || resource.resource_type === expectedType)
+    return resources.filter((resource) => {
+      if (resource.quality_level !== quality) return false;
       // 漂泊者是主角，不可从唤取中获得
-      && !(resource.resource_type === 'role' && resource.name.startsWith('漂泊者')),
-    );
+      if (resource.resource_type === 'role' && resource.name.startsWith('漂泊者')) return false;
+      if (quality !== 5) return true;
+      if (resource.resource_type !== expectedType) return false;
+      // 角色常驻唤取 / 新手自选唤取：仅可选常驻五星角色
+      if (STANDARD_ROLE_POOLS.has(poolType)) return STANDARD_CHARACTERS.has(resource.name);
+      // 武器常驻唤取：仅可选常驻五星武器
+      if (STANDARD_WEAPON_POOLS.has(poolType)) return STANDARD_WEAPONS.has(resource.name);
+      // 武器活动唤取 / 武器新旅唤取 / 武器联动唤取 / 武器忆旅唤取：排除常驻五星武器
+      if (EVENT_WEAPON_POOLS.has(poolType)) return !STANDARD_WEAPONS.has(resource.name);
+      // 角色活动唤取 / 新手唤取 / 角色新旅唤取 / 角色联动唤取 / 角色忆旅唤取：所有五星角色（漂泊者已排除）
+      return true;
+    });
   }, [resources, record?.quality_level, poolType]);
 
   const selectedResource = useMemo(
