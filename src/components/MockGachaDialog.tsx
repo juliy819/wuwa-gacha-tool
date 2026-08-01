@@ -107,7 +107,9 @@ export default function MockGachaDialog({
     const expectedType = ROLE_FIVE_STAR_POOLS.has(poolType) ? 'role' : 'weapon';
     return resources.filter((resource) =>
       resource.quality_level === quality
-      && (quality !== 5 || resource.resource_type === expectedType),
+      && (quality !== 5 || resource.resource_type === expectedType)
+      // 漂泊者是主角，不可从唤取中获得
+      && !(resource.resource_type === 'role' && resource.name.startsWith('漂泊者')),
     );
   }, [resources, record?.quality_level, poolType]);
 
