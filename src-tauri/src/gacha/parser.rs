@@ -53,6 +53,8 @@ pub struct RecordSummary {
     pub record_count: usize,
     pub earliest_time: String,
     pub latest_time: String,
+    pub last_imported_at: Option<String>,
+    pub is_inferred: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

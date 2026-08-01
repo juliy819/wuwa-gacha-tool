@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { gachaApi } from '../services/tauri-api';
-import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, ToastMessage } from '../types';
+import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, RecordSummary, ToastMessage } from '../types';
 
 interface GachaStore {
   records: GachaRecord[];
   stats: GachaStats | null;
   pools: string[];
+  summaries: RecordSummary[];
   settings: GameSettings | null;
   loading: boolean;
   scanning: boolean;
@@ -17,6 +18,7 @@ interface GachaStore {
   fetchRecords: () => Promise<void>;
   fetchStats: (playerId?: string) => Promise<void>;
   fetchPools: () => Promise<void>;
+  fetchSummaries: () => Promise<void>;
   fetchSettings: () => Promise<void>;
   saveGameDir: (dir: string) => Promise<void>;
   scanGacha: (gameDir: string) => Promise<void>;
@@ -33,6 +35,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   records: [],
   stats: null,
   pools: [],
+  summaries: [],
   settings: null,
   loading: false,
   scanning: false,
@@ -62,9 +65,21 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
     }
   },
 
+  fetchSummaries: async () => {
+    try {
+      const summaries = await gachaApi.getRecordSummaries();
+      set({ summaries });
+    } catch {
+      // 静默失败
+    }
+  },
+
   fetchPools: async () => {
     try {
-      const pools = await gachaApi.getPools();
+      const [pools] = await Promise.all([
+        gachaApi.getPools(),
+        get().fetchSummaries(),
+      ]);
       set({ pools, initialized: true });
       const { activePlayerId } = get();
       if (!activePlayerId || !pools.includes(activePlayerId)) {
@@ -108,7 +123,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         activePlayerId: playerId || get().activePlayerId,
       });
 
-      await get().fetchPools();
+      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
       if (playerId) {
         await get().fetchStats(playerId);
       }
@@ -138,7 +153,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         activePlayerId: playerId || get().activePlayerId,
       });
 
-      await get().fetchPools();
+      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
       if (playerId) {
         await get().fetchStats(playerId);
       }
@@ -168,7 +183,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         activePlayerId: playerId || get().activePlayerId,
       });
 
-      await get().fetchPools();
+      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
       if (playerId) {
         await get().fetchStats(playerId);
       }
@@ -194,7 +209,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       if (result.backup_path) {
         get().addToast('info', `删除前备份已保存：${result.backup_path}`);
       }
-      await get().fetchPools();
+      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
       return result;
     } catch (e) {
       get().addToast('error', `清空记录失败: ${String(e)}`);
@@ -215,6 +230,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       get().fetchSettings(),
       get().fetchPools(),
       get().fetchRecords(),
+      get().fetchSummaries(),
     ]);
     if (activePlayerId) {
       await get().fetchStats(activePlayerId);

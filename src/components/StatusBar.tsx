@@ -1,21 +1,141 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { getVersion } from '@tauri-apps/api/app';
+import { AlertTriangle, CalendarRange, DatabaseZap, Info, User, AlertOctagon } from 'lucide-react';
+import {
+  getSyncFreshness,
+  daysSince,
+  SYNC_WARN_DAYS,
+  SYNC_DANGER_DAYS,
+  type SyncFreshness as SyncFreshnessType,
+} from '../lib/utils';
+import { useGachaStore } from '../store/useGachaStore';
 
 export default function StatusBar() {
   const [appVersion, setAppVersion] = useState('');
+  const { summaries, activePlayerId, records } = useGachaStore();
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
+  const activeSummary = useMemo(
+    () => summaries.find((summary) => summary.player_id === activePlayerId),
+    [summaries, activePlayerId],
+  );
+
+  // 活跃玩家的记录范围（records 已按 activePlayerId 过滤）
+  const recordRange = useMemo(() => {
+    if (records.length === 0) return null;
+    const orderedTimes = records.map((record) => record.time).sort((a, b) => a.localeCompare(b));
+    return `${orderedTimes[0].slice(0, 10)} 至 ${orderedTimes[orderedTimes.length - 1].slice(0, 10)}`;
+  }, [records]);
+
+  const lastImported = useMemo(() => {
+    if (!activeSummary?.last_imported_at) return null;
+    const freshness = getSyncFreshness(activeSummary.last_imported_at, activeSummary.is_inferred);
+    return {
+      date: activeSummary.last_imported_at.slice(0, 10),
+      isInferred: activeSummary.is_inferred === true,
+      freshness,
+      daysAgo: daysSince(activeSummary.last_imported_at),
+    };
+  }, [activeSummary]);
+
+  const activeRecordCount = activeSummary?.record_count ?? records.length;
+
+  // 根据 freshness 返回颜色类
+  const stalePalette = (freshness: SyncFreshnessType) => {
+    switch (freshness) {
+      case 'danger':
+        return {
+          text: 'text-[#d99a9a]',
+          icon: 'text-[#d84848]',
+          accent: 'text-[#d84848]',
+          label: '可能缺数据',
+          hint: `距上次同步已 ${lastImported?.daysAgo ?? 0} 天（超过 ${SYNC_DANGER_DAYS} 天阈值）。官方链接通常只保留近 6 个月，这段时间可能已存在数据遗漏（若期间未抽卡则不会丢数据）。`,
+        };
+      case 'warn':
+        return {
+          text: 'text-[#d9bd9a]',
+          icon: 'text-[#d09960]',
+          accent: 'text-[#d09960]',
+          label: '久未同步',
+          hint: `距上次同步已 ${lastImported?.daysAgo ?? 0} 天（超过 ${SYNC_WARN_DAYS} 天阈值）。建议尽快同步以免丢失 6 个月临界区的缺口。`,
+        };
+      default:
+        return { text: 'text-tide-dim', icon: 'text-[#c9ab78]', accent: '', label: '', hint: '' };
+    }
+  };
+
+  const palette = lastImported ? stalePalette(lastImported.freshness) : null;
+
   return (
     <div
-      className="flex items-center justify-between px-6 py-1.5 text-xs text-wave border-t border-[rgba(255,255,255,0.06)]"
+      className="flex items-center justify-between gap-4 px-6 py-1.5 text-xs text-wave border-t border-[rgba(255,255,255,0.06)]"
       style={{ background: '#1a1a1a' }}
     >
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span>Wuwa Gacha Tool{appVersion && ` v${appVersion}`}</span>
+
+        {activePlayerId && (
+          <>
+            <span className="h-3 w-px bg-white/10" />
+            <span className="flex items-center gap-1.5">
+              <User size={11} className="text-[#8fc8be]" />
+              <span className="tabular-nums text-tide-dim">UID {activePlayerId}</span>
+            </span>
+            {activeRecordCount > 0 && (
+              <>
+                <span className="h-3 w-px bg-white/10" />
+                <span>{activeRecordCount.toLocaleString()} 条记录</span>
+              </>
+            )}
+            {recordRange && (
+              <>
+                <span className="h-3 w-px bg-white/10" />
+                <span className="flex items-center gap-1.5">
+                  <CalendarRange size={11} className="text-[#8fc8be]" />
+                  <span className="tabular-nums text-tide-dim">{recordRange}</span>
+                </span>
+              </>
+            )}
+            {lastImported && palette && (
+              <>
+                <span className="h-3 w-px bg-white/10" />
+                <span
+                  className={`flex items-center gap-1.5 ${lastImported.freshness !== 'fresh' ? palette.text : ''}`}
+                  title={lastImported.freshness !== 'fresh' ? palette.hint : undefined}
+                >
+                  <DatabaseZap
+                    size={11}
+                    className={lastImported.freshness === 'fresh' ? 'text-[#c9ab78]' : palette.icon}
+                  />
+                  <span>最近同步</span>
+                  <span
+                    className={`tabular-nums ${lastImported.freshness === 'fresh' ? 'text-tide-dim' : palette.text}`}
+                  >
+                    {lastImported.date}
+                  </span>
+                  {lastImported.freshness === 'warn' && (
+                    <AlertTriangle size={11} className={palette.icon} />
+                  )}
+                  {lastImported.freshness === 'danger' && (
+                    <AlertOctagon size={11} className={palette.icon} />
+                  )}
+                  {lastImported.isInferred && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1 py-px text-[9px] text-[#c9ab78]"
+                      title="升级前已导入数据，同步时间由记录范围推断"
+                    >
+                      <Info size={8} /> 推断
+                    </span>
+                  )}
+                </span>
+              </>
+            )}
+          </>
+        )}
       </div>
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">

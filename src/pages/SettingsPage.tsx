@@ -8,10 +8,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useUpdateStore } from '../store/useUpdateStore';
 import {
+  AlertOctagon,
   AlertTriangle,
   CheckCircle2,
   Clipboard,
   Database,
+  DatabaseZap,
   Download,
   FolderOpen,
   Github,
@@ -27,6 +29,13 @@ import { getVersion } from '@tauri-apps/api/app';
 import PageTransition from '../components/PageTransition';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
+import {
+  getSyncFreshness,
+  daysSince,
+  SYNC_WARN_DAYS,
+  SYNC_DANGER_DAYS,
+  type SyncFreshness,
+} from '../lib/utils';
 import type { GameDirValidation, RecordSummary } from '../types';
 
 type DeleteTarget = { playerId: string | null };
@@ -43,13 +52,12 @@ function stripUpdateNotesFooter(body: string): string {
 }
 
 export default function SettingsPage() {
-  const { settings, fetchSettings, saveGameDir, clearRecords, pools, addToast } = useGachaStore();
+  const { settings, fetchSettings, saveGameDir, clearRecords, pools, addToast, summaries: storeSummaries, fetchSummaries } = useGachaStore();
   const [gameDirInput, setGameDirInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<GameDirValidation | null>(null);
-  const [summaries, setSummaries] = useState<RecordSummary[]>([]);
-  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryLoading, setSummaryLoading] = useState(pools.length > 0 && storeSummaries.length === 0);
   const [summaryError, setSummaryError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [confirmationText, setConfirmationText] = useState('');
@@ -103,29 +111,36 @@ export default function SettingsPage() {
     };
   }, [gameDirInput]);
 
+  // 订阅 store.summaries；进入设置页时确保拉取过一次（有 pools 但 summaries 空时触发）
   useEffect(() => {
     if (pools.length === 0) {
-      setSummaries([]);
       setSummaryLoading(false);
       setSummaryError(false);
       return;
     }
-
+    if (storeSummaries.length > 0) {
+      setSummaryLoading(false);
+      setSummaryError(false);
+      return;
+    }
     let cancelled = false;
     setSummaryLoading(true);
     setSummaryError(false);
-    gachaApi.getRecordSummaries()
-      .then((result) => {
-        if (!cancelled) setSummaries(result);
+    fetchSummaries()
+      .then(() => {
+        if (!cancelled) setSummaryLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setSummaryError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setSummaryLoading(false);
+        if (!cancelled) {
+          setSummaryError(true);
+          setSummaryLoading(false);
+        }
       });
     return () => { cancelled = true; };
-  }, [pools]);
+  }, [pools, storeSummaries.length, fetchSummaries]);
+
+  // 直接用 store 的 summaries，保证删除/清空/新增玩家后立即同步
+  const summaries = storeSummaries;
 
   useEffect(() => {
     if (!deleteTarget) return;
@@ -163,11 +178,68 @@ export default function SettingsPage() {
   const selectedSummary = deleteTarget?.playerId ? summaryByPlayer.get(deleteTarget.playerId) : null;
   const expectedConfirmation = deleteTarget?.playerId ?? '清空全部数据';
   const targetRecordCount = deleteTarget?.playerId ? selectedSummary?.record_count ?? 0 : totalRecords;
-  const targetTimeRange = selectedSummary
-    ? `${selectedSummary.earliest_time.slice(0, 10)} 至 ${selectedSummary.latest_time.slice(0, 10)}`
-    : summaries.length > 0
-      ? `${summaries.reduce((min, item) => item.earliest_time < min ? item.earliest_time : min, summaries[0].earliest_time).slice(0, 10)} 至 ${summaries.reduce((max, item) => item.latest_time > max ? item.latest_time : max, summaries[0].latest_time).slice(0, 10)}`
-      : '';
+
+  // 展示用的辅助函数：每个玩家 → 记录范围（完整日期段） + 最近同步时间（单点）
+  const formatSummaryMeta = (summary: RecordSummary | undefined) => {
+    if (!summary) return { recordRange: '', lastImportedAt: '', hasImport: false, impInferred: false };
+    const recordRange = `${summary.earliest_time.slice(0, 10)} 至 ${summary.latest_time.slice(0, 10)}`;
+    const hasImport = Boolean(summary.last_imported_at);
+    const lastImportedAt = hasImport ? summary.last_imported_at!.slice(0, 10) : '';
+    return {
+      recordRange,
+      lastImportedAt,
+      hasImport,
+      impInferred: summary.is_inferred === true,
+    };
+  };
+
+  // 清空全部时聚合所有玩家的记录范围和最近同步时间
+  const overallMeta = useMemo(() => {
+    if (summaries.length === 0) return { recordRange: '', lastImportedAt: '', hasImport: false, impInferred: false };
+    const earliestRecord = summaries.reduce((min, item) => (item.earliest_time < min ? item.earliest_time : min), summaries[0].earliest_time);
+    const latestRecord = summaries.reduce((max, item) => (item.latest_time > max ? item.latest_time : max), summaries[0].latest_time);
+    const lastImported = summaries
+      .filter((item) => item.last_imported_at)
+      .map((item) => item.last_imported_at!)
+      .reduce((max, t) => (t > max ? t : max), '');
+    return {
+      recordRange: `${earliestRecord.slice(0, 10)} 至 ${latestRecord.slice(0, 10)}`,
+      lastImportedAt: lastImported ? lastImported.slice(0, 10) : '',
+      hasImport: Boolean(lastImported),
+      impInferred: summaries.every((item) => item.is_inferred === true),
+    };
+  }, [summaries]);
+
+  const targetMeta = selectedSummary ? formatSummaryMeta(selectedSummary) : overallMeta;
+
+  // 玩家 freshness 分级（warn: 120~180 天久未同步 / danger: >180 天可能缺数据）
+  const freshnessInfo = useMemo(() => {
+    const map = new Map<string, { freshness: SyncFreshness; daysAgo: number }>();
+    summaries.forEach((summary) => {
+      const freshness = getSyncFreshness(summary.last_imported_at, summary.is_inferred);
+      const daysAgo = summary.last_imported_at ? daysSince(summary.last_imported_at) : 0;
+      map.set(summary.player_id, { freshness, daysAgo });
+    });
+    return map;
+  }, [summaries]);
+
+  // 是否有任何一个玩家处于 warn 或 danger（用来切换顶部提示条的颜色）
+  const anyWarn = useMemo(
+    () => summaries.some((summary) => getSyncFreshness(summary.last_imported_at, summary.is_inferred) === 'warn'),
+    [summaries],
+  );
+  const anyDanger = useMemo(
+    () => summaries.some((summary) => getSyncFreshness(summary.last_imported_at, summary.is_inferred) === 'danger'),
+    [summaries],
+  );
+  const anyStale = anyWarn || anyDanger;
+
+  const staleCardTip = (freshness: SyncFreshness, daysAgo: number) => {
+    if (freshness === 'danger') {
+      return `距上次同步已 ${daysAgo} 天（超过 ${SYNC_DANGER_DAYS} 天阈值）。官方链接通常只保留近 6 个月，这段时间可能已存在数据遗漏（若期间未抽卡则不会丢数据）。`;
+    }
+    return `距上次同步已 ${daysAgo} 天（超过 ${SYNC_WARN_DAYS} 天阈值）。建议尽快同步以免丢失 6 个月临界区的缺口。`;
+  };
 
   const handleSelectFolder = async () => {
     try {
@@ -417,9 +489,31 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="mt-4 flex items-start gap-2 rounded-md border border-[#c9ab78]/15 bg-[#c9ab78]/[0.05] px-3 py-2.5 text-[11px] leading-5 text-[#c9ab78]">
-                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                <span>官方抽卡链接仅保留近约 6 个月。建议至少每半年同步一次，超期缺口无法自动补回。</span>
+              <div
+                className={`mt-4 flex items-start gap-2 rounded-md border px-3 py-2.5 text-[11px] leading-5 ${
+                  anyDanger
+                    ? 'border-[#d84848]/25 bg-[#d84848]/[0.07] text-[#d99a9a]'
+                    : anyWarn
+                      ? 'border-[#c99a68]/15 bg-[#c99a68]/[0.05] text-[#d9bd9a]'
+                      : 'border-[#c9ab78]/15 bg-[#c9ab78]/[0.05] text-[#c9ab78]'
+                }`}
+              >
+                {anyDanger ? (
+                  <AlertOctagon size={13} className="mt-0.5 shrink-0 text-[#d84848]" />
+                ) : anyWarn ? (
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[#d09960]" />
+                ) : (
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                )}
+                <span>
+                  官方抽卡链接仅保留近约 6 个月。建议至少每半年同步一次，超期缺口无法自动补回。
+                  {anyDanger && (
+                    <span className="ml-2 text-[#d84848]">（检测到超过 {SYNC_DANGER_DAYS} 天未同步，可能已存在数据遗漏）</span>
+                  )}
+                  {!anyDanger && anyWarn && (
+                    <span className="ml-2 text-[#d09960]">（检测到超过 {SYNC_WARN_DAYS} 天未同步，建议尽快同步）</span>
+                  )}
+                </span>
               </div>
 
               {lastBackupPath && (
@@ -447,17 +541,83 @@ export default function SettingsPage() {
                   <div className="divide-y divide-white/[0.05]">
                     {pools.map((playerId) => {
                       const summary = summaryByPlayer.get(playerId);
+                      const f = freshnessInfo.get(playerId);
+                      const freshness = f?.freshness ?? 'fresh';
+                      const isWarn = freshness === 'warn';
+                      const isDanger = freshness === 'danger';
+                      const isStale = isWarn || isDanger;
+                      const tip = isStale ? staleCardTip(freshness, f!.daysAgo) : undefined;
+
+                      // 根据 freshness 选配色
+                      const palette =
+                        isDanger
+                          ? {
+                              border: 'border-[#d84848]/20',
+                              bg: 'bg-[#d84848]/[0.04]',
+                              badge: 'border-[#d84848]/25 bg-[#d84848]/[0.08] text-[#d84848]',
+                              label: '可能缺数据',
+                              icon: 'text-[#d99a9a]',
+                              badgeIcon: AlertOctagon,
+                            }
+                          : isWarn
+                            ? {
+                                border: 'border-[#c99a68]/20',
+                                bg: 'bg-[#c99a68]/[0.04]',
+                                badge: 'border-[#c99a68]/25 bg-[#c99a68]/[0.08] text-[#d09960]',
+                                label: '久未同步',
+                                icon: 'text-[#d9bd9a]',
+                                badgeIcon: AlertTriangle,
+                              }
+                            : null;
+                      const BadgeIcon = palette?.badgeIcon ?? AlertTriangle;
+
                       return (
-                        <div key={playerId} className="flex items-center justify-between gap-3 px-3 py-3">
-                          <div className="min-w-0">
-                            <div className="text-sm text-tide">UID {playerId}</div>
+                        <div
+                          key={playerId}
+                          className={`relative flex items-center justify-between gap-3 px-3 py-3 ${palette ? palette.bg : ''}`}
+                          title={tip}
+                        >
+                          {palette && (
+                            <div className={`pointer-events-none absolute inset-0 rounded-md border ${palette.border}`} />
+                          )}
+                          <div className="relative min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <div className="text-sm text-tide">UID {playerId}</div>
+                              {palette && (
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] ${palette.badge}`}
+                                  title={tip}
+                                >
+                                  <BadgeIcon size={9} /> {palette.label}
+                                </span>
+                              )}
+                            </div>
                             {summary && (
-                              <div className="mt-1 text-[11px] text-wave">
-                                {summary.record_count.toLocaleString()} 条 · {summary.earliest_time.slice(0, 10)} 至 {summary.latest_time.slice(0, 10)}
+                              <div className="mt-1 flex flex-col gap-0.5 text-[11px] text-wave">
+                                <div className="flex items-center gap-1.5">
+                                  <Database size={11} className="text-[#8fc8be]" />
+                                  <span>记录 {summary.record_count.toLocaleString()} 条 · {summary.earliest_time.slice(0, 10)} 至 {summary.latest_time.slice(0, 10)}</span>
+                                </div>
+                                {summary.last_imported_at && (
+                                  <div className="flex items-center gap-1.5">
+                                    <DatabaseZap
+                                      size={11}
+                                      className={palette ? palette.icon : 'text-[#c9ab78]'}
+                                    />
+                                    <span className={palette ? palette.icon : ''}>
+                                      最近同步 {summary.last_imported_at.slice(0, 10)}
+                                      {summary.is_inferred && (
+                                        <span className="ml-1.5 inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1.5 py-px text-[10px] text-[#c9ab78]" title="升级前已导入数据，同步时间由记录范围推断">
+                                          <Info size={9} /> 推断
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
-                          <div className="flex shrink-0 items-center gap-1">
+                          <div className="relative flex shrink-0 items-center gap-1">
                             <button onClick={() => handleExport(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><Download size={14} /></button>
                             <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><Trash2 size={14} /></button>
                           </div>
@@ -508,7 +668,29 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-2 gap-3 border-y border-white/[0.06] py-3 text-sm">
                   <div><div className="text-xs text-wave">记录数量</div><div className="mt-1 font-medium text-tide">{targetRecordCount.toLocaleString()} 条</div></div>
                   <div><div className="text-xs text-wave">涉及玩家</div><div className="mt-1 font-medium text-tide">{deleteTarget.playerId ? 1 : pools.length} 位</div></div>
-                  {targetTimeRange && <div className="col-span-2"><div className="text-xs text-wave">记录范围</div><div className="mt-1 text-tide">{targetTimeRange}</div></div>}
+                  {targetMeta.recordRange && (
+                    <div className="col-span-2">
+                      <div className="text-xs text-wave">记录范围</div>
+                      <div className="mt-1 flex items-center gap-1.5 text-tide">
+                        <Database size={11} className="text-[#8fc8be]" />
+                        {targetMeta.recordRange}
+                      </div>
+                    </div>
+                  )}
+                  {targetMeta.hasImport && (
+                    <div className="col-span-2">
+                      <div className="text-xs text-wave">最近同步</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5 text-tide">
+                        <DatabaseZap size={11} className="text-[#c9ab78]" />
+                        <span className="tabular-nums">{targetMeta.lastImportedAt}</span>
+                        {targetMeta.impInferred && (
+                          <span className="inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1.5 py-px text-[10px] text-[#c9ab78]" title="升级前已导入数据，同步时间由记录范围推断">
+                            <Info size={9} /> 推断
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <label className="block">

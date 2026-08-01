@@ -10,6 +10,15 @@ use crate::gacha::parser::{ClearRecordsResult, GachaRecord, GameSettings, Record
 const STANDARD_FIVE_STAR_CHAR_IDS: &[i64] = &[1104, 1203, 1301, 1405, 1503];
 type OccurrenceKey = (String, String, String, i64, i32, String, i32);
 
+fn current_datetime() -> String {
+    use chrono::{Local, TimeZone};
+    let now = SystemTime::now();
+    let dur = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    // 用 chrono Local 格式化，跟记录时间保持一致
+    let local = Local.timestamp_opt(dur.as_secs() as i64, 0).single().unwrap_or_else(|| Local::now());
+    local.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
 #[derive(Debug, Clone)]
 pub struct MockInsertRequest {
     pub player_id: String,
@@ -114,6 +123,12 @@ impl Database {
                     cache_key TEXT PRIMARY KEY,
                     json TEXT NOT NULL,
                     updated_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS player_import_info (
+                    player_id TEXT PRIMARY KEY,
+                    last_imported_at TEXT,
+                    is_inferred INTEGER NOT NULL DEFAULT 0
                 );
                 ",
             )
@@ -267,6 +282,16 @@ impl Database {
                 player_id, card_pool_type, time, resource_id,
                 quality_level, resource_type, count, occurrence_no
             );
+
+            INSERT OR IGNORE INTO player_import_info (player_id, last_imported_at, is_inferred)
+            SELECT
+                gr.player_id,
+                MAX(gr.time) AS last_imported_at,
+                1 AS is_inferred
+            FROM gacha_records gr
+            LEFT JOIN player_import_info pii ON gr.player_id = pii.player_id
+            WHERE pii.player_id IS NULL
+            GROUP BY gr.player_id;
             "#,
             )
             .map_err(|e| e.to_string())?;
@@ -965,10 +990,12 @@ impl Database {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT player_id, COUNT(*), MIN(time), MAX(time)
-             FROM gacha_records
-             GROUP BY player_id
-             ORDER BY player_id",
+                "SELECT gr.player_id, COUNT(*), MIN(gr.time), MAX(gr.time),
+                        pii.last_imported_at, pii.is_inferred
+                 FROM gacha_records gr
+                 LEFT JOIN player_import_info pii ON gr.player_id = pii.player_id
+                 GROUP BY gr.player_id
+                 ORDER BY gr.player_id",
             )
             .map_err(|e| e.to_string())?;
         let summaries = stmt
@@ -978,12 +1005,55 @@ impl Database {
                     record_count: row.get::<_, i64>(1)? as usize,
                     earliest_time: row.get(2)?,
                     latest_time: row.get(3)?,
+                    last_imported_at: row.get(4)?,
+                    is_inferred: row.get::<_, Option<i32>>(5)?.map(|v| v != 0),
                 })
             })
             .map_err(|e| e.to_string())?
             .filter_map(|result| result.ok())
             .collect();
         Ok(summaries)
+    }
+
+    /// 更新指定玩家的导入时间信息。
+    /// - 无记录：last_imported_at = now，is_inferred=0（真实同步）
+    /// - 当前是推断数据（is_inferred=1）：last_imported_at = now，is_inferred=0（转真实同步）
+    /// - 已有真实同步：仅更新 last_imported_at = now
+    pub fn update_import_info(&self, player_id: &str) -> Result<(), String> {
+        let now = current_datetime();
+        let is_inferred: Option<i32> = self
+            .conn
+            .query_row(
+                "SELECT is_inferred FROM player_import_info WHERE player_id = ?1",
+                params![player_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or(None);
+
+        match is_inferred {
+            None => {
+                self.conn.execute(
+                    "INSERT INTO player_import_info (player_id, last_imported_at, is_inferred)
+                     VALUES (?1, ?2, 0)",
+                    params![player_id, now],
+                ).map_err(|e| e.to_string())?;
+            }
+            Some(flag) if flag != 0 => {
+                self.conn.execute(
+                    "UPDATE player_import_info SET last_imported_at = ?1, is_inferred = 0 WHERE player_id = ?2",
+                    params![now, player_id],
+                ).map_err(|e| e.to_string())?;
+            }
+            _ => {
+                self.conn.execute(
+                    "UPDATE player_import_info SET last_imported_at = ?1 WHERE player_id = ?2",
+                    params![now, player_id],
+                ).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
     }
 
     fn create_backup(&self) -> Result<Option<String>, String> {
@@ -1042,9 +1112,16 @@ impl Database {
                 "DELETE FROM gacha_records WHERE player_id = ?1",
                 params![pid],
             )
+            .map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM player_import_info WHERE player_id = ?1",
+                params![pid],
+            )
             .map_err(|e| e.to_string())?
         } else {
             tx.execute("DELETE FROM gacha_records", [])
+                .map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM player_import_info", [])
                 .map_err(|e| e.to_string())?
         };
         tx.commit().map_err(|e| e.to_string())?;

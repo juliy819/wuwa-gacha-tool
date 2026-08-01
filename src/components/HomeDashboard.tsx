@@ -2,9 +2,7 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   Activity,
-  AlertTriangle,
   BarChart3,
-  CalendarRange,
   CircleDot,
   Crosshair,
   Swords,
@@ -173,30 +171,6 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
         <SummaryMetric label="平均五星抽数" value={<AnimatedCounter value={stats.avg_five_star_pity} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="各卡池分别计算后汇总" icon={<BarChart3 size={13} />} />
         <SummaryMetric label="每个 UP 角色" value={<AnimatedCounter value={stats.avg_up_role_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 角色池整体投入" icon={<UserRoundCheck size={13} />} accent />
         <SummaryMetric label="每把 UP 武器" value={<AnimatedCounter value={stats.avg_up_weapon_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 武器池整体投入" icon={<Swords size={13} />} accent />
-      </motion.section>
-
-      <motion.section
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.04 }}
-        className="flex flex-col gap-3 rounded-lg border border-white/[0.06] bg-[#222222] px-4 py-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div className="flex min-w-0 items-center gap-2 text-xs text-tide-dim">
-          <CalendarRange size={14} className="shrink-0 text-[#8fc8be]" />
-          {recordRange ? (
-            <span>
-              已导入记录：<span className="tabular-nums text-tide">{recordRange.earliest}</span>
-              <span className="mx-1.5 text-wave">至</span>
-              <span className="tabular-nums text-tide">{recordRange.latest}</span>
-            </span>
-          ) : (
-            <span>正在读取记录日期</span>
-          )}
-        </div>
-        <div className="flex min-w-0 items-start gap-2 text-[11px] leading-5 text-[#c9ab78] md:max-w-[560px] md:justify-end">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          <span>官方抽卡链接仅保留近约 6 个月；两次同步间隔超过 6 个月，较早记录可能丢失且无法补回。</span>
-        </div>
       </motion.section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">

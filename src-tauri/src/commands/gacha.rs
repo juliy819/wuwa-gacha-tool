@@ -311,6 +311,8 @@ fn merge_and_load_player(
 ) -> Result<GachaImportResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let stats = db.merge_records(imported_records)?;
+    // 写入/更新真实导入时间（清除推断标记）
+    db.update_import_info(player_id)?;
     let records = db.get_all_records(Some(player_id))?;
     let total_count = records.len();
 

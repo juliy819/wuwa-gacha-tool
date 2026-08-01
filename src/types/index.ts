@@ -56,6 +56,8 @@ export interface RecordSummary {
   record_count: number;
   earliest_time: string;
   latest_time: string;
+  last_imported_at?: string | null;
+  is_inferred?: boolean | null;
 }
 
 export interface ClearRecordsResult {
