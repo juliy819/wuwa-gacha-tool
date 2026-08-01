@@ -34,6 +34,8 @@ interface FiveStarResult {
 }
 
 const CORE_POOL_TYPES = new Set(['1', '2', '3', '4']);
+// 新旅 / 忆旅唤取池：仅有实际抽取记录时才显示
+const OPTIONAL_POOL_TYPES = new Set(['8', '9', '12', '13']);
 
 function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
   const pityByPool = new Map<string, number>();
@@ -99,8 +101,8 @@ function PityRow({ pool }: { pool: PoolInfo }) {
   const isHigh = pool.current_pity >= 66;
 
   return (
-    <div className="py-3.5 border-b border-white/[0.05] last:border-b-0">
-      <div className="flex items-start justify-between gap-4">
+    <div className="py-3 border-b border-white/[0.05]">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm text-tide truncate">{pool.pool_name}</div>
           <div className="mt-1 text-[11px] text-wave-dim">
@@ -115,7 +117,7 @@ function PityRow({ pool }: { pool: PoolInfo }) {
           <span className="ml-1 text-xs text-wave">/ {limit}</span>
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-3">
+      <div className="mt-2.5 flex items-center gap-2">
         <div
           className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]"
           style={{
@@ -129,8 +131,8 @@ function PityRow({ pool }: { pool: PoolInfo }) {
             className={`h-full rounded-full ${isHigh ? 'bg-[#d8bd84]' : 'bg-[#6faaa0]'}`}
           />
         </div>
-        <span className="w-20 text-right text-[11px] text-wave">
-          距保底 {remaining} 抽
+        <span className="w-16 text-right text-[11px] text-wave">
+          剩 {remaining} 抽
         </span>
       </div>
     </div>
@@ -148,7 +150,9 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
     };
   }, [records]);
   const visiblePools = useMemo(
-    () => stats.pools.filter((pool) => CORE_POOL_TYPES.has(pool.pool_type) || pool.count > 0),
+    () => stats.pools.filter((pool) =>
+      CORE_POOL_TYPES.has(pool.pool_type)
+      || (OPTIONAL_POOL_TYPES.has(pool.pool_type) && pool.count > 0)),
     [stats.pools],
   );
   const eventRoleFiveStars = stats.pools
@@ -211,7 +215,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
             </div>
             <span className="rounded border border-white/[0.07] px-2 py-1 text-[10px] text-wave">五星保底 80</span>
           </div>
-          <div className="mt-2">
+          <div className="mt-2 grid grid-cols-2 gap-x-6">
             {visiblePools.map((pool) => <PityRow key={pool.pool_type} pool={pool} />)}
           </div>
         </GlowCard>
