@@ -225,13 +225,16 @@ export default function SettingsPage() {
   };
 
   const handleCheckUpdate = async () => {
-    const update = await manualCheck();
-    if (update?.available) {
-      setUpdateInfo(update);
-    } else if (update) {
-      addToast('success', '已是最新版本');
-    } else {
-      addToast('error', '检查更新失败，请检查网络连接后重试');
+    try {
+      const update = await manualCheck();
+      if (update) {
+        setUpdateInfo(update);
+      } else {
+        addToast('success', '已是最新版本');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      addToast('error', `检查更新失败: ${msg}`);
     }
   };
 
