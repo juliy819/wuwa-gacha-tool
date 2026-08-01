@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
+import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { type Update } from '@tauri-apps/plugin-updater';
 import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
@@ -13,6 +14,7 @@ import {
   Database,
   Download,
   FolderOpen,
+  Github,
   Info,
   LoaderCircle,
   RefreshCw,
@@ -393,6 +395,12 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <p className="mt-2 leading-5">数据仅保存在本机，不会上传到服务器。</p>
+                <button
+                  onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool')}
+                  className="mt-2 flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                >
+                  <Github size={13} /> GitHub 仓库
+                </button>
               </section>
             </div>
 
