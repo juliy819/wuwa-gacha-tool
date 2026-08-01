@@ -39,18 +39,22 @@ pub async fn get_resource_icon(state: &AppState, resource_id: i64) -> Result<Str
         return Err("无效的资源 ID".to_string());
     }
 
+    let icon_cache_dir = state.asset_cache_dir.join("icons");
+
+    // 本地缓存优先：角色/武器 ID 与其图标一一对应且固定，已下载的素材直接返回，
+    // 不依赖 nanoka.cc 是否可用（即使停运，已下载的图片仍可正常显示）。
+    if let Some(bytes) = read_local_icon_by_id(&icon_cache_dir, resource_id)? {
+        return Ok(to_data_url(&bytes));
+    }
+
+    // 本地缺失时才向 nanoka.cc 拉取 catalog 定位图标并下载新资源。
     let catalog = load_catalog(state).await?;
     let icon_path = catalog
         .icons
         .get(&resource_id)
         .ok_or_else(|| format!("nanoka 数据中未找到资源 {resource_id}"))?;
     let url = icon_url(icon_path)?;
-    let icon_cache_dir = state.asset_cache_dir.join("icons");
     let cache_path = icon_cache_dir.join(icon_cache_name(resource_id, icon_path));
-
-    if let Ok(bytes) = std::fs::read(&cache_path) {
-        return Ok(to_data_url(&bytes));
-    }
 
     let response = state
         .http
@@ -227,10 +231,12 @@ fn icon_url(icon_path: &str) -> Result<String, String> {
 }
 
 fn is_safe_version(version: &str) -> bool {
+    // 允许 `+`：nanoka 的鸣潮版本号形如 `3.6.1+8296177`（含构建号）。
+    // `+` 在 URL 路径里是合法字符，也不会构成 `..` 或 `/`，不影响 SSRF 防护。
     !version.is_empty()
         && version
             .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+'))
 }
 
 fn icon_cache_name(resource_id: i64, icon_path: &str) -> String {
@@ -243,6 +249,44 @@ fn icon_cache_name(resource_id: i64, icon_path: &str) -> String {
             (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
         });
     format!("{resource_id}-{hash:016x}.webp")
+}
+
+/// 按 `resource_id` 在本地缓存目录中查找已下载的素材。
+/// 文件名形如 `{resource_id}-{hash}.webp`，取最新修改的一份。
+/// 作为 `get_resource_icon` 的本地优先查询路径，使已下载素材的展示
+/// 不依赖 nanoka.cc 在线。
+fn read_local_icon_by_id(
+    dir: &std::path::Path,
+    resource_id: i64,
+) -> Result<Option<Vec<u8>>, String> {
+    let prefix = format!("{resource_id}-");
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("读取素材缓存目录失败: {error}")),
+    };
+    let mut latest: Option<(SystemTime, Vec<u8>)> = None;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(&prefix) || !name.ends_with(".webp") {
+            continue;
+        }
+        let mtime = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH);
+        let is_newer = match &latest {
+            None => true,
+            Some((existing, _)) => mtime > *existing,
+        };
+        if is_newer {
+            if let Ok(bytes) = std::fs::read(entry.path()) {
+                latest = Some((mtime, bytes));
+            }
+        }
+    }
+    Ok(latest.map(|(_, bytes)| bytes))
 }
 
 fn to_data_url(bytes: &[u8]) -> String {
@@ -287,5 +331,14 @@ mod tests {
         assert_ne!(first, icon_cache_name(1104, "/Game/Aki/UI/NewIcon.Head"));
         assert_ne!(first, icon_cache_name(1105, "/Game/Aki/UI/Icon.Head"));
         assert!(first.starts_with("1104-"));
+    }
+
+    #[test]
+    fn accepts_nanoka_version_with_build_suffix() {
+        assert!(is_safe_version("3.6.1+8296177"));
+        assert!(is_safe_version("3.5"));
+        assert!(!is_safe_version(""));
+        assert!(!is_safe_version("3.6/../etc"));
+        assert!(!is_safe_version("3.6 alpha"));
     }
 }
