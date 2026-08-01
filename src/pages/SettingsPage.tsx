@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { open, save } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
 import { type Update } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
+import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useUpdateStore } from '../store/useUpdateStore';
@@ -153,7 +153,7 @@ export default function SettingsPage() {
 
   const handleSelectFolder = async () => {
     try {
-      const selected = await open({ directory: true, multiple: false, title: '选择鸣潮游戏目录' });
+      const selected = await openDialog({ directory: true, multiple: false, title: '选择鸣潮游戏目录' });
       if (selected) setGameDirInput(selected);
     } catch {
       addToast('error', '无法打开目录选择器');
@@ -234,28 +234,54 @@ export default function SettingsPage() {
     if (!updateInfo) return;
     setUpdating(true);
     setUpdateProgress(0);
+
+    const unlistenFns: Array<() => void> = [];
+    const lastProxyRef = { current: '' };
     try {
-      let totalSize = 0;
-      let downloaded = 0;
-      await updateInfo.downloadAndInstall((event) => {
-        switch (event.event) {
-          case 'Started':
-            totalSize = event.data.contentLength ?? 0;
-            break;
-          case 'Progress':
-            downloaded += event.data.chunkLength;
-            if (totalSize > 0) {
-              setUpdateProgress(Math.min(Math.round((downloaded / totalSize) * 100), 99));
-            }
-            break;
-        }
-      });
+      const platforms = (updateInfo.rawJson.platforms ?? {}) as Record<string, { url?: string; signature?: string }>;
+      const ua = navigator.userAgent.toLowerCase();
+      const platformKey = ua.includes('win')
+        ? 'windows-x86_64'
+        : ua.includes('mac')
+          ? (navigator.userAgent.includes('aarch64') || navigator.userAgent.includes('arm64') ? 'darwin-aarch64' : 'darwin-x86_64')
+          : 'linux-x86_64';
+      const info = platforms[platformKey];
+      const officialUrl = info?.url;
+      if (!officialUrl) throw new Error('latest.json 未包含安装包下载地址');
+
+      // 注册进度事件（仅代理切换时提示一次）
+      const unlistenProgress = await listen<{ proxy: string; percent: number }>(
+        'update-download-progress',
+        (event) => {
+          const { proxy, percent } = event.payload;
+          if (proxy !== lastProxyRef.current) {
+            lastProxyRef.current = proxy;
+            addToast('info', `通过 ${proxy} 下载中...`);
+          }
+          setUpdateProgress(percent);
+        },
+      );
+      unlistenFns.push(unlistenProgress);
+
+      const unlistenDone = await listen<{ path: string }>(
+        'update-download-done',
+        () => {
+          addToast('success', '下载完成，正在安装...');
+        },
+      );
+      unlistenFns.push(unlistenDone);
+
+      await gachaApi.downloadAndInstallUpdate(officialUrl, updateInfo.version);
       setUpdateProgress(100);
-      await relaunch();
+
+      // 给前端一点时间渲染完成态，然后由 NSIS 静默安装并退出当前应用
+      await new Promise((resolve) => window.setTimeout(resolve, 800));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       addToast('error', `更新失败: ${msg}`);
       setUpdating(false);
+    } finally {
+      unlistenFns.forEach((fn) => fn());
     }
   };
 

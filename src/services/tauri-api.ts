@@ -69,4 +69,9 @@ export const gachaApi = {
   validateGameDir: (gameDir: string): Promise<GameDirValidation> => {
     return invoke('validate_game_dir', { gameDir });
   },
+
+  // 按代理顺序下载安装包并启动安装程序
+  downloadAndInstallUpdate: (officialUrl: string, version: string): Promise<void> => {
+    return invoke('download_and_install_update', { officialUrl, version });
+  },
 };

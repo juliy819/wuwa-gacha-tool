@@ -39,6 +39,9 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://gh.h233.eu.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
+        "https://edgeone.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
+        "https://cors.isteed.cc/github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
         "https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY0QTIzNUIwQTI0MjNCNjgKUldSb08wS2lzRFdpOUhFMmFVSktSRVlJdVdUeGw5Tkc0b2hERXVYNzhTY3ZMaGhheVl4UXY3UHAK"
