@@ -1,0 +1,369 @@
+name: Release
+
+# 推送形如 v* 的 tag 触发（例如 git tag v1.0.0 && git push --tags）
+# 也可在 Actions 页面手动点击 "Run workflow" 触发
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布标签 (留空则从 package.json 读取)'
+        required: false
+        default: ''
+      draft:
+        description: '是否创建为 draft (草稿)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write  # 用于创建 Release、推送 tag
+
+jobs:
+  # ----------------------------------------------------------------
+  # 阶段 1：生成 changelog + 解析 tag（轻量任务，跑在 ubuntu-latest）
+  # ----------------------------------------------------------------
+  prepare:
+    name: Prepare Changelog
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # push tag 触发时 checkout 默认 ref = refs/tags/v0.0.1（detached HEAD）
+          # 需要 fetch-depth: 0 拉所有 history + fetch-tags: true 拉所有 tags
+          fetch-depth: 0
+          fetch-tags: true
+          ref: main  # 显式 checkout 到 main HEAD，避开 detached HEAD on tag 的浅克隆问题
+
+      - name: Resolve release tag
+        id: version
+        shell: bash
+        run: |
+          set -e
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            VER=$(node -p "require('./package.json').version")
+            TAG="v${VER}"
+          fi
+          # 校验 tag 格式 vX.Y.Z
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Tag '$TAG' 不符合 vX.Y.Z 格式"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG"
+
+      # ----------------------------------------------------------------
+      # 版本号同步：把 tag 里的版本号写到 package.json + Cargo.toml
+      # 让产物文件名（依赖 Cargo.toml）和 Release 名（依赖 tag）保持一致
+      # ----------------------------------------------------------------
+      - name: Sync version to source files
+        id: bump
+        shell: bash
+        run: |
+          set -e
+          TAG="${{ steps.version.outputs.tag }}"
+          VER=${TAG#v}
+          CURRENT_PKG=$(node -p "require('./package.json').version")
+          CURRENT_CARGO=$(grep -E '^version\s*=' src-tauri/Cargo.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          CURRENT_TAURI=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$CURRENT_PKG" = "$VER" ] && [ "$CURRENT_CARGO" = "$VER" ] && [ "$CURRENT_TAURI" = "$VER" ]; then
+            echo "✓ All version files already at $VER, skipping bump"
+          else
+            echo "Bumping version: pkg=$CURRENT_PKG cargo=$CURRENT_CARGO tauri=$CURRENT_TAURI → $VER"
+            # 同步到 package.json
+            node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json'));p.version='$VER';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');"
+            # 同步到 Cargo.toml
+            sed -i -E "s/^version\s*=\s*\"[^\"]+\"/version = \"$VER\"/" src-tauri/Cargo.toml
+            # 同步到 tauri.conf.json
+            node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json'));p.version='$VER';fs.writeFileSync('src-tauri/tauri.conf.json',JSON.stringify(p,null,2)+'\n');"
+            # 同步到 Cargo.lock：更新本地 package 的版本记录
+            # 避免 bump 后远程构建时 cargo 自动改 Cargo.lock 但不提交，导致本地拉取后出现脏改动
+            awk -v ver="$VER" '
+              /^name = "wuwa-gacha-tool"$/ { print; found=1; next }
+              found && /^version = / { sub(/"[0-9.]+(\.[0-9]+)*"/, "\"" ver "\""); found=0; print; next }
+              { print }
+            ' src-tauri/Cargo.lock > src-tauri/Cargo.lock.tmp && mv src-tauri/Cargo.lock.tmp src-tauri/Cargo.lock
+            # 提交 bump 提交
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+            git commit -m "chore(release): bump version to $VER"
+            git push
+            echo "✓ Version bumped to $VER and committed"
+          fi
+
+      - name: Push release tag
+        shell: bash
+        run: |
+          set -e
+          TAG="${{ steps.version.outputs.tag }}"
+          # 在 bump commit 之后打 tag，确保 tag 指向包含正确版本号的 commit
+          # 用 -f 处理 push tag 触发时版本号不一致的场景：
+          # 此时 bump commit 创建在原 tag 之后，需要把 tag 移到 bump commit
+          git tag -f "$TAG"
+          git push origin -f "$TAG"
+
+      - name: Generate changelog
+        shell: bash
+        run: |
+          set -e
+          TAG="${{ steps.version.outputs.tag }}"
+          DATE=$(date -u +'%Y-%m-%d')
+
+          # ⚠️ push tag 触发时 checkout@v4 在 detached HEAD 状态，
+          # 即使 fetch-depth: 0 也可能只拉取当前 commit。
+          # 强制 unshallow 拉取完整历史 + 所有 tags。
+          git fetch --unshallow 2>/dev/null || true
+          git fetch --tags --force 2>/dev/null || true
+
+          echo "=== Debug: local history (last 5 commits) ==="
+          git log --oneline -5 || true
+          echo "=== Debug: all tags ==="
+          git tag --sort=-version:refname || true
+          echo "=== End debug ==="
+          echo ""
+
+          PREV_TAG=$(git tag --sort=-version:refname \
+            | grep -v "^${TAG}$" \
+            | head -1 \
+            || echo "")
+
+          # 按 commit type 分类（conventional commits 格式：type(scope): subject）
+          # 匹配：feat / feat(scope): / feat!: / feat(scope)!:  等
+          FEAT=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^(feat|feature)[:(]' \
+            | sed 's/^/- ✨ /' || true)
+          STYLE=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^(style|ui)[:(]' \
+            | sed 's/^/- 🎨 /' || true)
+          FIX=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^(fix|bug)[:(]' \
+            | sed 's/^/- 🐛 /' || true)
+          CHORE=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^(chore|ci|docs|build|refactor|perf|test)[:(]' \
+            | grep -vE '^chore\(release\): bump version' \
+            | sed 's/^/- 🔧 /' || true)
+          OTHER=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -vE '^(feat|feature|style|ui|fix|bug|chore|ci|docs|build|refactor|perf|test)[:(]' \
+            | sed 's/^/- 📝 /' || true)
+
+          {
+            echo "## 📦 ${TAG}"
+            echo ""
+            echo "> 🗓️ **Release Date:** ${DATE}"
+            if [ -n "$PREV_TAG" ]; then
+              echo "> 🔀 **Diff:** [\`${PREV_TAG}...${TAG}\`](https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${TAG})"
+            fi
+            echo ""
+            echo "---"
+            echo ""
+
+            if [ -n "$FEAT" ]; then
+              echo "### ✨ New Features"
+              echo ""
+              echo "$FEAT"
+              echo ""
+            fi
+
+            if [ -n "$STYLE" ]; then
+              echo "### 🎨 UI / Style"
+              echo ""
+              echo "$STYLE"
+              echo ""
+            fi
+
+            if [ -n "$FIX" ]; then
+              echo "### 🐛 Bug Fixes"
+              echo ""
+              echo "$FIX"
+              echo ""
+            fi
+
+            if [ -n "$CHORE" ]; then
+              echo "### 🔧 Chores"
+              echo ""
+              echo "$CHORE"
+              echo ""
+            fi
+
+            if [ -n "$OTHER" ]; then
+              echo "### 📝 Other"
+              echo ""
+              echo "$OTHER"
+              echo ""
+            fi
+
+            if [ -z "$FEAT$STYLE$FIX$CHORE$OTHER" ]; then
+              echo "_No commits found since last release._"
+              echo ""
+            fi
+
+            echo "---"
+            echo ""
+            echo "> ⬇️ **下载文件见下方 Assets 区域**（Windows / Linux 安装包）"
+            echo ""
+            echo "<sub>🤖 Auto-generated by GitHub Actions</sub>"
+          } > release-notes.md
+
+          echo "Generated changelog:"
+          cat release-notes.md
+
+      - name: Upload changelog
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+
+  # ----------------------------------------------------------------
+  # 阶段 2：2 个平台并行 build（windows / linux）
+  # ----------------------------------------------------------------
+  build-windows:
+    name: Build (Windows)
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-windows
+          path: |
+            src-tauri/target/release/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+  build-linux:
+    name: Build (Linux)
+    needs: prepare
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: 'npm'
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      # Tauri 在 Linux 上需要 webkit2gtk-4.1 + 其他系统库
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: warn  # Linux 上某些格式可能没装工具
+
+  # ----------------------------------------------------------------
+  # 阶段 3：收集所有平台 artifacts，创建 GitHub Release
+  # ----------------------------------------------------------------
+  release:
+    name: Publish Release
+    needs: [ prepare, build-windows, build-linux ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download changelog
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List all artifacts
+        run: |
+          echo "=== Files ==="
+          find artifacts -type f | sort
+          echo ""
+          echo "=== Sizes ==="
+          du -sh artifacts/* 2>/dev/null | sort -k2
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Version ${{ needs.prepare.outputs.tag }} 🚀"
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          body_path: release-notes.md
+          draft: ${{ inputs.draft || false }}
+          fail_on_unmatched_files: false
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+            artifacts/**/*.rpm
+          generate_release_notes: true
