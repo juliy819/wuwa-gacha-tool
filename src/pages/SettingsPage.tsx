@@ -21,7 +21,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import packageInfo from '../../package.json';
+import { getVersion } from '@tauri-apps/api/app';
 import PageTransition from '../components/PageTransition';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
@@ -46,10 +46,15 @@ export default function SettingsPage() {
   const { availableUpdate, checking: checkingUpdate, manualCheck } = useUpdateStore();
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(0);
+  const [appVersion, setAppVersion] = useState('');
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchSettings();
+  }, []);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -357,7 +362,7 @@ export default function SettingsPage() {
               <section className="border-t border-white/[0.06] px-1 pt-4 text-xs text-wave">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-tide-dim">Wuwa Gacha Tool v{packageInfo.version}</span>
+                    <span className="text-tide-dim">Wuwa Gacha Tool v{appVersion}</span>
                     {availableUpdate && !updateInfo && (
                       <span className="rounded-sm bg-[#6faaa0]/10 px-1.5 py-0.5 text-[10px] text-[#8fc8be]">
                         有新版本 v{availableUpdate.version}
@@ -518,7 +523,7 @@ export default function SettingsPage() {
                   <div className="mt-0.5 rounded-md bg-[#6faaa0]/10 p-2 text-[#8fc8be]"><RefreshCw size={18} /></div>
                   <div>
                     <h2 className="text-base font-medium text-tide">发现新版本</h2>
-                    <p className="mt-1 text-xs text-wave">v{packageInfo.version} → v{updateInfo.version}</p>
+                    <p className="mt-1 text-xs text-wave">v{appVersion} → v{updateInfo.version}</p>
                   </div>
                 </div>
                 <button onClick={closeUpdateModal} disabled={updating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>

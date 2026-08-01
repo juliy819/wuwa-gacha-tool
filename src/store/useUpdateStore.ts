@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { check, type Update } from '@tauri-apps/plugin-updater';
-import packageInfo from '../../package.json';
 
 const NOTIFIED_KEY = 'wuwa-update-last-notified';
 
