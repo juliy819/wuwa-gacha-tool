@@ -37,6 +37,14 @@ export const gachaApi = {
     return invoke('fetch_gacha_data_by_url', { url });
   },
 
+  openCloudGachaWindow: (): Promise<void> => {
+    return invoke('open_cloud_gacha_window');
+  },
+
+  closeCloudGachaWindow: (): Promise<void> => {
+    return invoke('close_cloud_gacha_window');
+  },
+
   // 从本地 JSON 文件导入抽卡数据
   importGachaJson: (filePath: string): Promise<GachaImportResult> => {
     return invoke('import_gacha_json', { filePath });

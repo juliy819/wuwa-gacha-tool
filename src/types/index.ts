@@ -51,6 +51,11 @@ export interface GachaImportResult {
   failed_pools: string[];
 }
 
+export interface CloudGachaLink {
+  url: string;
+  player_id: string;
+}
+
 export interface RecordSummary {
   player_id: string;
   record_count: number;

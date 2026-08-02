@@ -47,6 +47,8 @@ pub fn run() {
             asset_catalog_refresh: tokio::sync::Mutex::new(()),
         })
         .invoke_handler(tauri::generate_handler![
+            commands::cloud_gacha::open_cloud_gacha_window,
+            commands::cloud_gacha::close_cloud_gacha_window,
             commands::gacha::get_resource_icon,
             commands::gacha::get_gacha_resources,
             commands::gacha::insert_mock_gacha,

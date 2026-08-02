@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use url::{form_urlencoded, Url};
 
 /// 抽卡 API 基础 URL
 const CN_API_URL: &str = "https://gmserver-api.aki-game2.com/gacha/record/query";
@@ -134,31 +135,31 @@ pub struct ApiCardInfo {
 
 impl GachaParams {
     pub fn from_url(url: &str) -> Result<Self, String> {
-        let params_start = url
-            .find('?')
-            .ok_or_else(|| "URL 中未找到参数部分".to_string())?;
-        let params_str = &url[params_start + 1..];
+        let parsed = Url::parse(url).map_err(|e| format!("抽卡链接格式无效: {e}"))?;
+        let mut params = HashMap::new();
 
-        let mut player_id = String::new();
-        let mut record_id = String::new();
-        let mut resources_id = String::new();
-        let mut gacha_type = String::new();
-        let mut svr_id = String::new();
-        let mut lang = String::new();
+        for (key, value) in parsed.query_pairs() {
+            params.insert(key.into_owned(), value.into_owned());
+        }
 
-        for param in params_str.split('&') {
-            if let Some((key, value)) = param.split_once('=') {
-                match key {
-                    "player_id" => player_id = value.to_string(),
-                    "record_id" => record_id = value.to_string(),
-                    "resources_id" => resources_id = value.to_string(),
-                    "gacha_type" => gacha_type = value.to_string(),
-                    "svr_id" => svr_id = value.to_string(),
-                    "lang" => lang = value.to_string(),
-                    _ => {}
-                }
+        // PC 日志链接通常把参数放在 #/record? 后；云鸣潮链接会在
+        // 顶层 query 和 hash 中各带一份。hash 参数优先，兼容两种格式。
+        if let Some(fragment_query) = parsed
+            .fragment()
+            .and_then(|fragment| fragment.split_once('?'))
+        {
+            for (key, value) in form_urlencoded::parse(fragment_query.1.as_bytes()) {
+                params.insert(key.into_owned(), value.into_owned());
             }
         }
+
+        let take = |key: &str| params.get(key).cloned().unwrap_or_default();
+        let player_id = take("player_id");
+        let record_id = take("record_id");
+        let resources_id = take("resources_id");
+        let gacha_type = take("gacha_type");
+        let svr_id = take("svr_id");
+        let lang = take("lang");
 
         if player_id.is_empty() || record_id.is_empty() {
             return Err("URL 参数不完整".to_string());
@@ -247,6 +248,37 @@ mod tests {
         assert_eq!(params.player_id, "106485288");
         assert_eq!(params.record_id, "acdf99a1891e329555d37279a48f68ba");
         assert_eq!(params.resources_id, "c9fbcd24b02d54c175875b81513cfacc");
+    }
+
+    #[test]
+    fn parses_pc_hash_only_url() {
+        let url = "https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=cn-server&player_id=123456789&record_id=pc-token&resources_id=pool-id&gacha_type=1&lang=zh-Hans";
+        let params = GachaParams::from_url(url).unwrap();
+
+        assert_eq!(params.player_id, "123456789");
+        assert_eq!(params.record_id, "pc-token");
+        assert_eq!(params.resources_id, "pool-id");
+        assert_eq!(params.svr_id, "cn-server");
+    }
+
+    #[test]
+    fn parses_cloud_query_and_hash_url_with_hash_precedence() {
+        let url = "https://aki-gm-resources.aki-game.com/aki/gacha/index.html?player_id=old&record_id=old-token&resources_id=old-pool&svr_id=old-server&lang=zh-Hans#/record?player_id=106485288&record_id=cloud-token&resources_id=cloud-pool&svr_id=cloud-server&lang=zh-Hans";
+        let params = GachaParams::from_url(url).unwrap();
+
+        assert_eq!(params.player_id, "106485288");
+        assert_eq!(params.record_id, "cloud-token");
+        assert_eq!(params.resources_id, "cloud-pool");
+        assert_eq!(params.svr_id, "cloud-server");
+    }
+
+    #[test]
+    fn decodes_percent_encoded_parameters() {
+        let url = "https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?player_id=123456789&record_id=token%2Bvalue&lang=zh%2DHans";
+        let params = GachaParams::from_url(url).unwrap();
+
+        assert_eq!(params.record_id, "token+value");
+        assert_eq!(params.lang, "zh-Hans");
     }
 
     #[test]

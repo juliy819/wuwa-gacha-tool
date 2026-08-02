@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
-import { Clipboard, Folder, Link, LoaderCircle, Scan, Sparkles, Upload } from 'lucide-react';
+import { listen } from '@tauri-apps/api/event';
+import { AlertTriangle, Clipboard, Cloud, ExternalLink, Folder, Link, LoaderCircle, RotateCw, Scan, Sparkles, Upload } from 'lucide-react';
 import HomeDashboard from '../components/HomeDashboard';
 import PageTransition from '../components/PageTransition';
 import { useClickRipple } from '../hooks/useClickRipple';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
+import type { CloudGachaLink } from '../types';
 
-type ScanMode = 'dir' | 'url' | 'json';
+type ScanMode = 'dir' | 'cloud' | 'url' | 'json';
 
 export default function Home() {
   const {
@@ -35,6 +37,9 @@ export default function Home() {
   const [extractedUrl, setExtractedUrl] = useState('');
   const [extractingUrl, setExtractingUrl] = useState(false);
   const [urlExtractError, setUrlExtractError] = useState('');
+  const [cloudLink, setCloudLink] = useState<CloudGachaLink | null>(null);
+  const [cloudOpening, setCloudOpening] = useState(false);
+  const [cloudError, setCloudError] = useState('');
 
   useEffect(() => {
     fetchSettings();
@@ -47,12 +52,46 @@ export default function Home() {
     fetchRecords();
   }, [activePlayerId]);
 
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+
+    const unlisteners: Array<() => void> = [];
+    let cancelled = false;
+
+    Promise.all([
+      listen<CloudGachaLink>('cloud-gacha-link', (event) => {
+        setCloudLink(event.payload);
+        setCloudError('');
+        setCloudOpening(false);
+        addToast('success', `已从云鸣潮提取 UID ${event.payload.player_id} 的抽卡链接`);
+        void gachaApi.closeCloudGachaWindow();
+      }),
+      listen<string>('cloud-gacha-error', (event) => {
+        setCloudError(event.payload);
+        setCloudOpening(false);
+      }),
+    ]).then((listeners) => {
+      if (cancelled) {
+        listeners.forEach((unlisten) => unlisten());
+      } else {
+        unlisteners.push(...listeners);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisteners.forEach((unlisten) => unlisten());
+    };
+  }, [addToast]);
+
   const openScanModal = () => {
     setGameDirInput(settings?.game_dir || '');
     setUrlInput('');
     setJsonPath('');
     setExtractedUrl('');
     setUrlExtractError('');
+    setCloudLink(null);
+    setCloudError('');
     setScanMode('dir');
     setShowScanModal(true);
   };
@@ -108,6 +147,34 @@ export default function Home() {
     }
   };
 
+  const handleOpenCloud = async () => {
+    setCloudOpening(true);
+    setCloudError('');
+    try {
+      await gachaApi.openCloudGachaWindow();
+    } catch (e) {
+      setCloudError(String(e));
+    } finally {
+      setCloudOpening(false);
+    }
+  };
+
+  const handleCopyCloudUrl = async () => {
+    if (!cloudLink) return;
+    try {
+      await navigator.clipboard.writeText(cloudLink.url);
+      addToast('success', '云鸣潮抽卡链接已复制');
+    } catch {
+      addToast('error', '复制失败');
+    }
+  };
+
+  const handleImportCloudUrl = async () => {
+    if (!cloudLink) return;
+    await scanGachaByUrl(cloudLink.url);
+    if (!useGachaStore.getState().error) setShowScanModal(false);
+  };
+
   return (
     <PageTransition>
       <div className="h-full overflow-y-auto overflow-x-hidden">
@@ -160,6 +227,7 @@ export default function Home() {
               <div className="mb-4 flex items-center gap-1 rounded-lg border border-white/[0.04] bg-white/[0.04] p-0.5">
                 {([
                   ['dir', '游戏目录', Folder],
+                  ['cloud', '云鸣潮', Cloud],
                   ['url', '抽卡链接', Link],
                   ['json', '导入 JSON', Upload],
                 ] as const).map(([mode, label, Icon]) => (
@@ -235,6 +303,75 @@ export default function Home() {
                 </div>
               )}
 
+              {scanMode === 'cloud' && (
+                <div className="space-y-3">
+                  <div className="rounded-md border border-white/[0.06] bg-white/[0.03] px-3 py-3">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/[0.05] text-wave">
+                        <Cloud size={16} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm text-tide">
+                          {cloudLink ? '抽卡链接提取完成' : '从云鸣潮获取抽卡链接'}
+                        </p>
+                        {cloudLink ? (
+                          <p className="mt-1 text-xs leading-5 text-wave">
+                            已识别玩家 UID {cloudLink.player_id}，链接仅保留在当前窗口。
+                          </p>
+                        ) : (
+                          <ol className="mt-2 space-y-1 text-xs leading-5 text-wave">
+                            <li>1. 点击下方按钮打开云鸣潮。</li>
+                            <li>2. 首次使用时，在云鸣潮窗口完成手机号验证码登录。</li>
+                            <li>3. 登录成功后无需操作，程序会自动打开“工具 → 唤取记录”并提取链接。</li>
+                          </ol>
+                        )}
+                      </div>
+                    </div>
+
+                    {!cloudLink && (
+                      <div className="mt-3 flex items-start gap-2 border-t border-white/[0.06] pt-3 text-xs leading-5 text-[#d9b98c]">
+                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <p>云鸣潮不支持多端同时登录。在本工具中登录，可能会使其他设备上的云鸣潮退出登录。</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {cloudError && (
+                    <p className="rounded-md border border-[#d99a9a]/20 bg-[#d99a9a]/[0.06] px-3 py-2 text-xs leading-5 text-[#d99a9a]">
+                      {cloudError}
+                    </p>
+                  )}
+
+                  {cloudLink && (
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <span className="text-sm text-wave">提取的抽卡链接</span>
+                        <button
+                          onClick={handleOpenCloud}
+                          disabled={cloudOpening || scanning}
+                          className="flex items-center gap-1 text-xs text-wave transition-colors hover:text-tide disabled:opacity-50"
+                        >
+                          <RotateCw size={11} />
+                          重新获取
+                        </button>
+                      </div>
+                      <div className="flex items-start gap-2 rounded-md border border-white/[0.06] bg-[#1d1d1d] px-3 py-2.5">
+                        <p className="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-tide" title={cloudLink.url}>
+                          {cloudLink.url}
+                        </p>
+                        <button
+                          onClick={handleCopyCloudUrl}
+                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-wave transition-colors hover:bg-white/[0.05] hover:text-tide"
+                          title="复制链接"
+                        >
+                          <Clipboard size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {scanMode === 'json' && (
                 <div className="space-y-2">
                   <p className="text-sm text-wave">从本地 JSON 文件导入已有抽卡数据。</p>
@@ -270,21 +407,37 @@ export default function Home() {
                   取消
                 </button>
                 <button
-                  onClick={scanMode === 'dir' ? handleScanByDir : scanMode === 'url' ? handleScanByUrl : handleImportJson}
-                  disabled={scanning || (scanMode === 'dir' ? !gameDirInput.trim() : scanMode === 'url' ? !urlInput.trim() : !jsonPath.trim())}
+                  onClick={scanMode === 'dir'
+                    ? handleScanByDir
+                    : scanMode === 'cloud'
+                      ? cloudLink ? handleImportCloudUrl : handleOpenCloud
+                      : scanMode === 'url'
+                        ? handleScanByUrl
+                        : handleImportJson}
+                  disabled={scanning || cloudOpening || (scanMode === 'dir'
+                    ? !gameDirInput.trim()
+                    : scanMode === 'url'
+                      ? !urlInput.trim()
+                      : scanMode === 'json'
+                        ? !jsonPath.trim()
+                        : false)}
                   className="tide-btn flex flex-1 items-center justify-center gap-2 px-4 py-2 disabled:opacity-50"
                 >
-                  {scanning ? (
+                  {scanning || cloudOpening ? (
                     <>
                       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
                         <Scan size={16} />
                       </motion.div>
-                      {scanMode === 'json' ? '导入中...' : '扫描中...'}
+                      {cloudOpening ? '正在打开...' : scanMode === 'json' ? '导入中...' : '扫描中...'}
                     </>
                   ) : (
                     <>
-                      <Scan size={16} />
-                      {scanMode === 'json' ? '开始导入' : '开始扫描'}
+                      {scanMode === 'cloud' && !cloudLink ? <ExternalLink size={16} /> : <Scan size={16} />}
+                      {scanMode === 'cloud'
+                        ? cloudLink ? '导入此链接' : '打开云鸣潮'
+                        : scanMode === 'json'
+                          ? '开始导入'
+                          : '开始扫描'}
                     </>
                   )}
                 </button>

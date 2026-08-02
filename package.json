@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "check": "tsc -b --noEmit",
+    "test:cloud-gacha": "node --test tests/cloud-gacha-script.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
