@@ -13,7 +13,7 @@ import { useGachaStore } from '../store/useGachaStore';
 
 export default function StatusBar() {
   const [appVersion, setAppVersion] = useState('');
-  const { summaries, activePlayerId, records } = useGachaStore();
+  const { summaries, activePlayerId } = useGachaStore();
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -24,12 +24,10 @@ export default function StatusBar() {
     [summaries, activePlayerId],
   );
 
-  // 活跃玩家的记录范围（records 已按 activePlayerId 过滤）
   const recordRange = useMemo(() => {
-    if (records.length === 0) return null;
-    const orderedTimes = records.map((record) => record.time).sort((a, b) => a.localeCompare(b));
-    return `${orderedTimes[0].slice(0, 10)} 至 ${orderedTimes[orderedTimes.length - 1].slice(0, 10)}`;
-  }, [records]);
+    if (!activeSummary) return null;
+    return `${activeSummary.earliest_time.slice(0, 10)} 至 ${activeSummary.latest_time.slice(0, 10)}`;
+  }, [activeSummary]);
 
   const lastImported = useMemo(() => {
     if (!activeSummary?.last_imported_at) return null;
@@ -42,7 +40,7 @@ export default function StatusBar() {
     };
   }, [activeSummary]);
 
-  const activeRecordCount = activeSummary?.record_count ?? records.length;
+  const activeRecordCount = activeSummary?.record_count ?? 0;
 
   // 根据 freshness 返回颜色类
   const stalePalette = (freshness: SyncFreshnessType) => {

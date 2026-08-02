@@ -69,17 +69,14 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
     try {
       const summaries = await gachaApi.getRecordSummaries();
       set({ summaries });
-    } catch {
-      // 静默失败
+    } catch (e) {
+      throw e;
     }
   },
 
   fetchPools: async () => {
     try {
-      const [pools] = await Promise.all([
-        gachaApi.getPools(),
-        get().fetchSummaries(),
-      ]);
+      const pools = await gachaApi.getPools();
       set({ pools, initialized: true });
       const { activePlayerId } = get();
       if (!activePlayerId || !pools.includes(activePlayerId)) {
@@ -123,7 +120,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         activePlayerId: playerId || get().activePlayerId,
       });
 
-      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
+      await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
       if (playerId) {
         await get().fetchStats(playerId);
       }
@@ -153,7 +150,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         activePlayerId: playerId || get().activePlayerId,
       });
 
-      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
+      await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
       if (playerId) {
         await get().fetchStats(playerId);
       }
@@ -183,7 +180,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         activePlayerId: playerId || get().activePlayerId,
       });
 
-      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
+      await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
       if (playerId) {
         await get().fetchStats(playerId);
       }
@@ -209,7 +206,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       if (result.backup_path) {
         get().addToast('info', `删除前备份已保存：${result.backup_path}`);
       }
-      await Promise.all([get().fetchPools(), get().fetchSummaries()]);
+      await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
       return result;
     } catch (e) {
       get().addToast('error', `清空记录失败: ${String(e)}`);
@@ -230,7 +227,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       get().fetchSettings(),
       get().fetchPools(),
       get().fetchRecords(),
-      get().fetchSummaries(),
+      get().fetchSummaries().catch(() => {}),
     ]);
     if (activePlayerId) {
       await get().fetchStats(activePlayerId);

@@ -11,26 +11,36 @@ export const SYNC_DANGER_DAYS = 180;
 
 export type SyncFreshness = 'fresh' | 'warn' | 'danger';
 
-/** 计算给定 YYYY-MM-DD HH:mm:ss 字符串距离"今天本地零点"过去了多少天（不含时间部分）。无效日期返回 Infinity。 */
-export function daysSince(dateStr: string): number {
+/** 按本地日历日期计算间隔天数，避免夏令时和时区偏移造成边界误判。无效日期返回 Infinity。 */
+export function daysSince(dateStr: string, today = new Date()): number {
   if (!dateStr) return Infinity;
-  const d = new Date(dateStr.slice(0, 10));
-  if (Number.isNaN(d.getTime())) return Infinity;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  d.setHours(0, 0, 0, 0);
-  const diff = (today.getTime() - d.getTime()) / 86_400_000;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+  if (!match) return Infinity;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const dateUtc = Date.UTC(year, month - 1, day);
+  const parsed = new Date(dateUtc);
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) return Infinity;
+
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const diff = (todayUtc - dateUtc) / 86_400_000;
   return Math.max(0, Math.floor(diff));
 }
 
-/** 仅对"非推断"的真实导入时间做 freshness 判断。推断时间是由 MAX(record.time) 回填的，不适合拿来动态判断缺口。 */
+/** 推断时间仍参与风险判断；isInferred 只控制界面标记，不应掩盖历史数据缺口。 */
 export function getSyncFreshness(
   lastImportedAt?: string | null,
-  isInferred?: boolean | null,
+  _isInferred?: boolean | null,
+  today = new Date(),
 ): SyncFreshness {
   if (!lastImportedAt) return 'fresh';
-  if (isInferred === true) return 'fresh';
-  const n = daysSince(lastImportedAt);
+  const n = daysSince(lastImportedAt, today);
   if (n > SYNC_DANGER_DAYS) return 'danger';
   if (n > SYNC_WARN_DAYS) return 'warn';
   return 'fresh';

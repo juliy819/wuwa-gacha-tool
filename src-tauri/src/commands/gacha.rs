@@ -300,7 +300,14 @@ async fn fetch_gacha_data_internal(
         return Err(format!("所有卡池请求均失败，首个错误: {}", errors[0]));
     }
 
-    merge_and_load_player(state, &params.player_id, &all_records, errors)
+    let completed_official_sync = errors.is_empty();
+    merge_and_load_player(
+        state,
+        &params.player_id,
+        &all_records,
+        errors,
+        completed_official_sync,
+    )
 }
 
 fn merge_and_load_player(
@@ -308,11 +315,13 @@ fn merge_and_load_player(
     player_id: &str,
     imported_records: &[GachaRecord],
     failed_pools: Vec<String>,
+    completed_official_sync: bool,
 ) -> Result<GachaImportResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let stats = db.merge_records(imported_records)?;
-    // 写入/更新真实导入时间（清除推断标记）
-    db.update_import_info(player_id)?;
+    if completed_official_sync {
+        db.update_import_info(player_id)?;
+    }
     let records = db.get_all_records(Some(player_id))?;
     let total_count = records.len();
 
@@ -402,7 +411,8 @@ pub fn import_gacha_json(
         return Err("JSON 文件中没有有效的抽卡记录".to_string());
     }
 
-    merge_and_load_player(&state, &player_id, &all_records, Vec::new())
+    // JSON 可能是任意时间生成的离线快照，不能作为一次当前官方同步。
+    merge_and_load_player(&state, &player_id, &all_records, Vec::new(), false)
 }
 
 /// 获取所有抽卡记录

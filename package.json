@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "check": "tsc -b --noEmit",
     "test:cloud-gacha": "node --test tests/cloud-gacha-script.test.mjs",
+    "test:sync": "node --test tests/sync-freshness.test.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

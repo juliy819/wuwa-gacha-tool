@@ -25,12 +25,13 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
-  const { toastMessages, removeToast, fetchPools, fetchSettings } = useGachaStore();
+  const { toastMessages, removeToast, fetchPools, fetchSummaries, fetchSettings } = useGachaStore();
   const autoCheckUpdate = useUpdateStore(s => s.autoCheck);
 
   useEffect(() => {
     fetchSettings();
     fetchPools();
+    fetchSummaries().catch(() => {});
     // 延迟 3s 异步检查更新，避免与启动初始化抢资源
     const timer = setTimeout(() => { autoCheckUpdate(); }, 3000);
     return () => clearTimeout(timer);
