@@ -80,7 +80,18 @@ function PityBadge({ pity }: { pity: number }) {
 }
 
 export default function RecordsPage() {
-  const { records, activePlayerId, fetchRecords, fetchStats, loading, error, addToast } = useGachaStore();
+  const {
+    records,
+    recordsLoaded,
+    recordsPlayerId,
+    activePlayerId,
+    initialized,
+    fetchRecords,
+    fetchStats,
+    loading,
+    error,
+    addToast,
+  } = useGachaStore();
   const [activePoolType, setActivePoolType] = useState('all');
   const [scope, setScope] = useState<RecordScope>('five');
   const [query, setQuery] = useState('');
@@ -95,22 +106,21 @@ export default function RecordsPage() {
   const [editingRecord, setEditingRecord] = useState<GachaRecord | null>(null);
   const [mutating, setMutating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<GachaRecord | null>(null);
-  const [pageLoading, setPageLoading] = useState(true);
   const contentRef = useRef<HTMLElement>(null);
   const poolNavRef = useRef<HTMLElement>(null);
   const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
   const previousGridPageSizeRef = useRef(gridColumns * GRID_ROWS_PER_PAGE);
 
-  useLayoutEffect(() => {
-    let active = true;
-    setPageLoading(true);
+  useEffect(() => {
     setActivePoolType('all');
     setCurrentPage(1);
-    void fetchRecords().finally(() => {
-      if (active) setPageLoading(false);
-    });
-    return () => { active = false; };
-  }, [activePlayerId, fetchRecords]);
+  }, [activePlayerId]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    if (recordsLoaded && recordsPlayerId === activePlayerId) return;
+    void fetchRecords();
+  }, [activePlayerId, fetchRecords, initialized, recordsLoaded, recordsPlayerId]);
 
   const loadResources = async () => {
     if (resources.length > 0 || resourcesLoading) return;
@@ -338,7 +348,8 @@ export default function RecordsPage() {
     setQuery('');
   };
 
-  const recordsLoading = pageLoading || loading;
+  const cacheValid = recordsLoaded && recordsPlayerId === activePlayerId;
+  const recordsLoading = !initialized || !cacheValid || loading;
 
   return (
     <PageTransition>

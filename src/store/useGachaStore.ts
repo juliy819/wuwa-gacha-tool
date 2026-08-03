@@ -5,6 +5,8 @@ import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, RecordS
 
 interface GachaStore {
   records: GachaRecord[];
+  recordsLoaded: boolean;
+  recordsPlayerId: string | null;
   stats: GachaStats | null;
   pools: string[];
   summaries: RecordSummary[];
@@ -32,8 +34,12 @@ interface GachaStore {
   removeToast: (id: string) => void;
 }
 
+let recordsRequestId = 0;
+
 export const useGachaStore = create<GachaStore>((set, get) => ({
   records: [],
+  recordsLoaded: false,
+  recordsPlayerId: null,
   stats: null,
   pools: [],
   summaries: [],
@@ -46,12 +52,15 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   initialized: false,
 
   fetchRecords: async () => {
+    const requestId = ++recordsRequestId;
+    const requestedPlayerId = get().activePlayerId;
     set({ loading: true, error: null });
     try {
-      const { activePlayerId } = get();
-      const records = await gachaApi.getAllRecords(activePlayerId || undefined);
-      set({ records, loading: false });
+      const records = await gachaApi.getAllRecords(requestedPlayerId || undefined);
+      if (requestId !== recordsRequestId) return;
+      set({ records, recordsLoaded: true, recordsPlayerId: requestedPlayerId, loading: false });
     } catch (e) {
+      if (requestId !== recordsRequestId) return;
       set({ error: String(e), loading: false });
       // 不弹 toast，空数据是正常状态
     }
@@ -115,8 +124,13 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       const result = await gachaApi.fetchGachaData(gameDir);
       const playerId = result.player_id;
 
+      recordsRequestId += 1;
       set({
         records: result.records,
+        recordsLoaded: true,
+        recordsPlayerId: playerId || get().activePlayerId,
+        loading: false,
+        error: null,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
       });
@@ -146,8 +160,13 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       const result = await gachaApi.fetchGachaDataByUrl(url);
       const playerId = result.player_id;
 
+      recordsRequestId += 1;
       set({
         records: result.records,
+        recordsLoaded: true,
+        recordsPlayerId: playerId || get().activePlayerId,
+        loading: false,
+        error: null,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
       });
@@ -177,8 +196,13 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       const result = await gachaApi.importGachaJson(filePath);
       const playerId = result.player_id;
 
+      recordsRequestId += 1;
       set({
         records: result.records,
+        recordsLoaded: true,
+        recordsPlayerId: playerId || get().activePlayerId,
+        loading: false,
+        error: null,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
       });
@@ -204,7 +228,15 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       const result = await gachaApi.clearRecords(playerId);
       const { activePlayerId } = get();
       if (!playerId || playerId === activePlayerId) {
-        set({ records: [], stats: null });
+        recordsRequestId += 1;
+        set({
+          records: [],
+          recordsLoaded: true,
+          recordsPlayerId: activePlayerId,
+          stats: null,
+          loading: false,
+          error: null,
+        });
       }
       get().addToast('success', `已清空 ${result.deleted_count} 条记录`);
       if (result.backup_path) {

@@ -28,6 +28,8 @@ export default function Home() {
     fetchSettings,
     importJson,
     records,
+    recordsLoaded,
+    recordsPlayerId,
     scanGacha,
     scanGachaByUrl,
     scanning,
@@ -67,8 +69,10 @@ export default function Home() {
   useEffect(() => {
     if (!activePlayerId) return;
     fetchStats(activePlayerId);
-    fetchRecords();
-  }, [activePlayerId]);
+    if (!recordsLoaded || recordsPlayerId !== activePlayerId) {
+      fetchRecords();
+    }
+  }, [activePlayerId, fetchRecords, fetchStats, recordsLoaded, recordsPlayerId]);
 
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return;
