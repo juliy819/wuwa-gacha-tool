@@ -1,27 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
-  AlignJustify,
-  AlertTriangle,
-  CalendarRange,
-  Check,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  LayoutGrid,
   LoaderCircle,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Rows3,
-  Search,
-  Sparkles,
-  Trash2,
-  X,
 } from 'lucide-react';
 import PageTransition from '../components/PageTransition';
 import MockGachaDialog from '../components/MockGachaDialog';
+import Modal from '../components/Modal';
+import PageSignalField from '../components/PageSignalField';
+import ResonanceEmptyState from '../components/ResonanceEmptyState';
+import ResonanceCloseButton from '../components/ResonanceCloseButton';
+import ResonanceActionIcon from '../components/ResonanceActionIcon';
+import ResonanceIcon from '../components/ResonanceModeIcon';
 import ResourceIcon from '../components/ResourceIcon';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
@@ -55,10 +45,11 @@ const getBarColor = (pity: number) => {
 function RecordAvatar({ record, size = 'md' }: { record: GachaRecord; size?: 'sm' | 'md' | 'lg' }) {
   const color = QUALITY_COLORS[record.quality_level] ?? '#8a8a8a';
   const dimensions = size === 'sm' ? 'h-8 w-8' : size === 'lg' ? 'h-full w-full' : 'h-12 w-12';
+  const isFiveStar = record.quality_level === QUALITY.FIVE_STAR;
 
   return (
     <div
-      className={`relative shrink-0 overflow-hidden rounded-md border ${dimensions}`}
+      className={`record-resource-frame ${isFiveStar ? 'record-resource-frame-five' : ''} relative shrink-0 overflow-hidden rounded-md border ${dimensions}`}
       style={{ borderColor: record.is_off_rate ? 'rgba(216,72,72,0.65)' : `${color}55`, background: `${color}10` }}
     >
       <ResourceIcon
@@ -104,14 +95,22 @@ export default function RecordsPage() {
   const [editingRecord, setEditingRecord] = useState<GachaRecord | null>(null);
   const [mutating, setMutating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<GachaRecord | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
   const contentRef = useRef<HTMLElement>(null);
+  const poolNavRef = useRef<HTMLElement>(null);
+  const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
   const previousGridPageSizeRef = useRef(gridColumns * GRID_ROWS_PER_PAGE);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    let active = true;
+    setPageLoading(true);
     setActivePoolType('all');
     setCurrentPage(1);
-    fetchRecords();
-  }, [activePlayerId]);
+    void fetchRecords().finally(() => {
+      if (active) setPageLoading(false);
+    });
+    return () => { active = false; };
+  }, [activePlayerId, fetchRecords]);
 
   const loadResources = async () => {
     if (resources.length > 0 || resourcesLoading) return;
@@ -255,6 +254,29 @@ export default function RecordsPage() {
     [poolStats],
   );
 
+  useLayoutEffect(() => {
+    const nav = poolNavRef.current;
+    if (!nav) return;
+
+    const updateIndicator = () => {
+      const activeButton = nav.querySelector<HTMLElement>(`[data-pool-type="${activePoolType}"]`);
+      if (!activeButton) {
+        setPoolIndicator((current) => ({ ...current, visible: false }));
+        return;
+      }
+      setPoolIndicator({
+        top: activeButton.offsetTop,
+        height: activeButton.offsetHeight,
+        visible: true,
+      });
+    };
+
+    updateIndicator();
+    const observer = new ResizeObserver(updateIndicator);
+    observer.observe(nav);
+    return () => observer.disconnect();
+  }, [activePoolType, visiblePoolTypes]);
+
   const effectiveScope: RecordScope = viewMode === 'table' ? scope : 'five';
   const gridItemsPerPage = gridColumns * GRID_ROWS_PER_PAGE;
   const effectiveItemsPerPage = viewMode === 'grid' ? gridItemsPerPage : itemsPerPage;
@@ -291,6 +313,15 @@ export default function RecordsPage() {
   }, [filteredRecords, currentPage, effectiveItemsPerPage]);
 
   useEffect(() => setCurrentPage(1), [activePoolType, scope, query, viewMode, itemsPerPage]);
+
+  useEffect(() => {
+    if (!pageSizeMenuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPageSizeMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [pageSizeMenuOpen]);
   useEffect(() => setPageSizeMenuOpen(false), [viewMode]);
 
   const totalFiveStar = records.filter((record) => record.quality_level === QUALITY.FIVE_STAR).length;
@@ -307,18 +338,21 @@ export default function RecordsPage() {
     setQuery('');
   };
 
+  const recordsLoading = pageLoading || loading;
+
   return (
     <PageTransition>
-      <div className="flex h-full flex-col">
-        <header className="flex items-end justify-between gap-4 border-b border-white/[0.05] px-6 py-4">
+      <div className="records-page flex h-full flex-col">
+        <header className="page-header records-page-header flex items-end justify-between gap-4 px-6 py-4">
+          <PageSignalField variant="records" />
           <div>
-            <h1 className="text-xl font-semibold text-tide">唤取记录</h1>
-            <div className="mt-1 flex items-center gap-2 text-xs text-wave">
+            <h1 className="page-title text-xl font-semibold text-tide">唤取记录</h1>
+            <div className="page-subtitle mt-1 flex items-center gap-2 text-xs text-wave">
               <span>{records.length.toLocaleString()} 条记录</span>
               {recordRange && (
                 <>
                   <span className="text-white/15">|</span>
-                  <CalendarRange size={12} />
+                  <ResonanceIcon kind="calendar" size={13} />
                   <span>{recordRange.earliest} 至 {recordRange.latest}</span>
                 </>
               )}
@@ -326,32 +360,43 @@ export default function RecordsPage() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={openInsertDialog} disabled={!activePlayerId} className="tide-btn flex h-9 items-center gap-2 px-3 text-xs" title="插入五星记录">
-              <Plus size={14} />插入五星
+              <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="add" size={14} /></ResonanceActionIcon>插入五星
             </button>
             <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="记录布局">
               {([
-                ['list', '列表视图', AlignJustify],
-                ['grid', '宫格视图', LayoutGrid],
-                ['table', '表格视图', Rows3],
-              ] as const).map(([mode, label, Icon]) => (
+                ['list', '列表视图', 'traces'],
+                ['grid', '宫格视图', 'matrix'],
+                ['table', '表格视图', 'columns'],
+              ] as const).map(([mode, label, iconKind]) => (
                 <button
                   key={mode}
                   onClick={() => setViewMode(mode)}
-                  className={`flex h-8 w-8 items-center justify-center rounded-md transition-colors ${
-                    viewMode === mode ? 'bg-white/[0.1] text-tide' : 'text-wave hover:bg-white/[0.04] hover:text-tide'
+                  className={`relative flex h-8 w-8 items-center justify-center rounded-md ${
+                    viewMode === mode ? 'text-tide' : 'text-wave hover:bg-white/[0.04] hover:text-tide'
                   }`}
                   title={label}
                   aria-label={label}
                 >
-                  <Icon size={14} />
+                  {viewMode === mode && (
+                    <motion.span
+                      layoutId="record-view-indicator"
+                      className="resonance-icon-tab-indicator absolute inset-0"
+                      transition={{ type: 'spring', stiffness: 440, damping: 36 }}
+                    >
+                      <span className="resonance-tab-surface" />
+                    </motion.span>
+                  )}
+                  <ResonanceActionIcon size="sm" tone={viewMode === mode ? 'gold' : 'default'} framed={false} className="relative z-10">
+                    <ResonanceIcon kind={iconKind} />
+                  </ResonanceActionIcon>
                 </button>
               ))}
             </div>
           </div>
         </header>
 
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <aside className="w-[208px] shrink-0 overflow-y-auto border-r border-white/[0.05] p-3">
+        <div className="records-workbench flex min-h-0 flex-1 overflow-hidden">
+          <aside className="records-sidebar w-[208px] shrink-0 overflow-y-auto p-3">
             <div className="border-b border-white/[0.05] px-2 pb-3">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs text-wave">累计唤取</span>
@@ -363,46 +408,83 @@ export default function RecordsPage() {
               </div>
             </div>
 
-            <nav className="mt-2 space-y-1" aria-label="卡池筛选">
+            <nav ref={poolNavRef} className="relative mt-2 flex flex-col gap-1" aria-label="卡池筛选">
+              <motion.div
+                initial={false}
+                animate={{
+                  top: poolIndicator.top,
+                  height: poolIndicator.height,
+                  opacity: poolIndicator.visible ? 1 : 0,
+                }}
+                transition={{ type: 'spring', stiffness: 400, damping: 36 }}
+                className="pool-active-frame pointer-events-none absolute inset-x-0"
+                aria-hidden="true"
+              >
+                <span className="pool-active-surface" />
+              </motion.div>
               <button
                 onClick={() => setActivePoolType('all')}
-                className={`w-full rounded-md px-3 py-2.5 text-left transition-colors ${
-                  activePoolType === 'all' ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                data-pool-type="all"
+                data-seq="00"
+                className={`pool-filter relative w-full py-2.5 pl-9 pr-3 text-left ${
+                  activePoolType === 'all' ? '' : 'hover:bg-white/[0.04]'
                 }`}
               >
-                <div className="text-sm text-tide">全部卡池</div>
-                <div className="mt-0.5 text-[11px] text-wave">{records.length} 抽 · {totalFiveStar} 五星</div>
+                <div className="relative text-sm text-tide">全部卡池</div>
+                <div className="relative mt-0.5 text-[11px] text-wave">{records.length} 抽 · {totalFiveStar} 五星</div>
               </button>
-              {visiblePoolTypes.map((pool) => {
+              {visiblePoolTypes.map((pool, poolIndex) => {
                 const stats = poolStats.get(pool.type)!;
                 const isActive = activePoolType === pool.type;
                 return (
                   <button
                     key={pool.type}
                     onClick={() => setActivePoolType(pool.type)}
-                    className={`w-full rounded-md px-3 py-2.5 text-left transition-colors ${
-                      isActive ? 'bg-white/[0.08]' : 'hover:bg-white/[0.04]'
+                    data-pool-type={pool.type}
+                    data-seq={String(poolIndex + 1).padStart(2, '0')}
+                    className={`pool-filter relative w-full py-2.5 pl-9 pr-3 text-left ${
+                      isActive ? '' : 'hover:bg-white/[0.04]'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="relative flex items-center justify-between gap-2">
                       <span className="truncate text-sm text-tide">{pool.name}</span>
                       <span className="shrink-0 text-[11px] tabular-nums text-[#8fc8be]">{stats.currentPity}/80</span>
                     </div>
-                    <div className="mt-0.5 text-[11px] text-wave">{stats.count} 抽 · {stats.fiveStar} 五星</div>
+                    <div className="relative mt-0.5 text-[11px] text-wave">{stats.count} 抽 · {stats.fiveStar} 五星</div>
                   </button>
                 );
               })}
             </nav>
           </aside>
 
-          <main ref={contentRef} className="flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.05] px-4 py-3">
-              {viewMode === 'table' && (
-                <div className="flex items-center gap-0.5 rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5">
-                  <button onClick={() => setScope('five')} className={`rounded px-3 py-1.5 text-xs ${scope === 'five' ? 'bg-white/[0.1] text-tide' : 'text-wave hover:text-tide'}`}>五星记录</button>
-                  <button onClick={() => setScope('all')} className={`rounded px-3 py-1.5 text-xs ${scope === 'all' ? 'bg-white/[0.1] text-tide' : 'text-wave hover:text-tide'}`}>全部记录</button>
+          <main ref={contentRef} className="records-main flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="records-toolbar flex min-h-[59px] flex-wrap items-center gap-y-2 px-4 py-3">
+              <motion.div
+                initial={false}
+                animate={{
+                  width: viewMode === 'table' ? 158 : 0,
+                  opacity: viewMode === 'table' ? 1 : 0,
+                }}
+                transition={{
+                  width: { duration: 0.28, ease: [0.4, 0, 0.2, 1] },
+                  opacity: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+                }}
+                aria-hidden={viewMode !== 'table'}
+                className="shrink-0 overflow-hidden"
+              >
+                <div className="mr-2 flex w-[150px] items-center gap-0.5 whitespace-nowrap rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5">
+                  {(['five', 'all'] as const).map((value) => (
+                    <button key={value} disabled={viewMode !== 'table'} onClick={() => setScope(value)} className={`relative whitespace-nowrap rounded px-3 py-1.5 text-xs ${scope === value ? 'text-tide' : 'text-wave hover:text-tide'}`}>
+                      {scope === value && (
+                        <motion.span layoutId="record-scope-indicator" className="resonance-tab-indicator absolute inset-0" transition={{ type: 'spring', stiffness: 440, damping: 36 }}>
+                          <span className="resonance-tab-surface" />
+                        </motion.span>
+                      )}
+                      <span className="relative z-10">{value === 'five' ? '五星记录' : '全部记录'}</span>
+                    </button>
+                  ))}
                 </div>
-              )}
+              </motion.div>
 
               <div className="relative min-w-[180px] flex-1 md:max-w-[320px]">
                 <input
@@ -413,7 +495,7 @@ export default function RecordsPage() {
                 />
                 {query && (
                   <button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-wave hover:text-tide" title="清除搜索">
-                    <X size={13} />
+                    <ResonanceIcon kind="close" size={14} />
                   </button>
                 )}
               </div>
@@ -421,46 +503,81 @@ export default function RecordsPage() {
               <span className="ml-auto text-xs text-wave">找到 <span className="tabular-nums text-tide">{pagedList.total}</span> 条</span>
             </div>
 
-            {loading ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 text-wave">
+            <AnimatePresence initial={false} mode="wait">
+            {recordsLoading ? (
+              <motion.div
+                key="records-loading"
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.14, ease: [0.4, 0, 1, 1] }}
+                className="flex flex-1 flex-col items-center justify-center gap-3 text-wave"
+              >
                 <LoaderCircle size={24} className="animate-spin" />
                 <span className="text-sm">正在读取抽卡记录</span>
-              </div>
+              </motion.div>
             ) : error ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3">
+              <motion.div
+                key="records-error"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="flex flex-1 flex-col items-center justify-center gap-3"
+              >
                 <div className="text-sm text-[#d99a9a]">记录读取失败</div>
                 <button onClick={fetchRecords} className="flex items-center gap-2 rounded-md border border-white/[0.08] px-3 py-2 text-xs text-wave hover:text-tide">
-                  <RefreshCw size={13} />重新读取
+                  <ResonanceIcon kind="refresh" size={14} />重新读取
                 </button>
-              </div>
+              </motion.div>
             ) : records.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/[0.04] text-wave"><Sparkles size={21} /></div>
-                <div className="text-sm font-medium text-tide">暂无抽卡记录</div>
-                <p className="text-xs text-wave">先从首页扫描游戏目录或导入 JSON 文件</p>
-                <Link to="/" className="rounded-md border border-white/[0.08] px-3 py-2 text-xs text-tide hover:bg-white/[0.04]">前往首页</Link>
-              </div>
+              <motion.div
+                key="records-empty"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="flex flex-1"
+              >
+                <ResonanceEmptyState variant="records" title="暂无抽卡记录" description="先从首页扫描游戏目录或导入 JSON 文件" className="w-full">
+                  <Link to="/" className="instrument-link-button">前往首页</Link>
+                </ResonanceEmptyState>
+              </motion.div>
             ) : pagedList.total === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3">
-                <Search size={22} className="text-wave" />
-                <div className="text-sm font-medium text-tide">没有符合条件的记录</div>
-                <button onClick={clearFilters} className="text-xs text-[#8fc8be] hover:text-[#b0d9d2]">清除筛选条件</button>
-              </div>
+              <motion.div
+                key="records-no-results"
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -3 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="flex flex-1"
+              >
+                <ResonanceEmptyState variant="filter" title="没有符合条件的记录" description="当前卡池、范围或搜索词没有匹配项" compact className="w-full">
+                  <button onClick={clearFilters} className="text-xs text-[#8fc8be] hover:text-[#b0d9d2]">清除筛选条件</button>
+                </ResonanceEmptyState>
+              </motion.div>
             ) : (
               <motion.div
-                key={viewMode === 'table' ? `${viewMode}-${scope}` : viewMode}
-                initial={{ opacity: 0, y: 4 }}
+                key={`records-content-${viewMode === 'table' ? `${viewMode}-${scope}` : viewMode}`}
+                initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.15 }}
-                className="min-h-0 flex-1 overflow-auto"
+                exit={{ opacity: 0, y: -3 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="records-view-stage relative min-h-0 flex-1 overflow-auto"
               >
+                <motion.span
+                  className="records-view-scan"
+                  initial={{ x: '-110%', opacity: 0 }}
+                  animate={{ x: '118%', opacity: [0, 0.9, 0] }}
+                  transition={{ duration: 0.72, times: [0, 0.22, 1], ease: [0.16, 1, 0.3, 1] }}
+                  aria-hidden="true"
+                />
                 {viewMode === 'list' && (
-                  <div className="divide-y divide-white/[0.04] px-4">
+                  <div className="record-list-track px-4">
                     {pagedList.pageItems.map(({ record, pity }, index) => {
                       const barColor = getBarColor(pity);
                       const barWidth = Math.min((pity / 80) * 100, 100);
                       return (
-                        <div key={getRecordKey(record, index)} className="flex min-h-[64px] items-center gap-3 py-2.5">
+                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} className="record-list-row flex min-h-[64px] items-center gap-3 py-2.5">
                           <RecordAvatar record={record} />
                           <div className="w-24 shrink-0 min-w-0">
                             <div className="truncate text-sm text-tide" title={record.name}>{record.name}</div>
@@ -490,7 +607,7 @@ export default function RecordsPage() {
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3 p-4">
                     {pagedList.pageItems.map(({ record, pity }, index) => {
                       return (
-                        <div key={getRecordKey(record, index)} className="min-w-0 rounded-lg border border-white/[0.06] bg-[#242424] p-2.5">
+                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''}`}>
                           <div className="relative aspect-square overflow-hidden rounded-md">
                             <RecordAvatar record={record} size="lg" />
                             {record.is_off_rate && <span className="absolute bottom-1.5 left-1.5 rounded bg-[#a64f4f] px-1.5 py-0.5 text-[10px] text-white">歪</span>}
@@ -506,7 +623,7 @@ export default function RecordsPage() {
                 )}
 
                 {viewMode === 'table' && (
-                  <table className="w-full min-w-[820px] table-fixed text-xs">
+                  <table className="resonance-table w-full min-w-[820px] table-fixed text-xs">
                     <thead className="sticky top-0 z-10 bg-[#1f1f1f] text-wave">
                       <tr className="border-b border-white/[0.05]">
                         <th className="w-[154px] px-3 py-2.5 text-left font-medium">时间</th>
@@ -523,7 +640,7 @@ export default function RecordsPage() {
                         const isFive = record.quality_level === QUALITY.FIVE_STAR;
                         const color = QUALITY_COLORS[record.quality_level] ?? '#8a8a8a';
                         return (
-                          <tr key={getRecordKey(record, index)} className="hover:bg-white/[0.025]">
+                          <tr key={getRecordKey(record, index)} className={isFive ? 'record-table-row-five' : ''}>
                             <td className="px-3 py-2 tabular-nums text-wave">{record.time}</td>
                             <td className="truncate px-3 py-2 text-wave" title={record.card_pool_name}>{record.card_pool_name}</td>
                             <td className="px-3 py-2">
@@ -540,8 +657,8 @@ export default function RecordsPage() {
                             <td className="px-3 py-2">
                               {record.is_mock ? (
                                 <div className="flex items-center justify-center gap-1">
-                                  <button type="button" onClick={() => openEditDialog(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="编辑模拟记录"><Pencil size={13} /></button>
-                                  <button type="button" onClick={() => handleDeleteClick(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><Trash2 size={13} /></button>
+                                  <button type="button" onClick={() => openEditDialog(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="编辑模拟记录"><ResonanceIcon kind="edit" size={14} /></button>
+                                  <button type="button" onClick={() => handleDeleteClick(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><ResonanceIcon kind="delete" size={14} /></button>
                                 </div>
                               ) : <div className="text-center text-white/15">-</div>}
                             </td>
@@ -553,9 +670,18 @@ export default function RecordsPage() {
                 )}
               </motion.div>
             )}
+            </AnimatePresence>
 
-            {!loading && !error && pagedList.total > 0 && (
-              <footer className="flex h-12 shrink-0 items-center border-t border-white/[0.05] px-4">
+            <AnimatePresence initial={false}>
+            {!recordsLoading && !error && pagedList.total > 0 && (
+              <motion.footer
+                key="records-footer"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 3 }}
+                transition={{ duration: 0.2, delay: 0.04, ease: [0.16, 1, 0.3, 1] }}
+                className="records-footer flex h-12 shrink-0 items-center px-4"
+              >
                 {viewMode !== 'grid' && (
                   <div className="relative">
                     <button
@@ -566,20 +692,23 @@ export default function RecordsPage() {
                       aria-expanded={pageSizeMenuOpen}
                     >
                       <span>每页 {itemsPerPage} 条</span>
-                      <ChevronDown size={13} className={`text-wave transition-transform ${pageSizeMenuOpen ? 'rotate-180' : ''}`} />
+                      <ResonanceIcon kind="chevron" size={13} className={`text-wave transition-transform ${pageSizeMenuOpen ? 'rotate-180' : ''}`} />
                     </button>
                     {pageSizeMenuOpen && (
-                      <>
-                        <button
+                      <button
                           type="button"
                           className="fixed inset-0 z-40 cursor-default"
                           onClick={() => setPageSizeMenuOpen(false)}
                           aria-label="关闭每页数量菜单"
                         />
+                    )}
+                    <AnimatePresence>
+                    {pageSizeMenuOpen && (
                         <motion.div
                           initial={{ opacity: 0, y: 4 }}
                           animate={{ opacity: 1, y: 0 }}
-                          transition={{ duration: 0.12 }}
+                          exit={{ opacity: 0, y: 3, scale: 0.985 }}
+                          transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
                           className="glass-card absolute bottom-full left-0 z-50 mb-2 w-32 overflow-hidden rounded-md p-1"
                           role="listbox"
                           aria-label="每页数量"
@@ -599,12 +728,12 @@ export default function RecordsPage() {
                               aria-selected={itemsPerPage === size}
                             >
                               <span>每页 {size} 条</span>
-                              {itemsPerPage === size && <Check size={13} />}
+                              {itemsPerPage === size && <ResonanceIcon kind="check" size={13} />}
                             </button>
                           ))}
                         </motion.div>
-                      </>
                     )}
+                    </AnimatePresence>
                   </div>
                 )}
                 <div className="ml-auto flex items-center gap-3 text-xs text-wave">
@@ -612,13 +741,14 @@ export default function RecordsPage() {
                     {(pagedList.safeCurrentPage - 1) * effectiveItemsPerPage + 1}-{Math.min(pagedList.safeCurrentPage * effectiveItemsPerPage, pagedList.total)}，共 {pagedList.total} 条
                   </span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={pagedList.safeCurrentPage <= 1} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="上一页"><ChevronLeft size={14} /></button>
+                    <button onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={pagedList.safeCurrentPage <= 1} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="上一页"><ResonanceIcon kind="previous" size={14} /></button>
                     <span className="min-w-14 text-center tabular-nums text-tide">{pagedList.safeCurrentPage}/{pagedList.totalPages}</span>
-                    <button onClick={() => setCurrentPage((page) => Math.min(pagedList.totalPages, page + 1))} disabled={pagedList.safeCurrentPage >= pagedList.totalPages} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="下一页"><ChevronRight size={14} /></button>
+                    <button onClick={() => setCurrentPage((page) => Math.min(pagedList.totalPages, page + 1))} disabled={pagedList.safeCurrentPage >= pagedList.totalPages} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="下一页"><ResonanceIcon kind="next" size={14} /></button>
                   </div>
                 </div>
-              </footer>
+              </motion.footer>
             )}
+            </AnimatePresence>
           </main>
         </div>
       </div>
@@ -633,18 +763,18 @@ export default function RecordsPage() {
         onSubmit={submitMockRecord}
       />
 
-      {deleteConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
-          role="dialog"
-          aria-modal="true"
-          onMouseDown={(event) => { if (event.currentTarget === event.target && !mutating) setDeleteConfirm(null); }}
-        >
-          <div className="w-full max-w-sm rounded-lg border border-[#d84848]/30 bg-[#242424] shadow-2xl">
+      <Modal
+        open={deleteConfirm !== null}
+        onClose={() => setDeleteConfirm(null)}
+        closeDisabled={mutating}
+        className="max-w-sm border-[#d84848]/30 bg-[#242424]"
+        labelledBy="delete-mock-dialog-title"
+      >
+          {deleteConfirm && <>
             <div className="flex items-start gap-3 p-5">
-              <div className="mt-0.5 shrink-0 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><AlertTriangle size={18} /></div>
+              <div className="mt-0.5 shrink-0 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><ResonanceIcon kind="warning" size={19} /></div>
               <div className="min-w-0">
-                <h2 className="text-base font-medium text-tide">
+                <h2 id="delete-mock-dialog-title" className="text-base font-medium text-tide">
                   {deleteConfirm.quality_level === QUALITY.FIVE_STAR ? '删除整批模拟记录' : '删除模拟记录'}
                 </h2>
                 <p className="mt-1.5 text-xs leading-5 text-wave">
@@ -653,7 +783,7 @@ export default function RecordsPage() {
                     : `确定删除这条 ${deleteConfirm.name} 模拟记录？此操作不可撤销。`}
                 </p>
               </div>
-              <button onClick={() => setDeleteConfirm(null)} disabled={mutating} className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>
+              <ResonanceCloseButton onClick={() => setDeleteConfirm(null)} disabled={mutating} className="ml-auto shrink-0" />
             </div>
             <div className="flex justify-end gap-2 border-t border-white/[0.06] px-5 py-4">
               <button onClick={() => setDeleteConfirm(null)} disabled={mutating} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">取消</button>
@@ -662,13 +792,12 @@ export default function RecordsPage() {
                 disabled={mutating}
                 className="flex items-center gap-2 rounded-md bg-[#a64f4f] px-4 py-2 text-sm text-white hover:bg-[#b85a5a] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {mutating ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                {mutating ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="delete" size={15} />}
                 删除
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>}
+      </Modal>
     </PageTransition>
   );
 }

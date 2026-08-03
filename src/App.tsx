@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Toast from './components/Toast';
 import StatusBar from './components/StatusBar';
-import PageTransition from './components/PageTransition';
+import ResonancePulseLayer from './components/ResonancePulseLayer';
 import Home from './pages/Home';
 import RecordsPage from './pages/RecordsPage';
 import SettingsPage from './pages/SettingsPage';
@@ -16,9 +16,9 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        <Route path="/" element={<PageTransition><Home /></PageTransition>} />
-        <Route path="/records" element={<PageTransition><RecordsPage /></PageTransition>} />
-        <Route path="/settings" element={<PageTransition><SettingsPage /></PageTransition>} />
+        <Route path="/" element={<Home />} />
+        <Route path="/records" element={<RecordsPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AnimatePresence>
   );
@@ -39,9 +39,10 @@ export default function App() {
 
   return (
     <Router>
-      <div className="h-screen flex flex-col relative" style={{ background: '#1f1f1f' }}>
+      <div className="app-shell relative flex h-screen flex-col">
+        <ResonancePulseLayer />
         <Navbar />
-        <main className="flex-1 overflow-hidden">
+        <main className="relative flex-1 overflow-hidden">
           <AnimatedRoutes />
         </main>
         <Toast messages={toastMessages} onRemove={removeToast} />

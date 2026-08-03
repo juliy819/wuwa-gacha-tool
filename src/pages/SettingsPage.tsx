@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
@@ -8,25 +8,18 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useUpdateStore } from '../store/useUpdateStore';
 import {
-  AlertOctagon,
-  AlertTriangle,
-  CheckCircle2,
-  Clipboard,
-  Database,
-  DatabaseZap,
-  Download,
-  FolderOpen,
-  Github,
-  Info,
   LoaderCircle,
-  RefreshCw,
-  Save,
-  Trash2,
-  X,
-  XCircle,
 } from 'lucide-react';
 import { getVersion } from '@tauri-apps/api/app';
 import PageTransition from '../components/PageTransition';
+import PageSignalField from '../components/PageSignalField';
+import Modal from '../components/Modal';
+import ResonanceCloseButton from '../components/ResonanceCloseButton';
+import ResonanceActionIcon from '../components/ResonanceActionIcon';
+import ResonanceIcon from '../components/ResonanceModeIcon';
+import ResonanceEmptyState from '../components/ResonanceEmptyState';
+import { useUiFeedback } from '../hooks/useUiFeedback';
+import { playUiFeedback } from '../lib/uiFeedback';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 import {
@@ -68,7 +61,7 @@ export default function SettingsPage() {
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(0);
   const [appVersion, setAppVersion] = useState('');
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useUiFeedback();
 
   useEffect(() => {
     fetchSettings();
@@ -142,31 +135,6 @@ export default function SettingsPage() {
   // 直接用 store 的 summaries，保证删除/清空/新增玩家后立即同步
   const summaries = storeSummaries;
 
-  useEffect(() => {
-    if (!deleteTarget) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !deleting) {
-        setDeleteTarget(null);
-        setConfirmationText('');
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])'));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [deleteTarget, deleting]);
-
   const summaryByPlayer = useMemo(
     () => new Map(summaries.map((summary) => [summary.player_id, summary])),
     [summaries],
@@ -174,6 +142,13 @@ export default function SettingsPage() {
   const totalRecords = summaries.reduce((sum, summary) => sum + summary.record_count, 0);
   const savedPath = settings?.game_dir.trim() ?? '';
   const isDirty = gameDirInput.trim() !== savedPath;
+  const directoryState = !gameDirInput.trim()
+    ? { label: '未配置', tone: 'idle' }
+    : validating
+      ? { label: '校验中', tone: 'checking' }
+      : validation?.valid
+        ? { label: '目录可用', tone: 'ready' }
+        : { label: '需要检查', tone: 'error' };
 
   const selectedSummary = deleteTarget?.playerId ? summaryByPlayer.get(deleteTarget.playerId) : null;
   const expectedConfirmation = deleteTarget?.playerId ?? '清空全部数据';
@@ -386,22 +361,29 @@ export default function SettingsPage() {
 
   return (
     <PageTransition>
-      <div className="h-full overflow-y-auto overflow-x-hidden">
-        <div className="mx-auto max-w-5xl space-y-5 p-6">
-          <header>
-            <h1 className="text-xl font-semibold text-tide">设置</h1>
-            <p className="mt-1 text-xs text-wave">管理扫描目录与本地数据</p>
+      <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
+        <div className="page-container settings-page-container w-full space-y-5 p-6">
+          <header className="page-header settings-page-header py-1">
+            <PageSignalField variant="settings" />
+            <h1 className="page-title text-xl font-semibold text-tide">设置</h1>
+            <p className="page-subtitle mt-1 text-xs text-wave">管理扫描目录与本地数据</p>
           </header>
 
-          <div className="grid items-start gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)]">
+          <div className="settings-console-grid grid items-start gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(360px,1.1fr)]">
             <div className="space-y-4">
               <motion.section
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="rounded-lg border border-white/[0.06] bg-[#242424] p-5"
+                className="resonance-panel settings-panel settings-control-panel settings-directory-panel p-5"
               >
-                <div className="flex items-center gap-2 text-sm font-medium text-tide">
-                  <FolderOpen size={16} />游戏目录
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-tide">
+                    <ResonanceActionIcon tone="gold"><ResonanceIcon kind="directory" size={15} /></ResonanceActionIcon>游戏目录
+                  </div>
+                  <div className="settings-state-readout" data-state={directoryState.tone}>
+                    <span className="settings-state-pulse" />
+                    <span>{directoryState.label}</span>
+                  </div>
                 </div>
                 <p className="mt-1 text-xs text-wave">扫描抽卡记录时读取此目录中的 Client.log</p>
 
@@ -416,20 +398,20 @@ export default function SettingsPage() {
                       className="glass-input min-w-0 flex-1 px-3 py-2.5 text-sm"
                     />
                     <button onClick={handleSelectFolder} className="glass-input flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm text-wave hover:text-tide">
-                      <FolderOpen size={14} />选择
+                      <ResonanceActionIcon size="sm"><ResonanceIcon kind="directory" size={14} /></ResonanceActionIcon>选择
                     </button>
                   </div>
                 </label>
 
                 <div className="mt-2 min-h-5">
                   {!gameDirInput.trim() ? (
-                    <div className="flex items-center gap-2 text-[11px] text-wave"><Info size={12} />尚未设置游戏目录</div>
+                    <div className="flex items-center gap-2 text-[11px] text-wave"><ResonanceIcon kind="info" size={13} />尚未设置游戏目录</div>
                   ) : validating ? (
                     <div className="flex items-center gap-2 text-[11px] text-wave"><LoaderCircle size={12} className="animate-spin" />正在检查 Client.log</div>
                   ) : validation?.valid ? (
-                    <div className="flex items-center gap-2 text-[11px] text-[#8fc8be]"><CheckCircle2 size={12} />{validation.message}</div>
+                    <div className="flex items-center gap-2 text-[11px] text-[#8fc8be]"><ResonanceIcon kind="success" size={13} />{validation.message}</div>
                   ) : (
-                    <div className="flex items-center gap-2 text-[11px] text-[#d99a9a]"><XCircle size={12} />{validation?.message}</div>
+                    <div className="flex items-center gap-2 text-[11px] text-[#d99a9a]"><ResonanceIcon kind="error" size={13} />{validation?.message}</div>
                   )}
                 </div>
 
@@ -439,13 +421,44 @@ export default function SettingsPage() {
                     disabled={saving || validating || !isDirty || !validation?.valid}
                     className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40"
                   >
-                    {saving ? <LoaderCircle size={14} className="animate-spin" /> : <Save size={14} />}
+                    <ResonanceActionIcon size="sm" tone="gold">
+                      {saving ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="save" size={14} />}
+                    </ResonanceActionIcon>
                     {saving ? '保存中' : '保存目录'}
                   </button>
                   {isDirty && validation?.valid && <span className="text-[11px] text-[#c9ab78]">有未保存的修改</span>}
                   {!isDirty && savedPath && <span className="text-[11px] text-wave">当前设置已保存</span>}
                 </div>
               </motion.section>
+
+              <section className="feedback-preference-row">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="feedback-preference-icon"><ResonanceIcon kind="activity" size={16} /></span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-tide">频率反馈</div>
+                    <div className="mt-0.5 text-[11px] text-wave">扫描、导入和插入记录完成时播放轻提示音</div>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button type="button" onClick={() => void playUiFeedback('record-inserted')} disabled={!soundEnabled} className="feedback-preview-button">试听</button>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={soundEnabled}
+                    aria-label="频率反馈"
+                    onClick={() => {
+                      const next = !soundEnabled;
+                      setSoundEnabled(next);
+                      if (next) void playUiFeedback('scan-complete');
+                    }}
+                    className="resonance-toggle"
+                    data-active={soundEnabled ? 'true' : 'false'}
+                  >
+                    <span className="resonance-toggle-track" />
+                    <span className="resonance-toggle-node" />
+                  </button>
+                </div>
+              </section>
 
               <section className="border-t border-white/[0.06] px-1 pt-4 text-xs text-wave">
                 <div className="flex items-center justify-between">
@@ -462,7 +475,9 @@ export default function SettingsPage() {
                     disabled={checkingUpdate}
                     className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide disabled:opacity-50"
                   >
-                    {checkingUpdate ? <LoaderCircle size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                    <ResonanceActionIcon size="sm">
+                      {checkingUpdate ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="refresh" size={15} />}
+                    </ResonanceActionIcon>
                     {checkingUpdate ? '检查中' : '检查更新'}
                   </button>
                 </div>
@@ -471,7 +486,7 @@ export default function SettingsPage() {
                   onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool')}
                   className="mt-2 flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
                 >
-                  <Github size={13} /> GitHub 仓库
+                  <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>GitHub 仓库
                 </button>
               </section>
             </div>
@@ -480,12 +495,17 @@ export default function SettingsPage() {
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 }}
-              className="rounded-lg border border-white/[0.06] bg-[#242424] p-5"
+              className="resonance-panel settings-panel settings-control-panel settings-data-panel p-5"
             >
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <div className="flex items-center gap-2 text-sm font-medium text-tide"><Database size={16} />本地数据</div>
+                  <div className="flex items-center gap-2 text-sm font-medium text-tide"><ResonanceActionIcon tone="gold"><ResonanceIcon kind="database" size={15} /></ResonanceActionIcon>本地数据</div>
                   <p className="mt-1 text-xs text-wave">{pools.length} 位玩家 · {totalRecords.toLocaleString()} 条记录</p>
+                </div>
+                <div className="settings-data-readout" aria-label={`本地共 ${totalRecords.toLocaleString()} 条记录`}>
+                  <span className="settings-data-readout-value">{totalRecords.toLocaleString()}</span>
+                  <span className="settings-data-readout-label">条记录</span>
+                  <span className="settings-data-readout-orbit" aria-hidden="true" />
                 </div>
               </div>
 
@@ -499,11 +519,11 @@ export default function SettingsPage() {
                 }`}
               >
                 {anyDanger ? (
-                  <AlertOctagon size={13} className="mt-0.5 shrink-0 text-[#d84848]" />
+                  <ResonanceIcon kind="error" size={14} className="mt-0.5 shrink-0 text-[#d84848]" />
                 ) : anyWarn ? (
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0 text-[#d09960]" />
+                  <ResonanceIcon kind="warning" size={14} className="mt-0.5 shrink-0 text-[#d09960]" />
                 ) : (
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <ResonanceIcon kind="warning" size={14} className="mt-0.5 shrink-0" />
                 )}
                 <span>
                   官方抽卡链接仅保留近约 6 个月。建议至少每半年同步一次，超期缺口无法自动补回。
@@ -518,12 +538,12 @@ export default function SettingsPage() {
 
               {lastBackupPath && (
                 <div className="mt-3 flex items-center gap-3 rounded-md border border-[#6faaa0]/15 bg-[#6faaa0]/[0.05] px-3 py-2.5">
-                  <CheckCircle2 size={14} className="shrink-0 text-[#8fc8be]" />
+                  <ResonanceIcon kind="success" size={15} className="shrink-0 text-[#8fc8be]" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] text-[#8fc8be]">删除前备份已创建</div>
                     <div className="mt-0.5 truncate text-[10px] text-wave" title={lastBackupPath}>{lastBackupPath}</div>
                   </div>
-                  <button onClick={copyBackupPath} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title="复制备份路径"><Clipboard size={13} /></button>
+                  <button onClick={copyBackupPath} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title="复制备份路径"><ResonanceActionIcon size="sm"><ResonanceIcon kind="copy" size={12} /></ResonanceActionIcon></button>
                 </div>
               )}
 
@@ -533,10 +553,7 @@ export default function SettingsPage() {
                 ) : summaryError ? (
                   <div className="py-10 text-center text-xs text-[#d99a9a]">数据摘要读取失败</div>
                 ) : pools.length === 0 ? (
-                  <div className="py-10 text-center">
-                    <Database size={19} className="mx-auto text-wave" />
-                    <div className="mt-2 text-xs text-wave">尚未保存抽卡记录</div>
-                  </div>
+                  <ResonanceEmptyState variant="database" compact title="尚未保存抽卡记录" description="完成一次扫描或导入后，本地数据摘要会显示在这里" />
                 ) : (
                   <div className="divide-y divide-white/[0.05]">
                     {pools.map((playerId) => {
@@ -557,7 +574,6 @@ export default function SettingsPage() {
                               badge: 'border-[#d84848]/25 bg-[#d84848]/[0.08] text-[#d84848]',
                               label: '可能缺数据',
                               icon: 'text-[#d99a9a]',
-                              badgeIcon: AlertOctagon,
                             }
                           : isWarn
                             ? {
@@ -566,11 +582,8 @@ export default function SettingsPage() {
                                 badge: 'border-[#c99a68]/25 bg-[#c99a68]/[0.08] text-[#d09960]',
                                 label: '久未同步',
                                 icon: 'text-[#d9bd9a]',
-                                badgeIcon: AlertTriangle,
                               }
                             : null;
-                      const BadgeIcon = palette?.badgeIcon ?? AlertTriangle;
-
                       return (
                         <div
                           key={playerId}
@@ -588,27 +601,28 @@ export default function SettingsPage() {
                                   className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] ${palette.badge}`}
                                   title={tip}
                                 >
-                                  <BadgeIcon size={9} /> {palette.label}
+                                  <ResonanceIcon kind={isDanger ? 'error' : 'warning'} size={10} /> {palette.label}
                                 </span>
                               )}
                             </div>
                             {summary && (
                               <div className="mt-1 flex flex-col gap-0.5 text-[11px] text-wave">
                                 <div className="flex items-center gap-1.5">
-                                  <Database size={11} className="text-[#8fc8be]" />
+                                  <ResonanceIcon kind="database" size={12} className="text-[#8fc8be]" />
                                   <span>记录 {summary.record_count.toLocaleString()} 条 · {summary.earliest_time.slice(0, 10)} 至 {summary.latest_time.slice(0, 10)}</span>
                                 </div>
                                 {summary.last_imported_at && (
                                   <div className="flex items-center gap-1.5">
-                                    <DatabaseZap
-                                      size={11}
+                                    <ResonanceIcon
+                                      kind="sync"
+                                      size={12}
                                       className={palette ? palette.icon : 'text-[#c9ab78]'}
                                     />
                                     <span className={palette ? palette.icon : ''}>
                                       最近同步 {summary.last_imported_at.slice(0, 10)}
                                       {summary.is_inferred && (
                                         <span className="ml-1.5 inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1.5 py-px text-[10px] text-[#c9ab78]" title="升级前已导入数据，同步时间由记录范围推断">
-                                          <Info size={9} /> 推断
+                                          <ResonanceIcon kind="info" size={10} /> 推断
                                         </span>
                                       )}
                                     </span>
@@ -618,8 +632,8 @@ export default function SettingsPage() {
                             )}
                           </div>
                           <div className="relative flex shrink-0 items-center gap-1">
-                            <button onClick={() => handleExport(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><Download size={14} /></button>
-                            <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><Trash2 size={14} /></button>
+                            <button onClick={() => handleExport(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
+                            <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon></button>
                           </div>
                         </div>
                       );
@@ -635,25 +649,24 @@ export default function SettingsPage() {
                   disabled={pools.length === 0}
                   className="flex items-center gap-2 rounded-md border border-[#d84848]/25 px-3 py-2 text-xs text-[#d99a9a] hover:bg-[#d84848]/10 disabled:cursor-not-allowed disabled:opacity-30"
                 >
-                  <Trash2 size={13} />清空全部
+                  <ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon>清空全部
                 </button>
               </div>
             </motion.section>
           </div>
         </div>
 
-        {deleteTarget && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-dialog-title"
-            onMouseDown={(event) => { if (event.currentTarget === event.target) closeDeleteDialog(); }}
-          >
-            <div ref={dialogRef} className="w-full max-w-md rounded-lg border border-[#d84848]/30 bg-[#242424] shadow-2xl">
+        <Modal
+          open={deleteTarget !== null}
+          onClose={closeDeleteDialog}
+          closeDisabled={deleting}
+          className="max-w-md border-[#d84848]/30 bg-[#242424]"
+          labelledBy="delete-dialog-title"
+        >
+            {deleteTarget && <>
               <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><AlertTriangle size={18} /></div>
+                  <div className="mt-0.5 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><ResonanceIcon kind="warning" size={19} /></div>
                   <div>
                     <h2 id="delete-dialog-title" className="text-base font-medium text-tide">
                       {deleteTarget.playerId ? `删除 UID ${deleteTarget.playerId} 的记录` : '清空所有抽卡记录'}
@@ -661,7 +674,7 @@ export default function SettingsPage() {
                     <p className="mt-1 text-xs text-wave">操作前会自动创建完整数据库备份</p>
                   </div>
                 </div>
-                <button onClick={closeDeleteDialog} disabled={deleting} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>
+                <ResonanceCloseButton onClick={closeDeleteDialog} disabled={deleting} />
               </div>
 
               <div className="space-y-4 p-5">
@@ -672,7 +685,7 @@ export default function SettingsPage() {
                     <div className="col-span-2">
                       <div className="text-xs text-wave">记录范围</div>
                       <div className="mt-1 flex items-center gap-1.5 text-tide">
-                        <Database size={11} className="text-[#8fc8be]" />
+                        <ResonanceIcon kind="database" size={12} className="text-[#8fc8be]" />
                         {targetMeta.recordRange}
                       </div>
                     </div>
@@ -681,11 +694,11 @@ export default function SettingsPage() {
                     <div className="col-span-2">
                       <div className="text-xs text-wave">最近同步</div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-tide">
-                        <DatabaseZap size={11} className="text-[#c9ab78]" />
+                        <ResonanceIcon kind="sync" size={12} className="text-[#c9ab78]" />
                         <span className="tabular-nums">{targetMeta.lastImportedAt}</span>
                         {targetMeta.impInferred && (
                           <span className="inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1.5 py-px text-[10px] text-[#c9ab78]" title="升级前已导入数据，同步时间由记录范围推断">
-                            <Info size={9} /> 推断
+                            <ResonanceIcon kind="info" size={10} /> 推断
                           </span>
                         )}
                       </div>
@@ -705,32 +718,31 @@ export default function SettingsPage() {
                     disabled={deleting || confirmationText !== expectedConfirmation}
                     className="flex items-center gap-2 rounded-md bg-[#a64f4f] px-4 py-2 text-sm text-white hover:bg-[#b85a5a] disabled:cursor-not-allowed disabled:opacity-35"
                   >
-                    {deleting ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    <ResonanceActionIcon size="sm" tone="danger">{deleting ? <LoaderCircle size={11} className="animate-spin" /> : <ResonanceIcon kind="delete" size={12} />}</ResonanceActionIcon>
                     {deleting ? '备份并删除中' : '备份并删除'}
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            </>}
+        </Modal>
 
-        {updateInfo && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
-            role="dialog"
-            aria-modal="true"
-            onMouseDown={(event) => { if (event.currentTarget === event.target) closeUpdateModal(); }}
-          >
-            <div className="w-full max-w-md rounded-lg border border-white/[0.08] bg-[#242424] shadow-2xl">
+        <Modal
+          open={updateInfo !== null}
+          onClose={closeUpdateModal}
+          closeDisabled={updating}
+          className="max-w-md border-white/[0.08] bg-[#242424]"
+          labelledBy="update-dialog-title"
+        >
+            {updateInfo && <>
               <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 rounded-md bg-[#6faaa0]/10 p-2 text-[#8fc8be]"><RefreshCw size={18} /></div>
+                  <div className="mt-0.5 rounded-md bg-[#6faaa0]/10 p-2 text-[#8fc8be]"><ResonanceIcon kind="refresh" size={19} /></div>
                   <div>
-                    <h2 className="text-base font-medium text-tide">发现新版本</h2>
+                    <h2 id="update-dialog-title" className="text-base font-medium text-tide">发现新版本</h2>
                     <p className="mt-1 text-xs text-wave">v{appVersion} → v{updateInfo.version}</p>
                   </div>
                 </div>
-                <button onClick={closeUpdateModal} disabled={updating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭"><X size={16} /></button>
+                <ResonanceCloseButton onClick={closeUpdateModal} disabled={updating} />
               </div>
 
               <div className="p-5">
@@ -759,14 +771,13 @@ export default function SettingsPage() {
                     disabled={updating}
                     className="flex items-center gap-2 rounded-md bg-[#5a8a82] px-4 py-2 text-sm text-white hover:bg-[#6a9a92] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {updating ? <LoaderCircle size={14} className="animate-spin" /> : <Download size={14} />}
+                    <ResonanceActionIcon size="sm" tone="gold">{updating ? <LoaderCircle size={11} className="animate-spin" /> : <ResonanceIcon kind="download" size={12} />}</ResonanceActionIcon>
                     {updating ? '更新中' : '立即更新'}
                   </button>
                 </div>
               </div>
-            </div>
-          </div>
-        )}
+            </>}
+        </Modal>
       </div>
     </PageTransition>
   );

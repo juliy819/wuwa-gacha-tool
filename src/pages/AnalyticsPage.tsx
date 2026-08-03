@@ -4,7 +4,7 @@ import { useGachaStore } from '../store/useGachaStore';
 import PageTransition from '../components/PageTransition';
 import ReactECharts from 'echarts-for-react';
 import { QUALITY } from '../types';
-import { BarChart3, TrendingUp, Target, Calendar, Award } from 'lucide-react';
+import ResonanceIcon from '../components/ResonanceModeIcon';
 
 export default function AnalyticsPage() {
   const { records, activePlayerId, fetchStats, fetchRecords } = useGachaStore();
@@ -143,7 +143,7 @@ export default function AnalyticsPage() {
         {records.length === 0 ? (
           <div className="glass-card p-16 flex flex-col items-center justify-center gap-3">
             <div className="w-16 h-16 rounded-full bg-[rgba(212,212,212,0.06)] flex items-center justify-center">
-              <BarChart3 size={28} className="text-wave" />
+              <ResonanceIcon kind="chart" size={29} className="text-wave" />
             </div>
             <div className="text-center">
               <h3 className="text-lg font-medium text-tide">暂无数据</h3>
@@ -154,23 +154,23 @@ export default function AnalyticsPage() {
           <>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-5">
-                <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><Calendar size={14} />每日抽卡统计</h3>
+                <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><ResonanceIcon kind="calendar" size={15} />每日抽卡统计</h3>
                 <div style={{ height: 280 }}><ReactECharts option={barChartOption} style={{ height: '100%' }} /></div>
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="glass-card p-5">
-                <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><Award size={14} />品质分布</h3>
+                <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><ResonanceIcon kind="trophy" size={15} />品质分布</h3>
                 <div style={{ height: 280 }}><ReactECharts option={qualityChartOption} style={{ height: '100%' }} /></div>
               </motion.div>
 
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="glass-card p-5 lg:col-span-2">
-                <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><Target size={14} />卡池分布</h3>
+                <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><ResonanceIcon kind="target" size={15} />卡池分布</h3>
                 <div style={{ height: 320 }}><ReactECharts option={pieChartOption} style={{ height: '100%' }} /></div>
               </motion.div>
             </div>
 
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-card p-5">
-              <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><TrendingUp size={14} />详细统计</h3>
+              <h3 className="text-sm text-wave mb-4 flex items-center gap-2"><ResonanceIcon kind="chart" size={15} />详细统计</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="p-4 rounded-lg bg-[rgba(212,212,212,0.03)]">
                   <div className="text-xs text-wave">总抽数</div>

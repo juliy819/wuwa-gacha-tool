@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { AlertTriangle, Clipboard, Cloud, ExternalLink, Folder, Link, LoaderCircle, RotateCw, Scan, Sparkles, Upload } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import HomeDashboard from '../components/HomeDashboard';
 import PageTransition from '../components/PageTransition';
+import Modal from '../components/Modal';
+import ResonanceField from '../components/ResonanceField';
+import ResonanceEmptyState from '../components/ResonanceEmptyState';
+import ResonanceCloseButton from '../components/ResonanceCloseButton';
+import ResonanceActionIcon from '../components/ResonanceActionIcon';
+import ResonanceIcon from '../components/ResonanceModeIcon';
 import { useClickRipple } from '../hooks/useClickRipple';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
@@ -40,6 +46,18 @@ export default function Home() {
   const [cloudLink, setCloudLink] = useState<CloudGachaLink | null>(null);
   const [cloudOpening, setCloudOpening] = useState(false);
   const [cloudError, setCloudError] = useState('');
+  const scanContentRef = useRef<HTMLDivElement>(null);
+  const [scanContentHeight, setScanContentHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (!showScanModal || !scanContentRef.current) return;
+    const content = scanContentRef.current;
+    const updateHeight = () => setScanContentHeight(content.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [scanMode, showScanModal]);
 
   useEffect(() => {
     fetchSettings();
@@ -115,6 +133,15 @@ export default function Home() {
     if (selected) setJsonPath(selected as string);
   };
 
+  const handleSelectGameDir = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: gameDirInput.trim() || settings?.game_dir || undefined,
+    });
+    if (typeof selected === 'string') setGameDirInput(selected);
+  };
+
   const handleImportJson = async () => {
     if (!jsonPath) return;
     await importJson(jsonPath);
@@ -177,15 +204,16 @@ export default function Home() {
 
   return (
     <PageTransition>
-      <div className="h-full overflow-y-auto overflow-x-hidden">
-        <div className="mx-auto max-w-7xl space-y-5 p-6">
-          <header className="flex items-end justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-semibold text-tide">抽卡概览</h1>
-              <p className="mt-1 text-xs text-wave">重点数据按卡池独立统计</p>
+      <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
+        <div className="page-container home-page-container w-full space-y-5 p-6">
+          <header className="page-header home-page-header relative flex items-end justify-between gap-4 overflow-hidden py-1">
+            <ResonanceField />
+            <div className="relative z-10">
+              <h1 className="page-title text-xl font-semibold text-tide">抽卡概览</h1>
+              <p className="page-subtitle mt-1 text-xs text-wave">重点数据按卡池独立统计</p>
             </div>
-            <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple flex items-center gap-2 px-4 py-2">
-              <Scan size={16} />
+            <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple relative z-10 flex items-center gap-2 px-4 py-2">
+              <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
               扫描抽卡
             </button>
           </header>
@@ -193,72 +221,103 @@ export default function Home() {
           {stats && stats.total_draws > 0 ? (
             <HomeDashboard stats={stats} records={records} />
           ) : (
-            <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-white/[0.06] bg-[#242424] p-12">
-              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-white/[0.04]">
-                <Sparkles size={24} className="text-wave" />
-              </div>
-              <div className="text-center">
-                <h2 className="text-base font-medium text-tide">暂无抽卡数据</h2>
-                <p className="mt-1 text-sm text-wave">扫描游戏记录或导入已有 JSON 文件</p>
-              </div>
+            <ResonanceEmptyState
+              variant="scan"
+              title="暂无抽卡数据"
+              description="扫描游戏记录或导入已有 JSON 文件"
+              className="resonance-panel min-h-[360px]"
+            >
               <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple mt-1 flex items-center gap-2 px-4 py-2">
-                <Scan size={16} />
+                <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
                 开始扫描
               </button>
-            </div>
+            </ResonanceEmptyState>
           )}
         </div>
 
-        {showScanModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-            onClick={() => !scanning && setShowScanModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.96, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="glass-card w-[480px] p-6"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <h2 className="mb-4 text-lg font-semibold text-tide">扫描抽卡数据</h2>
+        <Modal
+          open={showScanModal}
+          onClose={() => setShowScanModal(false)}
+          closeDisabled={scanning || cloudOpening}
+          className="max-w-[480px] p-6"
+          labelledBy="scan-dialog-title"
+          placement="top"
+        >
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <h2 id="scan-dialog-title" className="modal-title text-lg font-semibold text-tide">扫描抽卡数据</h2>
+                <ResonanceCloseButton onClick={() => setShowScanModal(false)} disabled={scanning || cloudOpening} />
+              </div>
 
-              <div className="mb-4 flex items-center gap-1 rounded-lg border border-white/[0.04] bg-white/[0.04] p-0.5">
+              <div className="resonance-segmented mb-4 flex items-center gap-1 p-0.5">
                 {([
-                  ['dir', '游戏目录', Folder],
-                  ['cloud', '云鸣潮', Cloud],
-                  ['url', '抽卡链接', Link],
-                  ['json', '导入 JSON', Upload],
-                ] as const).map(([mode, label, Icon]) => (
+                  ['dir', '游戏目录', 'directory'],
+                  ['cloud', '云鸣潮', 'cloud'],
+                  ['url', '抽卡链接', 'coupling'],
+                  ['json', '导入 JSON', 'ingress'],
+                ] as const).map(([mode, label, iconKind]) => (
                   <button
                     key={mode}
                     onClick={() => setScanMode(mode)}
                     disabled={scanning}
-                    className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs transition-colors ${
-                      scanMode === mode ? 'bg-white/[0.08] text-tide' : 'text-wave hover:text-tide-dim disabled:opacity-50'
+                    className={`relative flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-2 text-xs ${
+                      scanMode === mode ? 'text-tide' : 'text-wave hover:text-tide-dim disabled:opacity-50'
                     }`}
                   >
-                    <Icon size={13} />
-                    {label}
+                    {scanMode === mode && (
+                      <motion.span
+                        layoutId="scan-mode-indicator"
+                        className="resonance-tab-indicator absolute inset-0"
+                        transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                      >
+                        <span className="resonance-tab-surface" />
+                      </motion.span>
+                    )}
+                    <ResonanceActionIcon size="sm" tone={scanMode === mode ? 'gold' : 'default'} framed={false} className="relative z-10">
+                      <ResonanceIcon kind={iconKind} />
+                    </ResonanceActionIcon>
+                    <span className="relative z-10">{label}</span>
                   </button>
                 ))}
               </div>
 
+              <motion.div
+                initial={false}
+                animate={scanContentHeight === null ? undefined : { height: scanContentHeight }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="overflow-hidden"
+              >
+              <motion.div
+                ref={scanContentRef}
+                key={scanMode}
+                initial={{ opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+              >
               {scanMode === 'dir' && (
                 <div className="space-y-2">
                   <p className="text-sm text-wave">请先在游戏中打开抽卡历史记录，再选择游戏安装目录。</p>
-                  <label className="mt-3 block">
-                    <span className="text-sm text-wave">游戏目录</span>
-                    <input
-                      type="text"
-                      value={gameDirInput}
-                      onChange={(event) => setGameDirInput(event.target.value)}
-                      placeholder="例如: E:\Wuthering Waves\Wuthering Waves"
-                      className="glass-input mt-1 w-full px-3 py-2 text-sm"
-                    />
+                  <div className="mt-3">
+                    <label htmlFor="scan-game-dir" className="text-sm text-wave">游戏目录</label>
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        id="scan-game-dir"
+                        type="text"
+                        value={gameDirInput}
+                        onChange={(event) => setGameDirInput(event.target.value)}
+                        placeholder="例如: E:\Wuthering Waves\Wuthering Waves"
+                        className="glass-input min-w-0 flex-1 px-3 py-2 text-sm"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSelectGameDir}
+                        disabled={scanning || extractingUrl}
+                        className="glass-input flex shrink-0 items-center gap-1.5 px-3 text-xs text-wave hover:text-tide disabled:opacity-50"
+                      >
+                        <ResonanceIcon kind="directory" size={14} />选择
+                      </button>
+                    </div>
                     <p className="mt-1 text-xs text-wave">目录下需要包含 Client/Saved/Logs/Client.log 文件</p>
-                  </label>
+                  </div>
 
                   <div className="mt-3">
                     <button
@@ -266,7 +325,7 @@ export default function Home() {
                       disabled={extractingUrl || !gameDirInput.trim()}
                       className="flex items-center gap-2 rounded-lg border border-white/[0.1] px-3 py-1.5 text-xs text-wave transition-colors hover:text-tide disabled:opacity-50"
                     >
-                      {extractingUrl ? <LoaderCircle size={12} className="animate-spin" /> : <Link size={12} />}
+                      {extractingUrl ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="coupling" size={13} />}
                       {extractingUrl ? '提取中...' : '提取抽卡链接'}
                     </button>
 
@@ -278,7 +337,7 @@ export default function Home() {
                       <div className="mt-2 flex items-center gap-2 rounded-md border border-white/[0.06] bg-white/[0.03] px-3 py-2">
                         <span className="min-w-0 flex-1 truncate font-mono text-xs text-tide" title={extractedUrl}>{extractedUrl}</span>
                         <button onClick={handleCopyUrl} className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-wave hover:bg-white/[0.05] hover:text-tide" title="复制链接">
-                          <Clipboard size={12} />
+                          <ResonanceIcon kind="copy" size={13} />
                         </button>
                       </div>
                     )}
@@ -308,7 +367,7 @@ export default function Home() {
                   <div className="rounded-md border border-white/[0.06] bg-white/[0.03] px-3 py-3">
                     <div className="flex items-start gap-3">
                       <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/[0.05] text-wave">
-                        <Cloud size={16} />
+                        <ResonanceIcon kind="cloud" size={17} />
                       </div>
                       <div className="min-w-0">
                         <p className="text-sm text-tide">
@@ -330,7 +389,7 @@ export default function Home() {
 
                     {!cloudLink && (
                       <div className="mt-3 flex items-start gap-2 border-t border-white/[0.06] pt-3 text-xs leading-5 text-[#d9b98c]">
-                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <ResonanceIcon kind="warning" size={15} className="mt-0.5 shrink-0" />
                         <p>云鸣潮不支持多端同时登录。在本工具中登录，可能会使其他设备上的云鸣潮退出登录。</p>
                       </div>
                     )}
@@ -351,7 +410,7 @@ export default function Home() {
                           disabled={cloudOpening || scanning}
                           className="flex items-center gap-1 text-xs text-wave transition-colors hover:text-tide disabled:opacity-50"
                         >
-                          <RotateCw size={11} />
+                          <ResonanceIcon kind="refresh" size={12} />
                           重新获取
                         </button>
                       </div>
@@ -364,7 +423,7 @@ export default function Home() {
                           className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-wave transition-colors hover:bg-white/[0.05] hover:text-tide"
                           title="复制链接"
                         >
-                          <Clipboard size={13} />
+                          <ResonanceIcon kind="copy" size={14} />
                         </button>
                       </div>
                     </div>
@@ -397,8 +456,10 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              </motion.div>
+              </motion.div>
 
-              <div className="mt-6 flex gap-3">
+              <div className="mt-4 flex gap-3 border-t border-white/[0.06] pt-4">
                 <button
                   onClick={() => setShowScanModal(false)}
                   disabled={scanning}
@@ -426,25 +487,33 @@ export default function Home() {
                   {scanning || cloudOpening ? (
                     <>
                       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
-                        <Scan size={16} />
+                        <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
                       </motion.div>
-                      {cloudOpening ? '正在打开...' : scanMode === 'json' ? '导入中...' : '扫描中...'}
+                      {cloudOpening ? '正在打开...' : scanMode === 'dir' ? '扫描中...' : '导入中...'}
                     </>
                   ) : (
                     <>
-                      {scanMode === 'cloud' && !cloudLink ? <ExternalLink size={16} /> : <Scan size={16} />}
+                      <ResonanceActionIcon size="sm" tone="gold">
+                      {scanMode === 'cloud' && !cloudLink
+                        ? <ResonanceIcon kind="external" size={14} />
+                        : scanMode === 'json'
+                          ? <ResonanceIcon kind="ingress" size={14} />
+                          : scanMode === 'url'
+                            ? <ResonanceIcon kind="coupling" size={14} />
+                            : <ResonanceIcon kind="scan" size={14} />}
+                      </ResonanceActionIcon>
                       {scanMode === 'cloud'
                         ? cloudLink ? '导入此链接' : '打开云鸣潮'
                         : scanMode === 'json'
                           ? '开始导入'
-                          : '开始扫描'}
+                          : scanMode === 'url'
+                            ? '导入链接'
+                            : '开始扫描'}
                     </>
                   )}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
+        </Modal>
       </div>
     </PageTransition>
   );

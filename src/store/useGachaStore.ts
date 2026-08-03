@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { gachaApi } from '../services/tauri-api';
+import { playUiFeedback } from '../lib/uiFeedback';
 import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, RecordSummary, ToastMessage } from '../types';
 
 interface GachaStore {
@@ -129,6 +130,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         'success',
         `扫描完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
       );
+      void playUiFeedback('scan-complete');
       if (result.failed_pools.length > 0) {
         get().addToast('info', `${result.failed_pools.length} 个卡池获取失败，已保留原有数据`);
       }
@@ -159,6 +161,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         'success',
         `扫描完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
       );
+      void playUiFeedback('scan-complete');
       if (result.failed_pools.length > 0) {
         get().addToast('info', `${result.failed_pools.length} 个卡池获取失败，已保留原有数据`);
       }
@@ -189,6 +192,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         'success',
         `导入完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
       );
+      void playUiFeedback('data-rebuilt');
     } catch (e) {
       set({ error: String(e), scanning: false });
       get().addToast('error', String(e));

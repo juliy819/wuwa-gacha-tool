@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { getVersion } from '@tauri-apps/api/app';
-import { AlertTriangle, CalendarRange, DatabaseZap, Info, User, AlertOctagon } from 'lucide-react';
 import {
   getSyncFreshness,
   daysSince,
@@ -10,6 +9,7 @@ import {
   type SyncFreshness as SyncFreshnessType,
 } from '../lib/utils';
 import { useGachaStore } from '../store/useGachaStore';
+import ResonanceIcon from './ResonanceModeIcon';
 
 export default function StatusBar() {
   const [appVersion, setAppVersion] = useState('');
@@ -70,8 +70,7 @@ export default function StatusBar() {
 
   return (
     <div
-      className="flex items-center justify-between gap-4 px-6 py-1.5 text-xs text-wave border-t border-[rgba(255,255,255,0.06)]"
-      style={{ background: '#1a1a1a' }}
+      className="app-status-bar flex items-center justify-between gap-4 px-6 py-1.5 text-xs text-wave"
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span>Wuwa Gacha Tool{appVersion && ` v${appVersion}`}</span>
@@ -80,7 +79,7 @@ export default function StatusBar() {
           <>
             <span className="h-3 w-px bg-white/10" />
             <span className="flex items-center gap-1.5">
-              <User size={11} className="text-[#8fc8be]" />
+              <ResonanceIcon kind="user" size={12} className="text-[#8fc8be]" />
               <span className="tabular-nums text-tide-dim">UID {activePlayerId}</span>
             </span>
             {activeRecordCount > 0 && (
@@ -93,7 +92,7 @@ export default function StatusBar() {
               <>
                 <span className="h-3 w-px bg-white/10" />
                 <span className="flex items-center gap-1.5">
-                  <CalendarRange size={11} className="text-[#8fc8be]" />
+                  <ResonanceIcon kind="calendar" size={12} className="text-[#8fc8be]" />
                   <span className="tabular-nums text-tide-dim">{recordRange}</span>
                 </span>
               </>
@@ -105,8 +104,9 @@ export default function StatusBar() {
                   className={`flex items-center gap-1.5 ${lastImported.freshness !== 'fresh' ? palette.text : ''}`}
                   title={lastImported.freshness !== 'fresh' ? palette.hint : undefined}
                 >
-                  <DatabaseZap
-                    size={11}
+                  <ResonanceIcon
+                    kind="sync"
+                    size={12}
                     className={lastImported.freshness === 'fresh' ? 'text-[#c9ab78]' : palette.icon}
                   />
                   <span>最近同步</span>
@@ -116,17 +116,17 @@ export default function StatusBar() {
                     {lastImported.date}
                   </span>
                   {lastImported.freshness === 'warn' && (
-                    <AlertTriangle size={11} className={palette.icon} />
+                    <ResonanceIcon kind="warning" size={12} className={palette.icon} />
                   )}
                   {lastImported.freshness === 'danger' && (
-                    <AlertOctagon size={11} className={palette.icon} />
+                    <ResonanceIcon kind="error" size={12} className={palette.icon} />
                   )}
                   {lastImported.isInferred && (
                     <span
                       className="inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1 py-px text-[9px] text-[#c9ab78]"
                       title="升级前已导入数据，同步时间由记录范围推断"
                     >
-                      <Info size={8} /> 推断
+                      <ResonanceIcon kind="info" size={9} /> 推断
                     </span>
                   )}
                 </span>

@@ -1,20 +1,27 @@
 import { useRef, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
-import { Home, RefreshCw, Settings as SettingsIcon, ChevronDown, Check, Minus, X, Maximize2 } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useGachaStore } from '../store/useGachaStore';
+import { useUpdateStore } from '../store/useUpdateStore';
+import appIcon from '../../src-tauri/icons/32x32.png';
+import ResonanceCloseButton from './ResonanceCloseButton';
+import ResonanceActionIcon from './ResonanceActionIcon';
+import ResonanceIcon, { type ResonanceModeIconKind } from './ResonanceModeIcon';
+import WuwaControlIcon from './WuwaControlIcon';
 
-const navItems = [
-  { path: '/', label: '首页', Icon: Home },
-  { path: '/records', label: '记录', Icon: RefreshCw },
-  { path: '/settings', label: '设置', Icon: SettingsIcon },
+const navItems: Array<{ path: string; label: string; kind: ResonanceModeIconKind }> = [
+  { path: '/', label: '首页', kind: 'origin' },
+  { path: '/records', label: '记录', kind: 'echo' },
+  { path: '/settings', label: '设置', kind: 'calibration' },
 ];
 
 export default function Navbar() {
   const location = useLocation();
   const { pools, activePlayerId, setActivePlayer, refreshAll } = useGachaStore();
+  const availableUpdate = useUpdateStore((state) => state.availableUpdate);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 });
 
@@ -32,6 +39,25 @@ export default function Navbar() {
     });
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [menuOpen]);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refreshAll();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const handleMinimize = async () => {
     try { await getCurrentWindow().minimize(); } catch (e) { console.error(e); }
   };
@@ -45,52 +71,51 @@ export default function Navbar() {
   return (
     <nav
       data-tauri-drag-region
-      className="relative flex items-center justify-between border-b select-none h-12 shrink-0"
-      style={{ background: '#1a1a1a', borderColor: 'rgba(255, 255, 255, 0.06)' }}
+      className="app-navbar relative flex h-12 shrink-0 select-none items-center justify-between"
     >
       {/* 左侧：标题 + 分隔线 + 导航标签 */}
       <div className="flex items-center h-full">
-        <div className="flex items-center gap-2.5 pl-5 pr-3 h-full">
-          <span className="text-sm font-medium text-tide tracking-wide whitespace-nowrap">
-            Wuwa Gacha Tool - BY Juliy
+        <div className="flex h-full items-center gap-2.5 pl-5 pr-4">
+          <img src={appIcon} alt="" className="app-brand-icon" aria-hidden="true" />
+          <span className="flex items-baseline gap-2 whitespace-nowrap">
+            <span className="brand-title">Wuwa Gacha Tool</span>
+            <span className="brand-author">BY Juliy</span>
           </span>
         </div>
 
-        <div className="h-4 w-px" style={{ background: 'rgba(255, 255, 255, 0.08)' }} />
+        <div className="nav-divider h-5 w-px" />
 
         <div ref={containerRef} className="relative flex items-center gap-1 pl-2.5 pr-5 h-full">
           <motion.div
-            className="absolute rounded-md overflow-hidden"
+            className="nav-active-frame absolute overflow-hidden"
             style={{
               top: 6,
               bottom: 6,
-              background: '#2f2f2f',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
             animate={{ left: indicatorStyle.left, width: indicatorStyle.width }}
             transition={{ type: 'spring', stiffness: 400, damping: 35 }}
           >
-            <div
-              className="navbar-scan-line absolute inset-y-0"
-              style={{
-                width: '40%',
-                background: 'linear-gradient(90deg, transparent, rgba(212, 212, 212, 0.08), transparent)',
-              }}
-            />
+            <span className="nav-active-surface" />
+            <span className="nav-active-node" />
           </motion.div>
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
-            const Icon = item.Icon;
             return (
               <Link
                 key={item.path}
                 to={item.path}
-                className={`relative z-10 flex items-center gap-2 px-4 py-2 rounded-md font-medium text-sm tracking-wide transition-colors duration-200 ${
+                data-active={isActive ? 'true' : 'false'}
+                className={`app-nav-link relative z-10 flex items-center gap-2 px-4 py-2 text-sm font-medium ${
                   isActive ? 'text-tide' : 'text-wave hover:text-tide-dim'
                 }`}
               >
-                <Icon size={15} strokeWidth={isActive ? 2.2 : 1.6} />
+                <ResonanceActionIcon size="sm" tone={isActive ? 'gold' : 'default'} framed={false}>
+                  <ResonanceIcon kind={item.kind} />
+                </ResonanceActionIcon>
                 <span>{item.label}</span>
+                {item.path === '/settings' && availableUpdate && (
+                  <span className="nav-status-diamond" aria-hidden="true" />
+                )}
               </Link>
             );
           })}
@@ -106,14 +131,16 @@ export default function Navbar() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm glass-input"
             >
               <span className="text-tide">{activePlayerId || '选择玩家'}</span>
-              <ChevronDown size={14} className={`transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
+              <ResonanceIcon kind="chevron" size={14} className={`transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
             </button>
-            {menuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+            {menuOpen && <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />}
+            <AnimatePresence>
+              {menuOpen && (
                 <motion.div
                   initial={{ opacity: 0, y: -5 }}
                   animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.985 }}
+                  transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
                   className="absolute right-0 top-full mt-2 w-48 rounded-lg overflow-hidden z-50 glass-card"
                 >
                   {pools.map((id) => (
@@ -124,41 +151,45 @@ export default function Navbar() {
                       style={{ color: activePlayerId === id ? '#d4d4d4' : '#b4b4b4' }}
                     >
                       {id}
-                      {activePlayerId === id && <Check size={14} className="text-tide" />}
+                      {activePlayerId === id && <ResonanceIcon kind="check" size={14} className="text-tide" />}
                     </button>
                   ))}
                 </motion.div>
-              </>
-            )}
+              )}
+            </AnimatePresence>
           </div>
         )}
 
         <button
-          onClick={refreshAll}
-          className="flex items-center justify-center w-9 h-9 mr-1 text-wave hover:text-tide rounded-md hover:bg-white/[0.04] transition-all"
-          title="刷新"
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="utility-control mr-1 flex h-9 w-9 items-center justify-center text-wave hover:text-tide"
+          title={refreshing ? '正在刷新' : '刷新'}
+          aria-label={refreshing ? '正在刷新' : '刷新'}
         >
-          <RefreshCw size={15} />
+          <WuwaControlIcon kind="refresh" active={refreshing} />
         </button>
 
         <button
           onClick={handleMinimize}
-          className="flex items-center justify-center w-12 h-full text-wave hover:text-tide-dim hover:bg-white/[0.04] transition-all"
+          className="window-control flex h-full w-12 items-center justify-center text-wave hover:text-tide-dim"
+          aria-label="最小化窗口"
         >
-          <Minus size={14} />
+          <WuwaControlIcon kind="minimize" />
         </button>
         <button
           onClick={handleMaximize}
-          className="flex items-center justify-center w-12 h-full text-wave hover:text-tide-dim hover:bg-white/[0.04] transition-all"
+          className="window-control flex h-full w-12 items-center justify-center text-wave hover:text-tide-dim"
+          aria-label="最大化或还原窗口"
         >
-          <Maximize2 size={12} />
+          <WuwaControlIcon kind="maximize" />
         </button>
-        <button
+        <ResonanceCloseButton
           onClick={handleClose}
-          className="flex items-center justify-center w-12 h-full text-wave hover:text-white hover:bg-[rgba(255,80,80,0.2)] transition-all"
-        >
-          <X size={14} />
-        </button>
+          className="window-control window-control-close window-resonance-close"
+          aria-label="关闭窗口"
+          title="关闭窗口"
+        />
       </div>
     </nav>
   );

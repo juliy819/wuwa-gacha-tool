@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Clock3, LoaderCircle, Plus, Save, X } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 import type { GachaRecord, GachaResource } from '../types';
 import { POOL_TYPES } from '../types';
+import Modal from './Modal';
+import ResonanceCloseButton from './ResonanceCloseButton';
+import ResonanceIcon from './ResonanceModeIcon';
+import { playUiFeedback } from '../lib/uiFeedback';
 
 type SubmitValue = {
   card_pool_type: string;
@@ -180,8 +184,6 @@ export default function MockGachaDialog({
     && validTimePart(second, 59);
   const displayTime = `${date.replace(/-/g, '/')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
 
-  if (!open) return null;
-
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!pullsValid || !timeValid) return;
@@ -191,22 +193,35 @@ export default function MockGachaDialog({
       pulls: numericPulls,
       time: `${date} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`,
     });
+    void playUiFeedback(editing ? 'data-rebuilt' : 'record-inserted');
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-4"
-      onMouseDown={(event) => { if (event.currentTarget === event.target && !submitting) onClose(); }}
+    <Modal
+      open={open}
+      onClose={onClose}
+      closeDisabled={submitting}
+      className="allow-popover-overflow max-w-[500px] overflow-visible"
+      labelledBy="mock-gacha-dialog-title"
     >
-      <form onSubmit={submit} className="glass-card w-full max-w-[500px] overflow-visible rounded-lg shadow-2xl">
+      <form
+        onSubmit={submit}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || (!poolOpen && !resourceOpen && !timeOpen)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          setPoolOpen(false);
+          setResourceOpen(false);
+          setTimeOpen(false);
+        }}
+        className="w-full"
+      >
         <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <div>
-            <h2 className="text-sm font-semibold text-tide">{editing ? '编辑模拟记录' : '插入五星记录'}</h2>
+            <h2 id="mock-gacha-dialog-title" className="text-sm font-semibold text-tide">{editing ? '编辑模拟记录' : '插入五星记录'}</h2>
             <p className="mt-1 text-xs text-wave">{editing ? '仅修改当前模拟记录' : '自动补足目标抽数缺少的记录'}</p>
           </div>
-          <button type="button" onClick={onClose} disabled={submitting} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="关闭">
-            <X size={16} />
-          </button>
+          <ResonanceCloseButton onClick={onClose} disabled={submitting} />
         </header>
 
         <div className="grid gap-4 px-5 py-5 sm:grid-cols-2">
@@ -220,7 +235,7 @@ export default function MockGachaDialog({
               aria-expanded={poolOpen}
             >
               <span className="truncate">{POOL_TYPES.find((pool) => pool.type === poolType)?.name}</span>
-              <ChevronDown size={14} className={`shrink-0 text-wave transition-transform ${poolOpen ? 'rotate-180' : ''}`} />
+              <ResonanceIcon kind="chevron" size={14} className={`shrink-0 text-wave transition-transform ${poolOpen ? 'rotate-180' : ''}`} />
             </button>
             {poolOpen && (
               <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-white/[0.1] bg-[#202020] p-1 shadow-2xl" role="listbox">
@@ -234,7 +249,7 @@ export default function MockGachaDialog({
                     aria-selected={pool.type === poolType}
                   >
                     <span>{pool.name}</span>
-                    {pool.type === poolType && <Check size={13} />}
+                    {pool.type === poolType && <ResonanceIcon kind="check" size={13} />}
                   </button>
                 ))}
               </div>
@@ -257,7 +272,7 @@ export default function MockGachaDialog({
                 aria-expanded={resourceOpen}
                 aria-controls="mock-resource-options"
               />
-              <ChevronDown size={14} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-wave transition-transform ${resourceOpen ? 'rotate-180' : ''}`} />
+              <ResonanceIcon kind="chevron" size={14} className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-wave transition-transform ${resourceOpen ? 'rotate-180' : ''}`} />
             </div>
             {resourceOpen && (
               <div id="mock-resource-options" className="absolute left-0 right-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-md border border-white/[0.1] bg-[#202020] p-1 shadow-2xl" role="listbox">
@@ -274,7 +289,7 @@ export default function MockGachaDialog({
                     aria-selected={resource.resource_id === resourceId}
                   >
                     <span className="truncate">{resource.name}</span>
-                    {resource.resource_id === resourceId && <Check size={13} className="shrink-0" />}
+                    {resource.resource_id === resourceId && <ResonanceIcon kind="check" size={13} className="shrink-0" />}
                   </button>
                 ))}
               </div>
@@ -308,17 +323,17 @@ export default function MockGachaDialog({
               aria-expanded={timeOpen}
             >
               <span className="truncate">{displayTime}</span>
-              <CalendarDays size={15} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-wave" />
+              <ResonanceIcon kind="calendar" size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-wave" />
             </button>
             {timeOpen && (
               <div className="absolute bottom-full right-0 z-30 mb-1 w-[360px] max-w-[calc(100vw-3rem)] rounded-md border border-white/[0.1] bg-[#202020] p-3 shadow-2xl" role="dialog" aria-label="选择记录时间">
                 <div className="flex items-center justify-between">
                   <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="flex h-8 w-8 items-center justify-center rounded text-wave hover:bg-white/[0.06] hover:text-tide" title="上个月">
-                    <ChevronLeft size={15} />
+                    <ResonanceIcon kind="previous" size={15} />
                   </button>
                   <span className="text-sm font-medium text-tide">{calendarMonth.getFullYear()} 年 {calendarMonth.getMonth() + 1} 月</span>
                   <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="flex h-8 w-8 items-center justify-center rounded text-wave hover:bg-white/[0.06] hover:text-tide" title="下个月">
-                    <ChevronRight size={15} />
+                    <ResonanceIcon kind="next" size={15} />
                   </button>
                 </div>
                 <div className="mt-2 grid grid-cols-7 text-center text-[10px] text-wave">
@@ -341,7 +356,7 @@ export default function MockGachaDialog({
                   })}
                 </div>
                 <div className="mt-3 flex items-end gap-2 border-t border-white/[0.07] pt-3">
-                  <Clock3 size={15} className="mb-2.5 shrink-0 text-wave" />
+                  <ResonanceIcon kind="clock" size={16} className="mb-2.5 shrink-0 text-wave" />
                   {[
                     { label: '时', value: hour, setValue: setHour, max: 23 },
                     { label: '分', value: minute, setValue: setMinute, max: 59 },
@@ -376,14 +391,14 @@ export default function MockGachaDialog({
           <button type="button" className="fixed inset-0 z-20 cursor-default" onClick={() => { setPoolOpen(false); setResourceOpen(false); setTimeOpen(false); }} aria-label="关闭弹出菜单" />
         )}
 
-        <footer className="flex items-center justify-end gap-2 rounded-b-lg border-t border-white/[0.06] bg-[#262626] px-5 py-4">
+        <footer className="flex items-center justify-end gap-2 border-t border-white/[0.06] bg-transparent px-5 py-4">
           <button type="button" onClick={onClose} disabled={submitting} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">取消</button>
           <button type="submit" disabled={submitting || loadingResources || resourceId === 0 || !pullsValid || !timeValid} className="tide-btn flex min-w-[108px] items-center justify-center gap-2 px-4 py-2 text-sm">
-            {submitting ? <LoaderCircle size={14} className="animate-spin" /> : editing ? <Save size={14} /> : <Plus size={14} />}
+            {submitting ? <LoaderCircle size={14} className="animate-spin" /> : editing ? <ResonanceIcon kind="save" size={15} /> : <ResonanceIcon kind="add" size={15} />}
             {editing ? '保存修改' : '确认插入'}
           </button>
         </footer>
       </form>
-    </div>
+    </Modal>
   );
 }

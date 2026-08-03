@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, XCircle, Info, X } from 'lucide-react';
 import type { ToastMessage } from '../types';
+import ResonanceCloseButton from './ResonanceCloseButton';
+import ResonanceIcon from './ResonanceModeIcon';
 
 interface ToastProps {
   messages: ToastMessage[];
@@ -28,21 +28,19 @@ export default function Toast({ messages, onRemove }: ToastProps) {
             }`}
           >
             {msg.type === 'success' && (
-              <CheckCircle size={18} className="text-[#7ab88a]" />
+              <ResonanceIcon kind="success" size={19} className="text-[#7ab88a]" />
             )}
             {msg.type === 'error' && (
-              <XCircle size={18} className="text-[#b87a7a]" />
+              <ResonanceIcon kind="error" size={19} className="text-[#b87a7a]" />
             )}
             {msg.type === 'info' && (
-              <Info size={18} className="text-[#7a8ab8]" />
+              <ResonanceIcon kind="info" size={19} className="text-[#7a8ab8]" />
             )}
             <span className="text-sm text-tide flex-1">{msg.message}</span>
-            <button
+            <ResonanceCloseButton
               onClick={() => onRemove(msg.id)}
-              className="text-wave hover:text-tide transition-colors"
-            >
-              <X size={14} />
-            </button>
+              size="sm"
+            />
             <div
               className="toast-progress absolute bottom-0 left-0 h-0.5"
               style={{

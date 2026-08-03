@@ -1,20 +1,11 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
-import {
-  Activity,
-  BarChart3,
-  CircleDot,
-  Crosshair,
-  Swords,
-  Sparkles,
-  Trophy,
-  UserRoundCheck,
-} from 'lucide-react';
 import type { GachaRecord, GachaStats, PoolInfo } from '../types';
 import { QUALITY } from '../types';
 import AnimatedCounter from './AnimatedCounter';
 import GlowCard from './GlowCard';
 import ResourceIcon from './ResourceIcon';
+import ResonanceIcon from './ResonanceModeIcon';
 
 interface HomeDashboardProps {
   stats: GachaStats;
@@ -32,8 +23,10 @@ interface FiveStarResult {
 }
 
 const CORE_POOL_TYPES = new Set(['1', '2', '3', '4']);
+const PITY_MILESTONES = [20, 40, 60, 80];
 // 新旅 / 忆旅唤取池：仅有实际抽取记录时才显示
 const OPTIONAL_POOL_TYPES = new Set(['8', '9', '12', '13']);
+const RATIO_DIAL_TICKS = Array.from({ length: 16 }, (_, index) => index * 22.5);
 
 function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
   const pityByPool = new Map<string, number>();
@@ -71,15 +64,22 @@ function SummaryMetric({
   detail,
   icon,
   accent = false,
+  index,
 }: {
   label: string;
   value: React.ReactNode;
   detail: string;
   icon: React.ReactNode;
   accent?: boolean;
+  index: number;
 }) {
   return (
-    <div className="min-w-0 bg-[#242424] px-4 py-3.5 transition-colors duration-200 hover:bg-[#252525]">
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.32, delay: index * 0.035, ease: [0.16, 1, 0.3, 1] }}
+      className="summary-metric min-w-0 px-4 py-3.5"
+    >
       <div className="flex items-center gap-2 text-xs text-wave">
         {icon}
         <span>{label}</span>
@@ -88,6 +88,46 @@ function SummaryMetric({
         {value}
       </div>
       <div className="mt-0.5 text-[11px] text-wave-dim truncate">{detail}</div>
+      <span className="summary-metric-node" aria-hidden="true" />
+    </motion.div>
+  );
+}
+
+function RatioDial({ rate, wins, total }: { rate: number; wins: number; total: number }) {
+  const safeRate = Math.min(Math.max(rate, 0), 100);
+  return (
+    <div className="ratio-dial-layout">
+      <div className="ratio-dial" aria-label={`不歪率 ${safeRate.toFixed(1)}%`}>
+        <svg viewBox="0 0 140 140" aria-hidden="true">
+          <circle cx="70" cy="70" r="52" fill="none" stroke="#d4d4d4" strokeOpacity="0.08" strokeWidth="8" />
+          <motion.circle
+            cx="70"
+            cy="70"
+            r="52"
+            fill="none"
+            pathLength="100"
+            stroke="#8fc8be"
+            strokeWidth="8"
+            strokeLinecap="butt"
+            transform="rotate(-90 70 70)"
+            initial={{ strokeDasharray: '0 100' }}
+            animate={{ strokeDasharray: `${safeRate} ${100 - safeRate}` }}
+            transition={{ duration: 0.72, delay: 0.18, ease: [0.16, 1, 0.3, 1] }}
+          />
+          <circle cx="70" cy="70" r="39" fill="none" stroke="#d8bd84" strokeOpacity="0.16" strokeWidth="1" strokeDasharray="2 5" />
+          {RATIO_DIAL_TICKS.map((angle) => (
+            <path key={angle} d="M70 8V14" transform={`rotate(${angle} 70 70)`} stroke={angle % 90 === 0 ? '#d8bd84' : '#d4d4d4'} strokeOpacity={angle % 90 === 0 ? 0.6 : 0.2} />
+          ))}
+        </svg>
+        <div className="ratio-dial-value">
+          <span>{total > 0 ? safeRate.toFixed(1) : '-'}</span>
+          {total > 0 ? <small>%</small> : null}
+        </div>
+      </div>
+      <div className="ratio-dial-legend">
+        <div><span className="ratio-legend-mark ratio-legend-win" />不歪 <strong>{wins}</strong></div>
+        <div><span className="ratio-legend-mark ratio-legend-off" />总五星 <strong>{total}</strong></div>
+      </div>
     </div>
   );
 }
@@ -99,7 +139,7 @@ function PityRow({ pool }: { pool: PoolInfo }) {
   const isHigh = pool.current_pity >= 66;
 
   return (
-    <div className="py-3 border-b border-white/[0.05]">
+    <div className="pity-row border-b border-white/[0.05] py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm text-tide truncate">{pool.pool_name}</div>
@@ -116,17 +156,27 @@ function PityRow({ pool }: { pool: PoolInfo }) {
         </div>
       </div>
       <div className="mt-2.5 flex items-center gap-2">
-        <div
-          className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.06]"
-          style={{
-            backgroundImage: 'repeating-linear-gradient(90deg, transparent 0, transparent calc(12.5% - 1px), rgba(255,255,255,0.08) calc(12.5% - 1px), rgba(255,255,255,0.08) 12.5%)',
-          }}
-        >
+        <div className="pity-track relative h-3 flex-1 overflow-hidden" aria-label={`当前 ${pool.current_pity} 抽，保底 ${limit} 抽`}>
           <motion.div
-            initial={{ width: 0 }}
-            animate={{ width: `${progress}%` }}
+            initial={{ scaleX: 0 }}
+            animate={{ scaleX: progress / 100 }}
             transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-            className={`h-full rounded-full ${isHigh ? 'bg-[#d8bd84]' : 'bg-[#6faaa0]'}`}
+            className={`pity-signal absolute inset-y-[3px] left-0 origin-left ${isHigh ? 'pity-signal-high' : ''}`}
+            style={{ width: '100%' }}
+          />
+          {PITY_MILESTONES.map((milestone) => (
+            <span
+              key={milestone}
+              className={`pity-milestone-node ${pool.current_pity >= milestone ? 'pity-milestone-node-reached' : ''}`}
+              style={{ left: `${(milestone / limit) * 100}%` }}
+              aria-hidden="true"
+            />
+          ))}
+          <motion.span
+            initial={{ left: 0, opacity: 0 }}
+            animate={{ left: `${progress}%`, opacity: pool.current_pity > 0 ? 1 : 0 }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className={`pity-measure-point ${isHigh ? 'pity-measure-point-high' : ''}`}
           />
         </div>
         <span className="w-16 text-right text-[11px] text-wave">
@@ -159,37 +209,37 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
   const notOffRateCount = Math.max(eventRoleFiveStars - stats.off_rate_count, 0);
 
   return (
-    <div className="space-y-4">
+    <div className="home-dashboard space-y-4">
       <motion.section
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.06] md:grid-cols-3 xl:grid-cols-6"
+        className="resonance-metrics grid grid-cols-2 gap-px overflow-hidden md:grid-cols-3 xl:grid-cols-6"
       >
-        <SummaryMetric label="累计唤取" value={<AnimatedCounter value={stats.total_draws} shimmer pulse milestone />} detail={`${stats.total_four_star} 个四星`} icon={<Sparkles size={13} />} />
-        <SummaryMetric label="五星数量" value={<AnimatedCounter value={stats.total_five_star} pulse milestone />} detail="已导入记录中的五星" icon={<Trophy size={13} />} accent />
-        <SummaryMetric label="五星概率" value={<AnimatedCounter value={stats.five_star_rate} formatter={(v) => `${v.toFixed(2)}%`} pulse />} detail="占全部已导入记录" icon={<CircleDot size={13} />} />
-        <SummaryMetric label="平均五星抽数" value={<AnimatedCounter value={stats.avg_five_star_pity} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="各卡池分别计算后汇总" icon={<BarChart3 size={13} />} />
-        <SummaryMetric label="每个 UP 角色" value={<AnimatedCounter value={stats.avg_up_role_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 角色池整体投入" icon={<UserRoundCheck size={13} />} accent />
-        <SummaryMetric label="每把 UP 武器" value={<AnimatedCounter value={stats.avg_up_weapon_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 武器池整体投入" icon={<Swords size={13} />} accent />
+        <SummaryMetric index={0} label="累计唤取" value={<AnimatedCounter value={stats.total_draws} shimmer pulse milestone />} detail={`${stats.total_four_star} 个四星`} icon={<ResonanceIcon kind="spark" size={14} />} />
+        <SummaryMetric index={1} label="五星数量" value={<AnimatedCounter value={stats.total_five_star} pulse milestone />} detail="已导入记录中的五星" icon={<ResonanceIcon kind="trophy" size={14} />} accent />
+        <SummaryMetric index={2} label="五星概率" value={<AnimatedCounter value={stats.five_star_rate} formatter={(v) => `${v.toFixed(2)}%`} pulse />} detail="占全部已导入记录" icon={<ResonanceIcon kind="target" size={14} />} />
+        <SummaryMetric index={3} label="平均五星抽数" value={<AnimatedCounter value={stats.avg_five_star_pity} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="各卡池分别计算后汇总" icon={<ResonanceIcon kind="chart" size={14} />} />
+        <SummaryMetric index={4} label="每个 UP 角色" value={<AnimatedCounter value={stats.avg_up_role_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 角色池整体投入" icon={<ResonanceIcon kind="user" size={14} />} accent />
+        <SummaryMetric index={5} label="每把 UP 武器" value={<AnimatedCounter value={stats.avg_up_weapon_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 武器池整体投入" icon={<ResonanceIcon kind="weapon" size={14} />} accent />
       </motion.section>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
+      <div className="home-dashboard-primary grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
         <GlowCard
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.06 }}
-          className="rounded-lg border border-white/[0.06] bg-[#242424] px-5 py-4"
+          className="resonance-panel px-5 py-4"
         >
           <div className="flex items-center justify-between gap-4">
             <div>
-              <h2 className="flex items-center gap-2 text-sm font-medium text-tide">
-                <Activity size={14} /> 当前垫抽
+              <h2 className="panel-heading flex items-center gap-2 text-sm font-medium text-tide">
+                <ResonanceIcon kind="activity" size={15} /> 当前垫抽
               </h2>
               <p className="mt-1 text-[11px] text-wave-dim">各类卡池独立累计，不跨池合并</p>
             </div>
-            <span className="rounded border border-white/[0.07] px-2 py-1 text-[10px] text-wave">五星保底 80</span>
+            <span className="tech-chip px-2 py-1 text-[10px] text-wave">五星保底 80</span>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-x-6">
+          <div className="home-pity-grid mt-2 grid grid-cols-2 gap-x-6">
             {visiblePools.map((pool) => <PityRow key={pool.pool_type} pool={pool} />)}
           </div>
         </GlowCard>
@@ -198,29 +248,21 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
-          className="rounded-lg border border-white/[0.06] bg-[#242424] p-5"
+          className="resonance-panel p-5"
         >
-          <h2 className="flex items-center gap-2 text-sm font-medium text-tide">
-            <Crosshair size={14} /> UP 角色池表现
+          <h2 className="panel-heading flex items-center gap-2 text-sm font-medium text-tide">
+            <ResonanceIcon kind="target" size={15} /> UP 角色池表现
           </h2>
           <p className="mt-1 text-[11px] text-wave-dim">仅统计 UP 角色池中的五星结果</p>
 
-          <div className="mt-6 border-l-2 border-[#6faaa0] pl-4">
-            <div className="text-[11px] text-wave">不歪率</div>
-            <div className="mt-1 text-3xl font-semibold tabular-nums text-[#8fc8be]">
-              {eventRoleFiveStars > 0 ? `${stats.win_rate_5050.toFixed(1)}%` : '-'}
-            </div>
-            <div className="mt-1 text-xs text-wave">
-              不歪 {notOffRateCount} 次 / 共 {eventRoleFiveStars} 次五星
-            </div>
-          </div>
+          <RatioDial rate={stats.win_rate_5050} wins={notOffRateCount} total={eventRoleFiveStars} />
 
           <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06]">
-            <div className="bg-[#202020] p-3">
+            <div className="submetric-cell p-3">
               <div className="text-[11px] text-wave">不歪次数</div>
               <div className="mt-1 text-xl font-semibold text-[#8fc8be]">{notOffRateCount}</div>
             </div>
-            <div className="bg-[#202020] p-3">
+            <div className="submetric-cell p-3">
               <div className="text-[11px] text-wave">歪的次数</div>
               <div className="mt-1 text-xl font-semibold text-[#d99a9a]">{stats.off_rate_count}</div>
             </div>
@@ -232,12 +274,12 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.14 }}
-        className="rounded-lg border border-white/[0.06] bg-[#242424] p-5"
+        className="resonance-panel p-5"
       >
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="flex items-center gap-2 text-sm font-medium text-tide">
-              <Trophy size={14} /> 最近五星
+            <h2 className="panel-heading flex items-center gap-2 text-sm font-medium text-tide">
+              <ResonanceIcon kind="trophy" size={15} /> 最近五星
             </h2>
             <p className="mt-1 text-[11px] text-wave-dim">抽数按各自卡池独立计算</p>
           </div>
@@ -247,17 +289,17 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
         </div>
 
         {recentFiveStars.length > 0 ? (
-          <div className="mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06] md:grid-cols-2 xl:grid-cols-3">
+          <div className="recent-five-grid mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06] md:grid-cols-2 xl:grid-cols-3">
             {recentFiveStars.map((item) => (
-              <div key={item.id} className="flex min-w-0 items-center gap-3 bg-[#202020] px-4 py-3">
-                <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-[#d8bd84]/25 bg-[#d8bd84]/[0.07]">
+              <div key={item.id} className="five-star-entry group flex min-w-0 items-center gap-3 px-4 py-3">
+                <div className="record-resource-frame record-resource-frame-five relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-[#d8bd84]/25 bg-[#d8bd84]/[0.07]">
                   <ResourceIcon
                     resourceId={item.resourceId}
                     alt={item.name}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.06]"
                     fallback={(
                       <div className="absolute inset-0 flex items-center justify-center text-[#d8bd84]">
-                        <Trophy size={17} />
+                        <ResonanceIcon kind="trophy" size={18} />
                       </div>
                     )}
                   />
@@ -277,7 +319,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
             ))}
           </div>
         ) : (
-          <div className="mt-4 rounded-md border border-dashed border-white/[0.08] py-8 text-center text-sm text-wave">
+          <div className="resonance-inline-empty mt-4 rounded-md border border-dashed border-white/[0.08] py-8 text-center text-sm text-wave">
             暂无五星记录
           </div>
         )}
