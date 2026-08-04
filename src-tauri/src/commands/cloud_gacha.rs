@@ -259,9 +259,19 @@ fn is_official_gacha_page(url: &Url) -> bool {
 fn emit_captured_url(app: &AppHandle, raw_url: &str) {
     match validate_captured_url(raw_url) {
         Ok(payload) => {
+            let suffix: String = payload.player_id.chars().rev().take(4).collect();
+            log::info!(
+                target: "app::cloud_gacha",
+                "event=url_captured player_suffix={}",
+                suffix.chars().rev().collect::<String>()
+            );
             let _ = app.emit_to("main", "cloud-gacha-link", payload);
         }
         Err(message) => {
+            log::warn!(
+                target: "app::cloud_gacha",
+                "event=captured_url_rejected error={message}"
+            );
             let _ = app.emit_to("main", "cloud-gacha-error", message);
         }
     }
@@ -275,6 +285,7 @@ fn build_cloud_gacha_window(app: AppHandle) -> Result<(), String> {
     {
         let _ = existing.unminimize();
         if existing.set_focus().is_ok() {
+            log::info!(target: "app::cloud_gacha", "event=window_focused_existing");
             return Ok(());
         }
     }
@@ -335,11 +346,14 @@ fn build_cloud_gacha_window(app: AppHandle) -> Result<(), String> {
         .build()
         .map_err(|e| format!("无法打开云鸣潮窗口: {e}"))?;
 
+    log::info!(target: "app::cloud_gacha", "event=window_opened");
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn open_cloud_gacha_window(app: AppHandle) -> Result<(), String> {
+    log::info!(target: "app::cloud_gacha", "event=window_open_requested");
     let (sender, receiver) = tokio::sync::oneshot::channel();
     let main_thread_app = app.clone();
     app.run_on_main_thread(move || {
@@ -353,11 +367,14 @@ pub async fn open_cloud_gacha_window(app: AppHandle) -> Result<(), String> {
 }
 
 fn close_cloud_gacha_windows(app: &AppHandle) -> Result<(), String> {
+    let mut closed = 0;
     for (label, window) in app.webview_windows() {
         if label.starts_with(CLOUD_GACHA_WINDOW_PREFIX) {
             window.close().map_err(|e| e.to_string())?;
+            closed += 1;
         }
     }
+    log::info!(target: "app::cloud_gacha", "event=windows_closed count={closed}");
     Ok(())
 }
 

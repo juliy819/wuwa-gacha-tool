@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { check, type Update } from '@tauri-apps/plugin-updater';
+import { appLogger } from '../services/logger';
 
 const NOTIFIED_KEY = 'wuwa-update-last-notified';
 // 单个 endpoint 的请求超时（毫秒），防止代理建连后挂起导致无限转圈
@@ -34,7 +35,8 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
           useGachaStore.getState().addToast('info', `发现新版本 v${update.version}，可在设置中更新`);
         }
       }
-    } catch {
+    } catch (error) {
+      appLogger.warn('update_auto_check_failed', { error });
       // 静默失败，不打扰用户
     } finally {
       set({ checking: false });
@@ -51,6 +53,9 @@ export const useUpdateStore = create<UpdateStore>((set, get) => ({
         set({ availableUpdate: update });
       }
       return update;
+    } catch (error) {
+      appLogger.error('update_manual_check_failed', { error });
+      throw error;
     } finally {
       set({ checking: false });
     }

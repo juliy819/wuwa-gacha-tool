@@ -210,6 +210,18 @@ fn parse_gacha_time(value: &str) -> Result<NaiveDateTime, String> {
         .ok_or_else(|| "时间格式必须为 YYYY-MM-DD HH:mm:ss".to_string())
 }
 
+fn masked_player_id(player_id: &str) -> String {
+    let suffix: String = player_id
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("***{suffix}")
+}
+
 fn build_filler_resources<R: Rng + ?Sized>(
     three_stars: &[&GachaResource],
     four_stars: &[&GachaResource],
@@ -263,6 +275,12 @@ async fn fetch_gacha_data_internal(
     url: &str,
 ) -> Result<GachaImportResult, String> {
     let params = GachaParams::from_url(url)?;
+    log::info!(
+        target: "app::gacha",
+        "event=sync_started player={} pools={}",
+        masked_player_id(&params.player_id),
+        POOL_TYPES.len()
+    );
     let client = reqwest::Client::new();
     let name_to_id = build_pool_name_to_id();
 
@@ -273,6 +291,12 @@ async fn fetch_gacha_data_internal(
         // API 请求需要发送数字 ID（如 "1"），而非中文名
         match fetcher::fetch_pool_data(&client, &params, pool_type).await {
             Ok(cards) => {
+                log::debug!(
+                    target: "app::gacha",
+                    "event=pool_fetch_succeeded pool_type={} records={}",
+                    pool_type,
+                    cards.len()
+                );
                 for card in cards {
                     // API 返回的 cardPoolType 是中文名，反查 pool type ID
                     let actual_pool_type = name_to_id
@@ -289,7 +313,12 @@ async fn fetch_gacha_data_internal(
                 }
             }
             Err(e) => {
-                eprintln!("获取 {} 失败: {}", pool_name, e);
+                log::warn!(
+                    target: "app::gacha",
+                    "event=pool_fetch_failed pool_type={} error={}",
+                    pool_type,
+                    crate::logging::sanitize_message(&e)
+                );
                 errors.push(format!("{}: {}", pool_name, e));
             }
         }
@@ -325,6 +354,17 @@ fn merge_and_load_player(
     let records = db.get_all_records(Some(player_id))?;
     let total_count = records.len();
 
+    log::info!(
+        target: "app::gacha",
+        "event=sync_completed player={} imported={} added={} duplicates={} total={} failed_pools={}",
+        masked_player_id(player_id),
+        stats.imported_count,
+        stats.added_count,
+        stats.duplicate_count,
+        total_count,
+        failed_pools.len()
+    );
+
     Ok(GachaImportResult {
         player_id: player_id.to_string(),
         records,
@@ -342,13 +382,29 @@ pub async fn fetch_gacha_data(
     state: State<'_, AppState>,
     game_dir: String,
 ) -> Result<GachaImportResult, String> {
+    log::info!(target: "app::gacha", "event=scan_requested source=game_log");
+    let result = fetch_gacha_data_from_log(&state, &game_dir).await;
+    if let Err(error) = &result {
+        log::error!(
+            target: "app::gacha",
+            "event=scan_failed source=game_log error={}",
+            crate::logging::sanitize_message(error)
+        );
+    }
+    result
+}
+
+async fn fetch_gacha_data_from_log(
+    state: &State<'_, AppState>,
+    game_dir: &str,
+) -> Result<GachaImportResult, String> {
     // 解码日志获取 URL
-    let log_path = decoder::get_log_path(&game_dir);
+    let log_path = decoder::get_log_path(game_dir);
     let decoded = decoder::decode_client_log(&log_path)?;
     let url = decoder::extract_gacha_url(&decoded)
         .ok_or_else(|| "未找到抽卡链接，请先在游戏中打开抽卡历史记录".to_string())?;
 
-    fetch_gacha_data_internal(&state, &url).await
+    fetch_gacha_data_internal(state, &url).await
 }
 
 /// 直接通过抽卡链接获取抽卡数据
@@ -357,13 +413,45 @@ pub async fn fetch_gacha_data_by_url(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<GachaImportResult, String> {
-    fetch_gacha_data_internal(&state, &url).await
+    log::info!(target: "app::gacha", "event=scan_requested source=captured_url");
+    let result = fetch_gacha_data_internal(&state, &url).await;
+    if let Err(error) = &result {
+        log::error!(
+            target: "app::gacha",
+            "event=scan_failed source=captured_url error={}",
+            crate::logging::sanitize_message(error)
+        );
+    }
+    result
 }
 
 /// 从本地 JSON 文件导入抽卡数据
 /// JSON 格式: { "1": [...cards], "2": [...], ..., "uid": "player_id" }
 #[tauri::command]
 pub fn import_gacha_json(
+    state: State<'_, AppState>,
+    file_path: String,
+) -> Result<GachaImportResult, String> {
+    let extension = std::path::Path::new(&file_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("none");
+    log::info!(
+        target: "app::gacha",
+        "event=json_import_started extension={extension}"
+    );
+    let result = import_gacha_json_inner(state, file_path);
+    if let Err(error) = &result {
+        log::error!(
+            target: "app::gacha",
+            "event=json_import_failed error={}",
+            crate::logging::sanitize_message(error)
+        );
+    }
+    result
+}
+
+fn import_gacha_json_inner(
     state: State<'_, AppState>,
     file_path: String,
 ) -> Result<GachaImportResult, String> {
@@ -432,6 +520,11 @@ pub fn export_gacha_json(
     player_id: String,
     file_path: String,
 ) -> Result<(), String> {
+    log::info!(
+        target: "app::gacha",
+        "event=json_export_started player={}",
+        masked_player_id(&player_id)
+    );
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(Some(&player_id))?;
 
@@ -439,8 +532,15 @@ pub fn export_gacha_json(
         return Err("该玩家没有抽卡记录".to_string());
     }
 
+    let record_count = records.len();
     let json = serialize_gacha_records(&player_id, records)?;
     std::fs::write(&file_path, &json).map_err(|e| format!("写入文件失败: {}", e))?;
+
+    log::info!(
+        target: "app::gacha",
+        "event=json_export_completed player={} records={record_count}",
+        masked_player_id(&player_id)
+    );
 
     Ok(())
 }
@@ -521,7 +621,26 @@ pub fn clear_records(
     player_id: Option<String>,
 ) -> Result<ClearRecordsResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.clear_records(player_id.as_deref())
+    let target = player_id
+        .as_deref()
+        .map(masked_player_id)
+        .unwrap_or_else(|| "all".to_string());
+    log::warn!(target: "app::gacha", "event=records_clear_started target={target}");
+    let result = db.clear_records(player_id.as_deref());
+    match &result {
+        Ok(value) => log::warn!(
+            target: "app::gacha",
+            "event=records_clear_completed target={} deleted={} backup_created={}",
+            target,
+            value.deleted_count,
+            value.backup_path.is_some()
+        ),
+        Err(error) => log::error!(
+            target: "app::gacha",
+            "event=records_clear_failed target={target} error={error}"
+        ),
+    }
+    result
 }
 
 /// 保存游戏目录

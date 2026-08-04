@@ -2,6 +2,10 @@ import { invoke } from '@tauri-apps/api/core';
 import type { ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, RecordSummary, UpdateMockGachaRequest } from '../types';
 
 export const gachaApi = {
+  openLogDirectory: (): Promise<string> => {
+    return invoke('open_log_directory');
+  },
+
   getResourceIcon: (resourceId: number): Promise<string> => {
     return invoke('get_resource_icon', { resourceId });
   },

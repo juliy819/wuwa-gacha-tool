@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { appLogger } from '../services/logger';
 import { gachaApi } from '../services/tauri-api';
 
 const RETRY_DELAY_MS = 60_000;
@@ -26,6 +27,11 @@ const loadResourceIcon = (resourceId: number) => {
     })
     .catch((error) => {
       failedAt.set(resourceId, Date.now());
+      appLogger.warn('resource_icon_request_failed', {
+        resource_id: resourceId,
+        retry_after_ms: RETRY_DELAY_MS,
+        error,
+      });
       throw error;
     })
     .finally(() => pendingIcons.delete(resourceId));
@@ -71,7 +77,10 @@ export default function ResourceIcon({ resourceId, alt, className, fallback }: R
       alt={alt}
       className={className}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => {
+        appLogger.warn('resource_icon_decode_failed', { resource_id: resourceId });
+        setFailed(true);
+      }}
     />
   );
 }

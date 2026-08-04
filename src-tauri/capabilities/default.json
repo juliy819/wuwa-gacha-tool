@@ -16,6 +16,7 @@
     "core:window:allow-is-maximized",
     "dialog:allow-open",
     "dialog:allow-save",
+    "log:default",
     "updater:default",
     "process:default",
     "process:allow-restart",

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -61,6 +61,20 @@ pub async fn get_gacha_resources(state: &AppState) -> Result<Vec<GachaResource>,
 }
 
 pub async fn get_resource_icon(state: &AppState, resource_id: i64) -> Result<String, String> {
+    let started = Instant::now();
+    let result = get_resource_icon_inner(state, resource_id).await;
+    if let Err(error) = &result {
+        log::warn!(
+            target: "app::assets",
+            "event=icon_load_failed resource_id={resource_id} elapsed_ms={} error={}",
+            started.elapsed().as_millis(),
+            crate::logging::sanitize_message(error)
+        );
+    }
+    result
+}
+
+async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<String, String> {
     if resource_id <= 0 {
         return Err("无效的资源 ID".to_string());
     }
@@ -70,8 +84,15 @@ pub async fn get_resource_icon(state: &AppState, resource_id: i64) -> Result<Str
     // 本地缓存优先：角色/武器 ID 与其图标一一对应且固定，已下载的素材直接返回，
     // 不依赖 nanoka.cc 是否可用（即使停运，已下载的图片仍可正常显示）。
     if let Some(bytes) = read_local_icon_by_id(&icon_cache_dir, resource_id)? {
+        log::debug!(
+            target: "app::assets",
+            "event=icon_cache_hit resource_id={resource_id} bytes={}",
+            bytes.len()
+        );
         return Ok(to_data_url(&bytes));
     }
+
+    log::info!(target: "app::assets", "event=icon_cache_miss resource_id={resource_id}");
 
     // 本地缺失时才向 nanoka.cc 拉取 catalog 定位图标并下载新资源。
     let catalog = load_catalog(state).await?;
@@ -125,6 +146,12 @@ pub async fn get_resource_icon(state: &AppState, resource_id: i64) -> Result<Str
         }
     }
 
+    log::info!(
+        target: "app::assets",
+        "event=icon_downloaded resource_id={resource_id} bytes={}",
+        bytes.len()
+    );
+
     Ok(to_data_url(&bytes))
 }
 
@@ -140,6 +167,7 @@ async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
         .as_ref()
         .is_some_and(|entry| now.saturating_sub(entry.updated_at) < MANIFEST_TTL_MS);
     let manifest = if cached_manifest_is_fresh {
+        log::debug!(target: "app::assets", "event=manifest_cache_hit freshness=fresh");
         parse_manifest(cached_manifest.as_ref().unwrap())?
     } else {
         match fetch_json::<Manifest>(&state.http, &format!("{NANOKA_BASE}/manifest.json")).await {
@@ -147,10 +175,18 @@ async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
                 let json = serde_json::to_string(&remote).map_err(|error| error.to_string())?;
                 let db = state.db.lock().map_err(|error| error.to_string())?;
                 db.set_nanoka_cache(MANIFEST_CACHE_KEY, &json, now)?;
+                log::info!(target: "app::assets", "event=manifest_refreshed");
                 remote
             }
             Err(error) => match cached_manifest.as_ref() {
-                Some(cached) => parse_manifest(cached)?,
+                Some(cached) => {
+                    log::warn!(
+                        target: "app::assets",
+                        "event=manifest_refresh_failed fallback=stale_cache error={}",
+                        crate::logging::sanitize_message(&error)
+                    );
+                    parse_manifest(cached)?
+                }
                 None => return Err(error),
             },
         }
@@ -169,6 +205,13 @@ async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
         let catalog: AssetCatalog = serde_json::from_str(&cached.json)
             .map_err(|error| format!("解析素材目录缓存失败: {error}"))?;
         if !catalog.resources.is_empty() {
+            log::debug!(
+                target: "app::assets",
+                "event=catalog_cache_hit version={} resources={} icons={}",
+                version,
+                catalog.resources.len(),
+                catalog.icons.len()
+            );
             return Ok(catalog);
         }
     }
@@ -178,6 +221,13 @@ async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
             let json = serde_json::to_string(&catalog).map_err(|error| error.to_string())?;
             let db = state.db.lock().map_err(|error| error.to_string())?;
             db.set_nanoka_cache(&cache_key, &json, now)?;
+            log::info!(
+                target: "app::assets",
+                "event=catalog_refreshed version={} resources={} icons={}",
+                version,
+                catalog.resources.len(),
+                catalog.icons.len()
+            );
             Ok(catalog)
         }
         Err(error) => {
@@ -189,8 +239,17 @@ async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
                 db.get_latest_nanoka_cache(CATALOG_CACHE_PREFIX)?
             };
             match fallback {
-                Some(cached) => serde_json::from_str(&cached.json)
-                    .map_err(|parse_error| format!("{error}; 解析旧素材目录失败: {parse_error}")),
+                Some(cached) => {
+                    log::warn!(
+                        target: "app::assets",
+                        "event=catalog_refresh_failed version={} fallback=latest_cache error={}",
+                        version,
+                        crate::logging::sanitize_message(&error)
+                    );
+                    serde_json::from_str(&cached.json).map_err(|parse_error| {
+                        format!("{error}; 解析旧素材目录失败: {parse_error}")
+                    })
+                }
                 None => Err(error),
             }
         }

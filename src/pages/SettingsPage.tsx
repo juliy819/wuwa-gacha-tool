@@ -359,6 +359,14 @@ export default function SettingsPage() {
     setUpdateProgress(0);
   };
 
+  const handleOpenLogDirectory = async () => {
+    try {
+      await gachaApi.openLogDirectory();
+    } catch (error) {
+      addToast('error', `打开日志目录失败: ${String(error)}`);
+    }
+  };
+
   return (
     <PageTransition>
       <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
@@ -482,12 +490,20 @@ export default function SettingsPage() {
                   </button>
                 </div>
                 <p className="mt-2 leading-5">数据仅保存在本机，不会上传到服务器。</p>
-                <button
-                  onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool')}
-                  className="mt-2 flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
-                >
-                  <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>GitHub 仓库
-                </button>
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <button
+                    onClick={handleOpenLogDirectory}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                  >
+                    <ResonanceActionIcon size="sm"><ResonanceIcon kind="log" size={14} /></ResonanceActionIcon>打开日志目录
+                  </button>
+                  <button
+                    onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool')}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                  >
+                    <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>GitHub 仓库
+                  </button>
+                </div>
               </section>
             </div>
 

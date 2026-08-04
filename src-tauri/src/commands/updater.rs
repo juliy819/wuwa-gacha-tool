@@ -59,6 +59,12 @@ pub async fn download_and_install_update(
     official_url: String,
     version: String,
 ) -> Result<(), String> {
+    log::info!(
+        target: "app::updater",
+        "event=download_started version={} sources={}",
+        version,
+        UPDATE_PROXIES.len()
+    );
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
@@ -72,16 +78,25 @@ pub async fn download_and_install_update(
         let url = build_url(&official_url);
         match try_download_once(&client, &app, &url, proxy_name, &version).await {
             Ok(path) => {
+                log::info!(
+                    target: "app::updater",
+                    "event=source_succeeded source={proxy_name}"
+                );
                 downloaded_path = Some(path);
                 break;
             }
             Err(e) => {
+                log::warn!(
+                    target: "app::updater",
+                    "event=source_failed source={proxy_name} error={e}"
+                );
                 errors.push(format!("{proxy_name}: {e}"));
             }
         }
     }
 
     let Some(local_path) = downloaded_path else {
+        log::error!(target: "app::updater", "event=download_failed all_sources=true");
         return Err(format!("所有下载渠道均失败\n{}", errors.join("\n")));
     };
 
@@ -97,7 +112,11 @@ pub async fn download_and_install_update(
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     // 启动安装程序（NSIS 会请求 UAC，用户确认后完成安装并启动新版本）
-    open_installer(&local_path).map_err(|e| format!("启动安装程序失败: {e}"))?;
+    open_installer(&local_path).map_err(|e| {
+        log::error!(target: "app::updater", "event=installer_launch_failed error={e}");
+        format!("启动安装程序失败: {e}")
+    })?;
+    log::info!(target: "app::updater", "event=installer_launched version={version}");
 
     // 退出当前应用，避免文件占用导致安装失败
     app.exit(0);

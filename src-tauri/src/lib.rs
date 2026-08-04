@@ -2,9 +2,12 @@ mod assets;
 mod commands;
 mod db;
 mod gacha;
+mod logging;
 
-use std::sync::Mutex;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+use tauri::Manager;
 
 pub struct AppState {
     pub db: Mutex<db::Database>,
@@ -15,38 +18,50 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app_data_dir = dirs::data_local_dir()
-        .expect("Failed to get app data dir")
-        .join("wuwa-gacha-tool");
-
-    std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data dir");
-
-    let db_path = app_data_dir.join("gacha.db");
-    let database = db::Database::new(&db_path).expect("Failed to initialize database");
-    let asset_cache_dir = app_data_dir.join("assets");
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()
-        .expect("Failed to initialize HTTP client");
+    logging::install_panic_hook();
 
     tauri::Builder::default()
+        .plugin(logging::plugin())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             #[cfg(desktop)]
             {
-                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
+
+            let app_data_dir = dirs::data_local_dir()
+                .ok_or_else(|| "Failed to get app data dir".to_string())?
+                .join("wuwa-gacha-tool");
+            std::fs::create_dir_all(&app_data_dir)?;
+
+            let db_path = app_data_dir.join("gacha.db");
+            let database = db::Database::new(&db_path)
+                .map_err(|error| format!("Failed to initialize database: {error}"))?;
+            let http = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(20))
+                .build()
+                .map_err(|error| format!("Failed to initialize HTTP client: {error}"))?;
+
+            app.manage(AppState {
+                db: Mutex::new(database),
+                http,
+                asset_cache_dir: app_data_dir.join("assets"),
+                asset_catalog_refresh: tokio::sync::Mutex::new(()),
+            });
+            log::info!(
+                target: "app::lifecycle",
+                "event=started version={} os={} arch={}",
+                app.package_info().version,
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            );
             Ok(())
         })
-        .manage(AppState {
-            db: Mutex::new(database),
-            http,
-            asset_cache_dir,
-            asset_catalog_refresh: tokio::sync::Mutex::new(()),
-        })
         .invoke_handler(tauri::generate_handler![
+            logging::open_log_directory,
             commands::cloud_gacha::open_cloud_gacha_window,
             commands::cloud_gacha::close_cloud_gacha_window,
             commands::gacha::get_resource_icon,
