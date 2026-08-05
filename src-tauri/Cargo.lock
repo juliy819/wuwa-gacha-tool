@@ -5451,7 +5451,7 @@ dependencies = [
 
 [[package]]
 name = "wuwa-gacha-tool"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
