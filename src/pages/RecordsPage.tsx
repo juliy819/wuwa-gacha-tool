@@ -22,6 +22,7 @@ import {
   QUALITY_LABELS,
   type GachaRecord,
   type GachaResource,
+  type ResourceAcquisitionInsight,
 } from '../types';
 
 type ViewMode = 'list' | 'grid' | 'table';
@@ -34,7 +35,9 @@ const GRID_GAP = 12;
 const GRID_HORIZONTAL_PADDING = 32;
 
 const getRecordKey = (record: GachaRecord, index: number) =>
-  `${record.id ?? 'local'}-${record.card_pool_type}-${record.time}-${record.resource_id}-${index}`;
+  record.id !== undefined && record.id !== null
+    ? `record-${record.id}`
+    : `local-${record.card_pool_type}-${record.time}-${record.resource_id}-${index}`;
 
 const getBarColor = (pity: number) => {
   if (pity <= 30) return '#7ec8a0';
@@ -106,6 +109,8 @@ export default function RecordsPage() {
   const [editingRecord, setEditingRecord] = useState<GachaRecord | null>(null);
   const [mutating, setMutating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<GachaRecord | null>(null);
+  const [acquisitionInsights, setAcquisitionInsights] = useState<ResourceAcquisitionInsight[]>([]);
+  const [selectedAcquisition, setSelectedAcquisition] = useState<ResourceAcquisitionInsight | null>(null);
   const contentRef = useRef<HTMLElement>(null);
   const poolNavRef = useRef<HTMLElement>(null);
   const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
@@ -121,6 +126,21 @@ export default function RecordsPage() {
     if (recordsLoaded && recordsPlayerId === activePlayerId) return;
     void fetchRecords();
   }, [activePlayerId, fetchRecords, initialized, recordsLoaded, recordsPlayerId]);
+
+  useEffect(() => {
+    if (!activePlayerId || !recordsLoaded || recordsPlayerId !== activePlayerId) {
+      setAcquisitionInsights([]);
+      return;
+    }
+    let current = true;
+    gachaApi.getResourceAcquisitionInsights(activePlayerId, true)
+      .then((result) => {
+        if (!current) return;
+        setAcquisitionInsights(result);
+      })
+      .catch(() => { if (current) setAcquisitionInsights([]); });
+    return () => { current = false; };
+  }, [activePlayerId, recordsLoaded, recordsPlayerId, records.length]);
 
   const loadResources = async () => {
     if (resources.length > 0 || resourcesLoading) return;
@@ -314,6 +334,7 @@ export default function RecordsPage() {
     });
   }, [allRecordsWithPity, activePoolType, effectiveScope, query]);
 
+  const lowerBoundCount = filteredRecords.filter(({ isLowerBound, record }) => isLowerBound && record.quality_level === QUALITY.FIVE_STAR).length;
   const pagedList = useMemo(() => {
     const totalPages = Math.max(1, Math.ceil(filteredRecords.length / effectiveItemsPerPage));
     const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -350,6 +371,12 @@ export default function RecordsPage() {
     setActivePoolType('all');
     setScope('five');
     setQuery('');
+  };
+
+  const openAcquisition = (record: GachaRecord) => {
+    if (record.quality_level !== QUALITY.FIVE_STAR || (record.is_off_rate && record.card_pool_group === 'UP角色池')) return;
+    const insight = acquisitionInsights.find((item) => item.pool_type === record.card_pool_type && item.resource_id === record.resource_id);
+    if (insight) setSelectedAcquisition(insight);
   };
 
   const cacheValid = recordsLoaded && recordsPlayerId === activePlayerId;
@@ -517,6 +544,12 @@ export default function RecordsPage() {
 
               <span className="ml-auto text-xs text-wave">找到 <span className="tabular-nums text-tide">{pagedList.total}</span> 条</span>
             </div>
+            {lowerBoundCount > 0 && (
+              <div className="records-confidence-note">
+                <ResonanceIcon kind="info" size={13} />
+                <span>本次筛选包含 {lowerBoundCount} 条首个可见五星，抽数以 <b>≥</b> 标记，表示记录范围可能早于当前数据。</span>
+              </div>
+            )}
 
             <AnimatePresence initial={false} mode="wait">
             {recordsLoading ? (
@@ -592,7 +625,7 @@ export default function RecordsPage() {
                       const barColor = getBarColor(pity);
                       const barWidth = Math.min((pity / 80) * 100, 100);
                       return (
-                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} className="record-list-row flex min-h-[64px] items-center gap-3 py-2.5">
+                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate) openAcquisition(record); }} className={`record-list-row flex min-h-[64px] items-center gap-3 py-2.5 ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
                           <RecordAvatar record={record} />
                           <div className="w-24 shrink-0 min-w-0">
                             <div className="truncate text-sm text-tide" title={record.name}>{record.name}</div>
@@ -622,7 +655,7 @@ export default function RecordsPage() {
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3 p-4">
                     {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       return (
-                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''}`}>
+                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
                           <div className="relative aspect-square overflow-hidden rounded-md">
                             <RecordAvatar record={record} size="lg" />
                             {record.is_off_rate && <span className="absolute bottom-1.5 left-1.5 rounded bg-[#a64f4f] px-1.5 py-0.5 text-[10px] text-white">歪</span>}
@@ -655,7 +688,7 @@ export default function RecordsPage() {
                         const isFive = record.quality_level === QUALITY.FIVE_STAR;
                         const color = QUALITY_COLORS[record.quality_level] ?? '#8a8a8a';
                         return (
-                          <tr key={getRecordKey(record, index)} className={isFive ? 'record-table-row-five' : ''}>
+                          <tr key={getRecordKey(record, index)} onClick={() => openAcquisition(record)} className={`${isFive ? 'record-table-row-five' : ''} ${isFive && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
                             <td className="px-3 py-2 tabular-nums text-wave">{record.time}</td>
                             <td className="truncate px-3 py-2 text-wave" title={record.card_pool_name}>{record.card_pool_name}</td>
                             <td className="px-3 py-2">
@@ -672,8 +705,8 @@ export default function RecordsPage() {
                             <td className="px-3 py-2">
                               {record.is_mock ? (
                                 <div className="flex items-center justify-center gap-1">
-                                  <button type="button" onClick={() => openEditDialog(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="编辑模拟记录"><ResonanceIcon kind="edit" size={14} /></button>
-                                  <button type="button" onClick={() => handleDeleteClick(record)} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><ResonanceIcon kind="delete" size={14} /></button>
+                                  <button type="button" onClick={(event) => { event.stopPropagation(); openEditDialog(record); }} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-40" title="编辑模拟记录"><ResonanceIcon kind="edit" size={14} /></button>
+                                  <button type="button" onClick={(event) => { event.stopPropagation(); handleDeleteClick(record); }} disabled={mutating} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a] disabled:opacity-40" title={isFive ? '删除整批模拟记录' : '删除模拟记录'}><ResonanceIcon kind="delete" size={14} /></button>
                                 </div>
                               ) : <div className="text-center text-white/15">-</div>}
                             </td>
@@ -777,6 +810,48 @@ export default function RecordsPage() {
         onClose={() => { setDialogOpen(false); setEditingRecord(null); }}
         onSubmit={submitMockRecord}
       />
+
+      <Modal
+        open={selectedAcquisition !== null}
+        onClose={() => setSelectedAcquisition(null)}
+        className="max-w-4xl border-white/[0.10] bg-[#242424]"
+        labelledBy="acquisition-trace-title"
+      >
+        {selectedAcquisition && (
+          <div className="acquisition-trace-modal">
+            <div className="flex items-start gap-3 border-b border-white/[0.07] p-5">
+              <RecordAvatar record={{ resource_id: selectedAcquisition.resource_id, name: selectedAcquisition.name, quality_level: 5, is_off_rate: false } as GachaRecord} size="md" />
+              <div className="min-w-0">
+                <span className="records-meta-label">ACQUISITION TRACE</span>
+                <h2 id="acquisition-trace-title" className="mt-1 text-lg font-semibold text-tide">{selectedAcquisition.name}</h2>
+                <p className="mt-1 text-xs text-wave">{selectedAcquisition.pool_name} · {selectedAcquisition.target_count} 次获取</p>
+              </div>
+              <ResonanceCloseButton onClick={() => setSelectedAcquisition(null)} className="ml-auto shrink-0" />
+            </div>
+            <div className="grid grid-cols-2 gap-px border-b border-white/[0.07] bg-white/[0.06] sm:grid-cols-4">
+              {[
+                ['获取数量', `${selectedAcquisition.target_count} 次`],
+                [selectedAcquisition.has_off_rate ? '歪 / 五星' : '五星记录', selectedAcquisition.has_off_rate ? `${selectedAcquisition.off_rate_count} / ${selectedAcquisition.total_five_star_count}` : `${selectedAcquisition.total_five_star_count}`],
+                ['总抽数', `${selectedAcquisition.is_lower_bound ? '≥' : ''}${selectedAcquisition.total_pulls}`],
+                ['平均每次', `${selectedAcquisition.is_lower_bound ? '≥' : ''}${selectedAcquisition.average_pulls?.toFixed(1) ?? '—'} 抽`],
+              ].map(([label, value]) => <div key={label} className="bg-[#242424] px-4 py-3"><div className="text-[10px] text-wave">{label}</div><div className="mt-1 text-base font-semibold tabular-nums text-tide">{value}</div></div>)}
+            </div>
+            <div className="max-h-[58vh] overflow-y-auto px-5 py-4">
+              <div className="space-y-2">
+                {[...selectedAcquisition.records].reverse().map((item, index) => (
+                  <div key={`${item.id ?? item.time}-${index}`} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 ${item.is_off_rate ? 'border-[#d84848]/25 bg-[#d84848]/[0.04]' : 'border-white/[0.07] bg-white/[0.025]'}`}>
+                    <ResourceIcon resourceId={item.resource_id} alt="" className="h-9 w-9 shrink-0 rounded" fallback={<span className="flex h-9 w-9 items-center justify-center rounded bg-white/[0.06] text-xs text-wave">{item.name.charAt(0)}</span>} />
+                    <div className="min-w-0 w-24 shrink-0"><div className="truncate text-xs text-tide">{item.name}</div><div className="mt-0.5 text-[10px] text-wave">{item.is_off_rate ? `第 ${String(item.acquisition_index).padStart(2, '0')} 次 · 前置歪` : `第 ${String(item.acquisition_index).padStart(2, '0')} 次获取`}</div></div>
+                    <div className="relative h-4 min-w-0 flex-1 overflow-hidden rounded bg-white/[0.06]"><div className="h-full rounded" style={{ width: `${Math.min(item.pity / (selectedAcquisition.pool_type === '5' ? 50 : 80) * 100, 100)}%`, background: item.is_off_rate ? '#d84848' : '#d8bd84' }} /></div>
+                    <PityBadge pity={item.pity} lowerBound={item.is_lower_bound} />
+                    <span className="hidden w-20 shrink-0 text-right text-[10px] tabular-nums text-wave sm:block">{item.time.slice(0, 10)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={deleteConfirm !== null}

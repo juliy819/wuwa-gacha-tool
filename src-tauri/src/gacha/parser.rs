@@ -193,6 +193,50 @@ pub struct ProbabilityPoint {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterPullInsight {
+    pub pool_type: String,
+    pub pool_name: String,
+    pub resource_id: i64,
+    pub name: String,
+    pub copy_count: usize,
+    pub complete_cycle_count: usize,
+    pub total_pulls: i32,
+    pub average_pulls: Option<f64>,
+    pub is_lower_bound: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcquisitionRecordInsight {
+    pub id: Option<i64>,
+    pub resource_id: i64,
+    pub name: String,
+    pub time: String,
+    pub pity: i32,
+    pub is_lower_bound: bool,
+    pub is_off_rate: bool,
+    pub is_target: bool,
+    pub is_mock: bool,
+    pub acquisition_index: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceAcquisitionInsight {
+    pub pool_type: String,
+    pub pool_name: String,
+    pub resource_id: i64,
+    pub name: String,
+    pub resource_type: String,
+    pub target_count: usize,
+    pub off_rate_count: usize,
+    pub total_five_star_count: usize,
+    pub total_pulls: i32,
+    pub average_pulls: Option<f64>,
+    pub is_lower_bound: bool,
+    pub has_off_rate: bool,
+    pub records: Vec<AcquisitionRecordInsight>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolInsight {
     pub pool_type: String,
     pub pool_name: String,
@@ -594,6 +638,211 @@ impl GachaInsights {
     }
 }
 
+#[derive(Default)]
+struct CharacterPullAccumulator {
+    pool_type: String,
+    pool_name: String,
+    resource_id: i64,
+    name: String,
+    copy_count: usize,
+    complete_cycle_count: usize,
+    total_pulls: i32,
+    is_lower_bound: bool,
+}
+
+pub fn character_pull_insights(
+    records: &[GachaRecord],
+    include_mock: bool,
+) -> Vec<CharacterPullInsight> {
+    let mut by_pool: HashMap<String, Vec<GachaRecord>> = HashMap::new();
+    for record in records
+        .iter()
+        .filter(|record| include_mock || !record.is_mock)
+    {
+        // Every draw in a limited role pool contributes to pity. Three- and
+        // four-star weapon results must not be filtered out merely because the
+        // eventual five-star target is a character.
+        if is_limited_char_pool(&record.card_pool_type) {
+            by_pool
+                .entry(record.card_pool_type.clone())
+                .or_default()
+                .push(record.clone());
+        }
+    }
+
+    let mut result = Vec::new();
+    for (pool_type, mut pool_records) in by_pool {
+        pool_records.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
+        let mut pity = 0i32;
+        let mut seen_five_star = false;
+        let mut pending_off_rate_pulls = 0i32;
+        let mut pending_off_rate_is_lower_bound = false;
+        let mut accumulators: HashMap<i64, CharacterPullAccumulator> = HashMap::new();
+
+        for record in pool_records.iter() {
+            pity += 1;
+            if !record.is_five_star() {
+                continue;
+            }
+            let current_is_lower_bound = !seen_five_star;
+            seen_five_star = true;
+            // Imported historical rows do not always carry a reliable is_off_rate
+            // flag. The standard-character resource IDs are the authoritative
+            // indicator for a role-pool off-rate result.
+            let is_off_rate = STANDARD_FIVE_STAR_CHAR_IDS.contains(&record.resource_id);
+            if is_off_rate {
+                pending_off_rate_pulls += pity;
+                pending_off_rate_is_lower_bound |= current_is_lower_bound;
+                pity = 0;
+                continue;
+            }
+            let entry = accumulators.entry(record.resource_id).or_insert_with(|| {
+                CharacterPullAccumulator {
+                    pool_type: pool_type.clone(),
+                    pool_name: get_display_pool_name(&pool_type).to_string(),
+                    resource_id: record.resource_id,
+                    name: record.name.clone(),
+                    ..Default::default()
+                }
+            });
+            let mut acquisition_pulls = pity;
+            let mut acquisition_is_lower_bound = current_is_lower_bound;
+            acquisition_pulls += pending_off_rate_pulls;
+            acquisition_is_lower_bound |= pending_off_rate_is_lower_bound;
+            entry.copy_count += 1;
+            entry.total_pulls += acquisition_pulls;
+            if acquisition_is_lower_bound {
+                entry.is_lower_bound = true;
+            } else {
+                entry.complete_cycle_count += 1;
+            }
+            pending_off_rate_pulls = 0;
+            pending_off_rate_is_lower_bound = false;
+            pity = 0;
+        }
+
+        result.extend(
+            accumulators
+                .into_values()
+                .map(|entry| CharacterPullInsight {
+                    pool_type: entry.pool_type,
+                    pool_name: entry.pool_name,
+                    resource_id: entry.resource_id,
+                    name: entry.name,
+                    copy_count: entry.copy_count,
+                    complete_cycle_count: entry.complete_cycle_count,
+                    total_pulls: entry.total_pulls,
+                    average_pulls: (entry.copy_count > 0)
+                        .then(|| entry.total_pulls as f64 / entry.copy_count as f64),
+                    is_lower_bound: entry.is_lower_bound,
+                }),
+        );
+    }
+
+    result.sort_by(|a, b| {
+        a.pool_type
+            .cmp(&b.pool_type)
+            .then_with(|| b.total_pulls.cmp(&a.total_pulls))
+    });
+    result
+}
+
+/// 返回所有池型可点击的五星资源获取档案。活动角色池会把前置歪常驻并入下一只 UP，
+/// 其它池型按每个五星独立成段，不在前端重复推导。
+pub fn resource_acquisition_insights(
+    records: &[GachaRecord],
+    include_mock: bool,
+) -> Vec<ResourceAcquisitionInsight> {
+    let mut by_pool: HashMap<String, Vec<GachaRecord>> = HashMap::new();
+    for record in records.iter().filter(|r| include_mock || !r.is_mock) {
+        by_pool
+            .entry(record.card_pool_type.clone())
+            .or_default()
+            .push(record.clone());
+    }
+    let mut result = Vec::new();
+    for (pool_type, mut pool_records) in by_pool {
+        pool_records.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
+        let limited_char = is_limited_char_pool(&pool_type);
+        let mut pity = 0;
+        let mut seen_five = false;
+        let mut pending: Vec<AcquisitionRecordInsight> = Vec::new();
+        let mut entries: HashMap<i64, ResourceAcquisitionInsight> = HashMap::new();
+        for record in pool_records {
+            pity += 1;
+            if !record.is_five_star() {
+                continue;
+            }
+            let lower = !seen_five;
+            seen_five = true;
+            let is_off = limited_char
+                && record.resource_type == "role"
+                && STANDARD_FIVE_STAR_CHAR_IDS.contains(&record.resource_id);
+            let mut item = AcquisitionRecordInsight {
+                id: record.id,
+                resource_id: record.resource_id,
+                name: record.name.clone(),
+                time: record.time.clone(),
+                pity,
+                is_lower_bound: lower,
+                is_off_rate: is_off,
+                is_target: !is_off,
+                is_mock: record.is_mock,
+                acquisition_index: 0,
+            };
+            if limited_char && is_off {
+                pending.push(item);
+                pity = 0;
+                continue;
+            }
+            let entry =
+                entries
+                    .entry(record.resource_id)
+                    .or_insert_with(|| ResourceAcquisitionInsight {
+                        pool_type: pool_type.clone(),
+                        pool_name: get_display_pool_name(&pool_type).to_string(),
+                        resource_id: record.resource_id,
+                        name: record.name.clone(),
+                        resource_type: record.resource_type.clone(),
+                        target_count: 0,
+                        off_rate_count: 0,
+                        total_five_star_count: 0,
+                        total_pulls: 0,
+                        average_pulls: None,
+                        is_lower_bound: false,
+                        has_off_rate: limited_char,
+                        records: Vec::new(),
+                    });
+            let acquisition_index = entry.target_count + 1;
+            if limited_char && !pending.is_empty() {
+                pending
+                    .iter_mut()
+                    .for_each(|pending_item| pending_item.acquisition_index = acquisition_index);
+                entry.off_rate_count += pending.len();
+                entry.total_five_star_count += pending.len();
+                entry.total_pulls += pending.iter().map(|r| r.pity).sum::<i32>();
+                entry.is_lower_bound |= pending.iter().any(|r| r.is_lower_bound);
+                entry.records.append(&mut pending);
+            }
+            entry.target_count += 1;
+            entry.total_five_star_count += 1;
+            entry.total_pulls += pity;
+            entry.is_lower_bound |= lower;
+            item.acquisition_index = acquisition_index;
+            entry.records.push(item);
+            entry.average_pulls = Some(entry.total_pulls as f64 / entry.target_count as f64);
+            pity = 0;
+        }
+        result.extend(entries.into_values().filter(|e| !e.records.is_empty()));
+    }
+    result.sort_by(|a, b| {
+        a.pool_type
+            .cmp(&b.pool_type)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    result
+}
+
 fn median(values: &[i32]) -> Option<f64> {
     let middle = values.len() / 2;
     match values.len() {
@@ -735,6 +984,327 @@ mod tests {
             is_mock: false,
             mock_batch_id: None,
         }
+    }
+
+    #[test]
+    fn character_cost_includes_pre_first_off_rate_but_ignores_trailing_off_rate() {
+        let mut records = Vec::new();
+        let mut first_off = record(1, "1", 5, "2026-01-01 00:00:01");
+        first_off.resource_id = 1104;
+        first_off.name = "维里奈".to_string();
+        first_off.is_off_rate = true;
+        records.push(first_off);
+        for id in 2..=11 {
+            let mut next = record(
+                id,
+                "1",
+                if id == 11 { 5 } else { 3 },
+                &format!("2026-01-01 00:00:{id:02}"),
+            );
+            if id == 11 {
+                next.resource_id = 2001;
+                next.name = "赞妮".to_string();
+            }
+            records.push(next);
+        }
+        for id in 12..=31 {
+            let mut next = record(
+                id,
+                "1",
+                if id == 31 { 5 } else { 3 },
+                &format!("2026-01-01 00:00:{id:02}"),
+            );
+            if id == 31 {
+                next.resource_id = 2001;
+                next.name = "赞妮".to_string();
+            }
+            records.push(next);
+        }
+        let mut trailing_off = record(32, "1", 5, "2026-01-01 00:00:32");
+        trailing_off.resource_id = 1203;
+        trailing_off.name = "卡卡罗".to_string();
+        trailing_off.is_off_rate = true;
+        records.push(trailing_off);
+
+        let insights = character_pull_insights(&records, false);
+        let zanni = insights
+            .iter()
+            .find(|item| item.resource_id == 2001)
+            .unwrap();
+        assert_eq!(zanni.copy_count, 2);
+        assert_eq!(zanni.complete_cycle_count, 1);
+        assert_eq!(zanni.total_pulls, 31);
+        assert_eq!(zanni.average_pulls, Some(15.5));
+        assert!(zanni.is_lower_bound);
+        assert!(insights
+            .iter()
+            .all(|item| item.resource_id != 1104 && item.resource_id != 1203));
+    }
+
+    #[test]
+    fn character_cost_adds_the_entire_off_rate_segment_to_the_next_featured_copy() {
+        let mut records = vec![record(1, "1", 5, "2026-01-01 00:00:01")];
+        records[0].resource_id = 3001;
+        records[0].name = "前一个UP".to_string();
+        for id in 2..=5 {
+            let mut next = record(
+                id,
+                "1",
+                if id == 5 { 5 } else { 3 },
+                &format!("2026-01-01 00:00:{id:02}"),
+            );
+            if id == 5 {
+                next.resource_id = 1104;
+                next.name = "维里奈".to_string();
+                next.is_off_rate = true;
+            }
+            records.push(next);
+        }
+        for id in 6..=15 {
+            let mut next = record(
+                id,
+                "1",
+                if id == 15 { 5 } else { 3 },
+                &format!("2026-01-01 00:00:{id:02}"),
+            );
+            if id == 15 {
+                next.resource_id = 2001;
+                next.name = "赞妮".to_string();
+            }
+            records.push(next);
+        }
+
+        let insights = character_pull_insights(&records, false);
+        let zanni = insights
+            .iter()
+            .find(|item| item.resource_id == 2001)
+            .unwrap();
+        assert_eq!(zanni.copy_count, 1);
+        assert_eq!(zanni.complete_cycle_count, 1);
+        assert_eq!(zanni.total_pulls, 14);
+        assert_eq!(zanni.average_pulls, Some(14.0));
+        assert!(!zanni.is_lower_bound);
+    }
+
+    #[test]
+    fn character_cost_handles_scattered_copies_stable_ids_and_pool_boundaries() {
+        let mut records = Vec::new();
+        let mut add = |id: i64, quality: i32, resource_id: i64, name: &str| {
+            let mut item = record(id, "1", quality, &format!("2026-01-01 00:{:02}:00", id));
+            item.resource_id = resource_id;
+            item.name = name.to_string();
+            item.is_off_rate = false;
+            records.push(item);
+        };
+
+        add(1, 5, 2001, "赞妮");
+        for id in 2..=4 {
+            add(id, 3, id, "三星");
+        }
+        add(5, 5, 2001, "赞妮");
+        for id in 6..=9 {
+            add(id, 3, id, "三星");
+        }
+        add(10, 5, 2002, "另一位UP");
+        for id in 11..=19 {
+            add(id, 3, id, "三星");
+        }
+        add(20, 5, 2001, "赞妮");
+        for id in 21..=24 {
+            add(id, 3, id, "三星");
+        }
+        // The flag is deliberately false: the standard ID must still identify this as an off-rate.
+        add(25, 5, 1104, "维里奈");
+        for id in 26..=29 {
+            add(id, 3, id, "三星");
+        }
+        add(30, 5, 2001, "赞妮");
+        for id in 31..=35 {
+            add(id, 3, id, "三星");
+        }
+        // A trailing off-rate after the last copy is not part of the character cost.
+        add(36, 5, 1203, "卡卡罗");
+
+        let mut other_pool = record(1, "2", 5, "2026-01-01 00:01:00");
+        other_pool.resource_id = 2001;
+        other_pool.name = "赞妮".to_string();
+        records.push(other_pool);
+
+        let insights = character_pull_insights(&records, false);
+        let zanni = insights
+            .iter()
+            .find(|item| item.resource_id == 2001)
+            .unwrap();
+        assert_eq!(zanni.copy_count, 4);
+        assert_eq!(zanni.complete_cycle_count, 3);
+        assert_eq!(zanni.total_pulls, 25);
+        assert_eq!(zanni.average_pulls, Some(6.25));
+        assert!(zanni.is_lower_bound);
+        assert_eq!(
+            insights
+                .iter()
+                .filter(|item| item.resource_id == 2001)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn character_cost_preserves_observed_pulls_across_invalid_consecutive_off_rates() {
+        let mut records = vec![record(1, "1", 5, "2026-01-01 00:00:01")];
+        records[0].resource_id = 3001;
+        for id in 2..=31 {
+            let quality = if matches!(id, 11 | 21 | 31) { 5 } else { 3 };
+            let mut item = record(id, "1", quality, &format!("2026-01-01 00:00:{id:02}"));
+            if id == 11 {
+                item.resource_id = 1104;
+                item.name = "维里奈".to_string();
+            } else if id == 21 {
+                item.resource_id = 1203;
+                item.name = "卡卡罗".to_string();
+            } else if id == 31 {
+                item.resource_id = 2001;
+                item.name = "赞妮".to_string();
+            }
+            records.push(item);
+        }
+
+        let insights = character_pull_insights(&records, false);
+        let zanni = insights
+            .iter()
+            .find(|item| item.resource_id == 2001)
+            .unwrap();
+        assert_eq!(zanni.total_pulls, 30);
+        assert_eq!(zanni.average_pulls, Some(30.0));
+        assert!(!zanni.is_lower_bound);
+    }
+
+    #[test]
+    fn character_cost_respects_mock_filtering() {
+        let mut mock = record(1, "1", 5, "2026-01-01 00:00:01");
+        mock.resource_id = 2001;
+        mock.name = "赞妮".to_string();
+        mock.is_mock = true;
+
+        assert!(character_pull_insights(&[mock.clone()], false).is_empty());
+        let included = character_pull_insights(&[mock], true);
+        assert_eq!(included.len(), 1);
+        assert_eq!(included[0].copy_count, 1);
+        assert!(included[0].is_lower_bound);
+    }
+
+    #[test]
+    fn character_cost_counts_weapon_fillers_inside_a_role_pool() {
+        let mut records = vec![record(1, "1", 5, "2026-01-01 00:00:01")];
+        records[0].resource_id = 3001;
+        for id in 2..=50 {
+            let mut item = record(
+                id,
+                "1",
+                if id == 50 { 5 } else { 3 },
+                &format!("2026-01-01 00:{:02}:00", id),
+            );
+            if id == 50 {
+                item.resource_id = 2001;
+                item.name = "赞妮".to_string();
+            } else {
+                item.resource_type = "weapon".to_string();
+                item.name = "三星武器".to_string();
+            }
+            records.push(item);
+        }
+
+        let insights = character_pull_insights(&records, false);
+        let zanni = insights
+            .iter()
+            .find(|item| item.resource_id == 2001)
+            .unwrap();
+        assert_eq!(zanni.total_pulls, 49);
+        assert_eq!(zanni.average_pulls, Some(49.0));
+        assert!(!zanni.is_lower_bound);
+    }
+
+    #[test]
+    fn acquisition_trace_groups_all_copies_and_their_preceding_off_rates() {
+        let mut records = Vec::new();
+        for id in 1..=8 {
+            let mut item = record(id, "1", 5, &format!("2026-01-01 00:00:{id:02}"));
+            let off = matches!(id, 1 | 4 | 7);
+            item.resource_id = if off { 1104 } else { 2001 };
+            item.name = if off { "维里奈" } else { "绯雪" }.to_string();
+            item.is_off_rate = off;
+            records.push(item);
+        }
+        let trace = resource_acquisition_insights(&records, false)
+            .into_iter()
+            .find(|item| item.resource_id == 2001)
+            .unwrap();
+        assert_eq!(trace.target_count, 5);
+        assert_eq!(trace.off_rate_count, 3);
+        assert_eq!(trace.total_five_star_count, 8);
+        assert_eq!(trace.records.len(), 8);
+        assert_eq!(trace.total_pulls, 8);
+        assert_eq!(
+            trace.records.iter().filter(|item| item.is_off_rate).count(),
+            3
+        );
+    }
+
+    #[test]
+    fn acquisition_trace_does_not_attach_a_trailing_off_rate() {
+        let mut up = record(1, "1", 5, "2026-01-01 00:00:01");
+        up.resource_id = 2001;
+        let mut off = record(2, "1", 5, "2026-01-01 00:00:02");
+        off.resource_id = 1104;
+        let trace = resource_acquisition_insights(&[up, off], false).remove(0);
+        assert_eq!(trace.target_count, 1);
+        assert_eq!(trace.off_rate_count, 0);
+        assert_eq!(trace.records.len(), 1);
+    }
+
+    #[test]
+    fn acquisition_trace_supports_weapon_standard_and_beginner_pools_without_off_rate() {
+        let mut weapon = record(1, "2", 5, "2026-01-01 00:00:01");
+        weapon.resource_id = 21040036;
+        weapon.resource_type = "weapon".to_string();
+        let mut standard = record(2, "3", 5, "2026-01-01 00:00:02");
+        standard.resource_id = 1503;
+        let beginner = record(3, "5", 5, "2026-01-01 00:00:03");
+        let insights = resource_acquisition_insights(&[weapon, standard, beginner], false);
+        assert_eq!(insights.len(), 3);
+        assert!(insights
+            .iter()
+            .all(|item| !item.has_off_rate && item.off_rate_count == 0));
+        assert!(insights
+            .iter()
+            .any(|item| item.pool_type == "2" && item.resource_type == "weapon"));
+        assert!(insights.iter().any(|item| item.pool_type == "3"));
+        assert!(insights.iter().any(|item| item.pool_type == "5"));
+    }
+
+    #[test]
+    fn acquisition_trace_isolated_by_pool_and_mock_filter() {
+        let mut real = record(1, "1", 5, "2026-01-01 00:00:01");
+        real.resource_id = 2001;
+        let mut other_pool = real.clone();
+        other_pool.id = Some(2);
+        other_pool.card_pool_type = "8".to_string();
+        let mut mock = real.clone();
+        mock.id = Some(3);
+        mock.is_mock = true;
+        let excluded =
+            resource_acquisition_insights(&[real.clone(), other_pool.clone(), mock.clone()], false);
+        assert_eq!(excluded.len(), 2);
+        assert!(excluded.iter().all(|item| item.target_count == 1));
+        let included = resource_acquisition_insights(&[real, other_pool, mock], true);
+        assert_eq!(
+            included
+                .iter()
+                .find(|item| item.pool_type == "1")
+                .unwrap()
+                .target_count,
+            2
+        );
     }
 
     #[test]

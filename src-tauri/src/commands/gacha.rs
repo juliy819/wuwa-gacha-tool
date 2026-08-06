@@ -15,8 +15,9 @@ use crate::gacha::fetcher::{
     ApiCardInfo, GachaParams, POOL_TYPES,
 };
 use crate::gacha::parser::{
+    character_pull_insights, resource_acquisition_insights, CharacterPullInsight,
     ClearRecordsResult, GachaImportResult, GachaInsights, GachaRecord, GachaStats,
-    GameDirValidation, GameSettings, RecordSummary,
+    GameDirValidation, GameSettings, RecordSummary, ResourceAcquisitionInsight,
 };
 use crate::AppState;
 
@@ -625,6 +626,29 @@ pub fn get_gacha_insights(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
     Ok(GachaInsights::from_records(&records, include_mock))
+}
+
+/// 获取限定角色的可识别抽取成本。
+#[tauri::command]
+pub fn get_character_pull_insights(
+    state: State<'_, AppState>,
+    player_id: Option<String>,
+    include_mock: bool,
+) -> Result<Vec<CharacterPullInsight>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let records = db.get_all_records(player_id.as_deref())?;
+    Ok(character_pull_insights(&records, include_mock))
+}
+
+#[tauri::command]
+pub fn get_resource_acquisition_insights(
+    state: State<'_, AppState>,
+    player_id: Option<String>,
+    include_mock: bool,
+) -> Result<Vec<ResourceAcquisitionInsight>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let records = db.get_all_records(player_id.as_deref())?;
+    Ok(resource_acquisition_insights(&records, include_mock))
 }
 
 /// 清空记录

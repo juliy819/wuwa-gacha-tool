@@ -120,6 +120,47 @@ export interface ProbabilityPoint {
   sample_size: number;
 }
 
+export interface CharacterPullInsight {
+  pool_type: string;
+  pool_name: string;
+  resource_id: number;
+  name: string;
+  copy_count: number;
+  complete_cycle_count: number;
+  total_pulls: number;
+  average_pulls: number | null;
+  is_lower_bound: boolean;
+}
+
+export interface AcquisitionRecordInsight {
+  id: number | null;
+  resource_id: number;
+  name: string;
+  time: string;
+  pity: number;
+  is_lower_bound: boolean;
+  is_off_rate: boolean;
+  is_target: boolean;
+  is_mock: boolean;
+  acquisition_index: number;
+}
+
+export interface ResourceAcquisitionInsight {
+  pool_type: string;
+  pool_name: string;
+  resource_id: number;
+  name: string;
+  resource_type: string;
+  target_count: number;
+  off_rate_count: number;
+  total_five_star_count: number;
+  total_pulls: number;
+  average_pulls: number | null;
+  is_lower_bound: boolean;
+  has_off_rate: boolean;
+  records: AcquisitionRecordInsight[];
+}
+
 export interface PoolInsight {
   pool_type: string;
   pool_name: string;

@@ -2066,7 +2066,7 @@ mod tests {
         let request = MockInsertRequest {
             player_id: "10001".to_string(),
             card_pool_type: "3".to_string(),
-            resource: resource(1608, "穗穗", 5, "role"),
+            resource: resource(1301, "鉴心", 5, "role"),
             pulls: 11,
             time: "2026-02-01 00:00:00".to_string(),
         };
@@ -2079,7 +2079,7 @@ mod tests {
                 "2026-02-01 00:00:01",
             )
             .unwrap_err();
-        assert!(error.contains("每 10 抽"));
+        assert!(error.contains("每 10 抽"), "unexpected error: {error}");
 
         let db = test_database();
         let mut previous_five = record("3", 1601, "2026-01-01 00:00:00");
@@ -2099,7 +2099,7 @@ mod tests {
         let request = MockInsertRequest {
             player_id: "10001".to_string(),
             card_pool_type: "3".to_string(),
-            resource: resource(1608, "穗穗", 5, "role"),
+            resource: resource(1301, "鉴心", 5, "role"),
             pulls: 2,
             time: "2026-02-01 00:00:00".to_string(),
         };
@@ -2183,7 +2183,7 @@ mod tests {
         let request = MockInsertRequest {
             player_id: "10001".to_string(),
             card_pool_type: "3".to_string(),
-            resource: resource(1608, "穗穗", 5, "role"),
+            resource: resource(1301, "鉴心", 5, "role"),
             pulls: 2,
             time: "2026-02-01 00:00:00".to_string(),
         };
@@ -2341,7 +2341,7 @@ mod tests {
         let request = MockInsertRequest {
             player_id: "10001".to_string(),
             card_pool_type: "3".to_string(),
-            resource: resource(1608, "穗穗", 5, "role"),
+            resource: resource(1301, "鉴心", 5, "role"),
             pulls: 50,
             time: "2026-03-01 00:00:00".to_string(),
         };
@@ -2363,7 +2363,7 @@ mod tests {
             five_star_pities(&records, "3"),
             vec![
                 ("前一个五星".to_string(), 1),
-                ("穗穗".to_string(), 50),
+                ("鉴心".to_string(), 50),
                 ("后一个五星".to_string(), 60),
             ]
         );
@@ -2376,7 +2376,7 @@ mod tests {
         db.update_mock_record(&MockUpdateRequest {
             id: five_star_id,
             card_pool_type: "3".to_string(),
-            resource: resource(1608, "穗穗", 5, "role"),
+            resource: resource(1301, "鉴心", 5, "role"),
             time: "2026-03-01 12:00:00".to_string(),
             filler_time: "2026-03-01 11:59:59".to_string(),
             after_filler_time: "2026-03-01 12:00:01".to_string(),
@@ -2399,7 +2399,7 @@ mod tests {
         );
         assert_eq!(
             five_star_pities(&moved, "3")[1..],
-            [("穗穗".to_string(), 50), ("后一个五星".to_string(), 60),]
+            [("鉴心".to_string(), 50), ("后一个五星".to_string(), 60),]
         );
 
         assert_eq!(db.delete_mock_record(five_star_id).unwrap(), 50);
@@ -2443,7 +2443,7 @@ mod tests {
         let request = MockInsertRequest {
             player_id: "10001".to_string(),
             card_pool_type: "3".to_string(),
-            resource: resource(1608, "穗穗", 5, "role"),
+            resource: resource(1301, "鉴心", 5, "role"),
             pulls: 4,
             time: "2026-02-01 00:00:00".to_string(),
         };
@@ -2460,7 +2460,7 @@ mod tests {
             five_star_pities(&db.get_all_records(Some("10001")).unwrap(), "3"),
             vec![
                 ("前一个五星".to_string(), 1),
-                ("穗穗".to_string(), 4),
+                ("鉴心".to_string(), 4),
                 ("后一个五星".to_string(), 3),
             ]
         );
@@ -2526,7 +2526,7 @@ mod tests {
             let request = MockInsertRequest {
                 player_id: "10001".to_string(),
                 card_pool_type: "3".to_string(),
-                resource: resource(1608, "穗穗", 5, "role"),
+                resource: resource(1301, "鉴心", 5, "role"),
                 pulls: target_pity,
                 time: "2026-01-02 00:00:00".to_string(),
             };
@@ -2541,7 +2541,7 @@ mod tests {
                 .unwrap();
             let pities = five_star_pities(&db.get_all_records(Some("10001")).unwrap(), "3");
             assert_eq!(inserted.len() as i32, target_pity);
-            assert_eq!(pities[1], ("穗穗".to_string(), target_pity));
+            assert_eq!(pities[1], ("鉴心".to_string(), target_pity));
             assert_eq!(pities[2], ("后一个五星".to_string(), next_pity));
         }
     }
