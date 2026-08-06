@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::assets::GachaResource;
-use crate::gacha::fetcher::{get_display_pool_name, is_limited_char_pool};
+use crate::gacha::fetcher::{get_display_pool_name, hard_pity_for_pool, is_limited_char_pool};
 use crate::gacha::parser::{ClearRecordsResult, GachaRecord, GameSettings, RecordSummary};
 
 const STANDARD_FIVE_STAR_CHAR_IDS: &[i64] = &[1104, 1203, 1301, 1405, 1503];
@@ -516,8 +516,9 @@ impl Database {
         after_fillers: &[GachaResource],
         after_filler_time: &str,
     ) -> Result<Vec<GachaRecord>, String> {
-        if request.pulls < 1 || request.pulls > 80 {
-            return Err("抽数必须在 1 到 80 之间".to_string());
+        let hard_pity = hard_pity_for_pool(&request.card_pool_type);
+        if request.pulls < 1 || request.pulls > hard_pity {
+            return Err(format!("抽数必须在 1 到 {hard_pity} 之间"));
         }
         if request.resource.quality_level != 5 {
             return Err("只能插入五星目标记录".to_string());
@@ -714,8 +715,9 @@ impl Database {
         time: &str,
         target_pity: i32,
     ) -> Result<MockInsertPlan, String> {
-        if !(1..=80).contains(&target_pity) {
-            return Err("抽数必须在 1 到 80 之间".to_string());
+        let hard_pity = hard_pity_for_pool(pool_type);
+        if !(1..=hard_pity).contains(&target_pity) {
+            return Err(format!("抽数必须在 1 到 {hard_pity} 之间"));
         }
         let existing_pity = self.pity_before(player_id, pool_type, time)?;
         let required_draws = target_pity - existing_pity;
@@ -1245,6 +1247,12 @@ fn validate_resource_for_pool(pool_type: &str, resource: &GachaResource) -> Resu
             "该卡池只能选择五星武器".to_string()
         });
     }
+    if resource.quality_level == 5
+        && matches!(pool_type, "3" | "5" | "6" | "7")
+        && !STANDARD_FIVE_STAR_CHAR_IDS.contains(&resource.resource_id)
+    {
+        return Err("该卡池只能选择常驻五星角色".to_string());
+    }
     Ok(())
 }
 
@@ -1489,6 +1497,32 @@ mod tests {
             quality_level,
             resource_type: resource_type.to_string(),
         }
+    }
+
+    #[test]
+    fn beginner_role_pools_only_accept_the_five_standard_characters() {
+        let jianxin = resource(1301, "鉴心", 5, "role");
+        let limited = resource(9999, "限定角色", 5, "role");
+
+        for pool_type in ["3", "5", "6", "7"] {
+            assert!(validate_resource_for_pool(pool_type, &jianxin).is_ok());
+            assert!(validate_resource_for_pool(pool_type, &limited).is_err());
+        }
+        assert!(validate_resource_for_pool("1", &limited).is_ok());
+    }
+
+    #[test]
+    fn beginner_pool_uses_50_pity_while_select_pool_keeps_80() {
+        let db = test_database();
+        let error = db
+            .mock_insert_plan("10001", "5", "2026-01-01 00:00:00", 51)
+            .unwrap_err();
+        assert!(error.contains("1 到 50"));
+
+        let plan = db
+            .mock_insert_plan("10001", "6", "2026-01-01 00:00:00", 80)
+            .unwrap();
+        assert_eq!(plan.required_draws, 80);
     }
 
     fn valid_filler_resources(
@@ -1839,7 +1873,7 @@ mod tests {
             .find(|pool| pool.pool_type == "1")
             .unwrap();
         assert_eq!(remaining.len(), 40);
-        assert_eq!(pool.avg_pity, 40.0);
+        assert_eq!(pool.avg_pity, 0.0);
 
         let five_star_id = remaining
             .iter()

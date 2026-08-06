@@ -27,8 +27,8 @@ type Props = {
 
 const ROLE_FIVE_STAR_POOLS = new Set(['1', '3', '5', '6', '7', '8', '10', '12']);
 
-// 常驻五星角色（角色常驻唤取 / 新手自选唤取可选）
-const STANDARD_CHARACTERS = new Set(['维里奈', '白芷', '卡卡罗', '安可', '凌阳']);
+// 常驻五星角色（维里奈、卡卡罗、鉴心、凌阳、安可）
+const STANDARD_CHARACTER_IDS = new Set([1104, 1203, 1301, 1405, 1503]);
 
 // 常驻五星武器（武器常驻唤取可选，武器活动唤取等排除）
 const STANDARD_WEAPONS = new Set([
@@ -36,8 +36,8 @@ const STANDARD_WEAPONS = new Set([
   '镭射切变', '源能机锋', '相位涟漪', '脉冲协臂', '玻色星仪',
 ]);
 
-// 角色常驻唤取 / 新手自选唤取：仅可选常驻五星角色
-const STANDARD_ROLE_POOLS = new Set(['3', '6', '7']);
+// 角色常驻唤取 / 新手唤取 / 新手自选唤取：仅可选常驻五星角色
+const STANDARD_ROLE_POOLS = new Set(['3', '5', '6', '7']);
 // 武器常驻唤取：仅可选常驻五星武器
 const STANDARD_WEAPON_POOLS = new Set(['4']);
 // 武器活动唤取 / 武器新旅唤取 / 武器联动唤取 / 武器忆旅唤取：排除常驻五星武器
@@ -131,8 +131,8 @@ export default function MockGachaDialog({
       if (resource.resource_type === 'role' && resource.name.startsWith('漂泊者')) return false;
       if (quality !== 5) return true;
       if (resource.resource_type !== expectedType) return false;
-      // 角色常驻唤取 / 新手自选唤取：仅可选常驻五星角色
-      if (STANDARD_ROLE_POOLS.has(poolType)) return STANDARD_CHARACTERS.has(resource.name);
+      // 角色常驻唤取 / 新手唤取 / 新手自选唤取：仅可选常驻五星角色
+      if (STANDARD_ROLE_POOLS.has(poolType)) return STANDARD_CHARACTER_IDS.has(resource.resource_id);
       // 武器常驻唤取：仅可选常驻五星武器
       if (STANDARD_WEAPON_POOLS.has(poolType)) return STANDARD_WEAPONS.has(resource.name);
       // 武器活动唤取 / 武器新旅唤取 / 武器联动唤取 / 武器忆旅唤取：排除常驻五星武器
@@ -161,11 +161,12 @@ export default function MockGachaDialog({
   }, [availableResources, resourceId]);
 
   const numericPulls = Number(pulls);
+  const hardPity = poolType === '5' ? 50 : 80;
   const pullsValid = editing || (
     pulls.trim() !== ''
     && Number.isInteger(numericPulls)
     && numericPulls >= 1
-    && numericPulls <= 80
+    && numericPulls <= hardPity
   );
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
@@ -302,7 +303,7 @@ export default function MockGachaDialog({
               <input
                 type="number"
                 min={1}
-                max={80}
+                max={hardPity}
                 step={1}
                 value={pulls}
                 onChange={(event) => setPulls(event.target.value)}
