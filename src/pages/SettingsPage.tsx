@@ -269,6 +269,14 @@ export default function SettingsPage() {
     }
   };
 
+  const openBackupDirectory = async () => {
+    try {
+      await gachaApi.openBackupDirectory();
+    } catch (error) {
+      addToast('error', `无法打开备份目录: ${String(error)}`);
+    }
+  };
+
   const handleExport = async (playerId: string) => {
     try {
       const today = new Date().toISOString().slice(0, 10);
@@ -559,6 +567,7 @@ export default function SettingsPage() {
                     <div className="text-[11px] text-[#8fc8be]">删除前备份已创建</div>
                     <div className="mt-0.5 truncate text-[10px] text-wave" title={lastBackupPath}>{lastBackupPath}</div>
                   </div>
+                  <button onClick={() => void openBackupDirectory()} className="flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] text-wave hover:bg-white/[0.05] hover:text-tide" title="打开备份目录"><ResonanceIcon kind="directory" size={12} />目录</button>
                   <button onClick={copyBackupPath} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title="复制备份路径"><ResonanceActionIcon size="sm"><ResonanceIcon kind="copy" size={12} /></ResonanceActionIcon></button>
                 </div>
               )}

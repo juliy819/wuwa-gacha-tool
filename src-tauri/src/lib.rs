@@ -62,6 +62,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             logging::open_log_directory,
+            logging::open_backup_directory,
             commands::cloud_gacha::open_cloud_gacha_window,
             commands::cloud_gacha::close_cloud_gacha_window,
             commands::gacha::get_resource_icon,

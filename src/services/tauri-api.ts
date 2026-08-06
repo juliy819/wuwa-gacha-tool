@@ -6,6 +6,10 @@ export const gachaApi = {
     return invoke('open_log_directory');
   },
 
+  openBackupDirectory: (): Promise<string> => {
+    return invoke('open_backup_directory');
+  },
+
   getResourceIcon: (resourceId: number): Promise<string> => {
     return invoke('get_resource_icon', { resourceId });
   },

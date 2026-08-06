@@ -102,6 +102,25 @@ pub fn open_log_directory(app: AppHandle) -> Result<String, String> {
     Ok(log_dir.to_string_lossy().into_owned())
 }
 
+#[tauri::command]
+pub fn open_backup_directory(app: AppHandle) -> Result<String, String> {
+    let backup_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法定位应用数据目录: {error}"))?
+        .join("backups");
+    std::fs::create_dir_all(&backup_dir).map_err(|error| {
+        log::error!(target: "app::logging", "event=create_backup_dir_failed error={error}");
+        format!("无法创建备份目录: {error}")
+    })?;
+    open_directory(&backup_dir).map_err(|error| {
+        log::error!(target: "app::logging", "event=open_backup_dir_failed error={error}");
+        format!("无法打开备份目录: {error}")
+    })?;
+    log::info!(target: "app::logging", "event=open_backup_dir");
+    Ok(backup_dir.to_string_lossy().into_owned())
+}
+
 fn open_directory(path: &Path) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     let mut command = std::process::Command::new("explorer");
