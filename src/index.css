@@ -1536,6 +1536,22 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .analysis-formula-strip span { color: #727a76; font-size: 9px; }
 .analysis-formula-strip strong { color: #c9c3ad; font: 12px Consolas, monospace; font-weight: 500; }
 .analysis-formula-strip i { color: #6a6f6c; font-style: normal; }
+.analysis-deviation-strip {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  min-height: 72px;
+  padding: 10px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.016);
+}
+.analysis-deviation-strip div { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.analysis-deviation-strip span { color: #727a76; font-size: 9px; }
+.analysis-deviation-strip strong { color: #dfe3e0; font: 15px Consolas, monospace; font-weight: 500; }
+.analysis-deviation-strip small { color: #69716c; font-size: 9px; line-height: 1.35; }
+.analysis-deviation-strip > i { width: 22px; height: 1px; background: linear-gradient(90deg, transparent, rgba(216, 189, 132, 0.55), transparent); }
 .analysis-forecast-section { overflow: hidden; border-color: rgba(216, 189, 132, 0.13); }
 .analysis-forecast-heading {
   display: flex;
@@ -1671,6 +1687,8 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   .analysis-metric { border-bottom: 1px solid rgba(255, 255, 255, 0.055); }
   .analysis-formula-strip { grid-template-columns: 1fr; gap: 8px; }
   .analysis-formula-strip i { display: none; }
+  .analysis-deviation-strip { grid-template-columns: 1fr; gap: 9px; }
+  .analysis-deviation-strip > i { display: none; }
   .analysis-forecast-heading { display: block; }
   .analysis-forecast-state { justify-items: start; margin-top: 12px; }
   .analysis-forecast-body { grid-template-columns: 1fr; }

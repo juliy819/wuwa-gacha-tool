@@ -41,6 +41,15 @@ function fiveStarRateAtPity(pull: number) {
   return 1;
 }
 
+function theoreticalThreshold(target: number) {
+  let survival = 1;
+  for (let pull = 1; pull <= 79; pull += 1) {
+    survival *= 1 - fiveStarRateAtPity(pull);
+    if (1 - survival >= target) return pull;
+  }
+  return 79;
+}
+
 function thresholdPulls(points: ForecastPoint[], key: 'fiveStar' | 'featured') {
   return FORECAST_THRESHOLDS.map((probability) => ({
     probability,
@@ -433,6 +442,18 @@ export default function AnalyticsPage() {
   const forecastNextTen = forecast
     ? forecast.points[Math.min(10, forecast.points.length - 1)]
     : null;
+  const theoreticalMedianPulls = theoreticalThreshold(0.5);
+  const observedDelta = activePool?.average_pity === null || activePool?.average_pity === undefined
+    ? null
+    : ((activePool.average_pity - FIVE_STAR_EXPECTED_PULLS) / FIVE_STAR_EXPECTED_PULLS) * 100;
+  const hasTrendSample = (activePool?.complete_interval_count ?? 0) >= 10;
+  const observedSignal = observedDelta === null || !hasTrendSample
+    ? { label: '样本不足', tone: '#8b938e' }
+    : observedDelta <= -12
+      ? { label: '偏欧', tone: '#8fc8be' }
+      : observedDelta >= 12
+        ? { label: '偏非', tone: '#d99a9a' }
+        : { label: '接近理论', tone: '#d8bd84' };
 
   return (
     <PageTransition>
@@ -529,6 +550,14 @@ export default function AnalyticsPage() {
                     <div><span>五星长期平均</span><strong>1 ÷ 1.85% = 54.1 抽</strong></div>
                     <i>→</i>
                     <div><span>角色 UP 长期平均</span><strong>54.1 × (50%×1 + 50%×2) = 81.15 抽</strong></div>
+                  </section>
+
+                  <section className="analysis-deviation-strip" aria-label="实际表现对照理论">
+                    <div><span>当前样本信号</span><strong style={{ color: observedSignal.tone }}>{observedSignal.label}</strong><small>{observedDelta === null ? '完成更多五星后再判断' : !hasTrendSample ? `仅 ${activePool?.complete_interval_count ?? 0} 个完整区间，不作欧非判断` : `平均抽数 ${observedDelta >= 0 ? '+' : ''}${observedDelta.toFixed(1)}% 对比理论 54.1 抽`}</small></div>
+                    <i />
+                    <div><span>历史中位数</span><strong>{formatPull(activePool.median_pity)}</strong><small>一半的五星不超过这个抽数</small></div>
+                    <i />
+                    <div><span>理论中位数</span><strong>{theoreticalMedianPulls} 抽</strong><small>按分段软保底模型计算</small></div>
                   </section>
 
                   {forecast && forecastOption ? (
