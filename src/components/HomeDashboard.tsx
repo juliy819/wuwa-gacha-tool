@@ -18,6 +18,7 @@ interface FiveStarResult {
   name: string;
   poolName: string;
   pity: number;
+  isLowerBound: boolean;
   time: string;
   isOffRate: boolean;
 }
@@ -30,6 +31,7 @@ const RATIO_DIAL_TICKS = Array.from({ length: 16 }, (_, index) => index * 22.5);
 
 function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
   const pityByPool = new Map<string, number>();
+  const poolsWithFiveStar = new Set<string>();
   const results: FiveStarResult[] = [];
 
   [...records]
@@ -42,12 +44,15 @@ function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
       pityByPool.set(record.card_pool_type, pity);
 
       if (record.quality_level === QUALITY.FIVE_STAR) {
+        const isLowerBound = !poolsWithFiveStar.has(record.card_pool_type);
+        poolsWithFiveStar.add(record.card_pool_type);
         results.push({
           id: `${record.card_pool_type}-${record.time}-${record.resource_id}-${index}`,
           resourceId: record.resource_id,
           name: record.name,
           poolName: record.card_pool_name,
           pity,
+          isLowerBound,
           time: record.time,
           isOffRate: record.is_off_rate,
         });
@@ -218,9 +223,9 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
         <SummaryMetric index={0} label="累计唤取" value={<AnimatedCounter value={stats.total_draws} shimmer pulse milestone />} detail={`${stats.total_four_star} 个四星`} icon={<ResonanceIcon kind="spark" size={14} />} />
         <SummaryMetric index={1} label="五星数量" value={<AnimatedCounter value={stats.total_five_star} pulse milestone />} detail="已导入记录中的五星" icon={<ResonanceIcon kind="trophy" size={14} />} accent />
         <SummaryMetric index={2} label="五星概率" value={<AnimatedCounter value={stats.five_star_rate} formatter={(v) => `${v.toFixed(2)}%`} pulse />} detail="占全部已导入记录" icon={<ResonanceIcon kind="target" size={14} />} />
-        <SummaryMetric index={3} label="平均五星抽数" value={<AnimatedCounter value={stats.avg_five_star_pity} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="各卡池分别计算后汇总" icon={<ResonanceIcon kind="chart" size={14} />} />
-        <SummaryMetric index={4} label="每个 UP 角色" value={<AnimatedCounter value={stats.avg_up_role_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 角色池整体投入" icon={<ResonanceIcon kind="user" size={14} />} accent />
-        <SummaryMetric index={5} label="每把 UP 武器" value={<AnimatedCounter value={stats.avg_up_weapon_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="UP 武器池整体投入" icon={<ResonanceIcon kind="weapon" size={14} />} accent />
+        <SummaryMetric index={3} label="平均五星抽数" value={<AnimatedCounter value={stats.avg_five_star_pity} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="仅统计可确认五星间隔" icon={<ResonanceIcon kind="chart" size={14} />} />
+        <SummaryMetric index={4} label="每个 UP 角色" value={<AnimatedCounter value={stats.avg_up_role_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="完整 UP 周期均值" icon={<ResonanceIcon kind="user" size={14} />} accent />
+        <SummaryMetric index={5} label="每把 UP 武器" value={<AnimatedCounter value={stats.avg_up_weapon_pulls} formatter={(v) => (v > 0 ? `${v.toFixed(1)} 抽` : '-')} />} detail="完整五星周期均值" icon={<ResonanceIcon kind="weapon" size={14} />} accent />
       </motion.section>
 
       <div className="home-dashboard-primary grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
@@ -281,7 +286,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
             <h2 className="panel-heading flex items-center gap-2 text-sm font-medium text-tide">
               <ResonanceIcon kind="trophy" size={15} /> 最近五星
             </h2>
-            <p className="mt-1 text-[11px] text-wave-dim">抽数按各自卡池独立计算</p>
+            <p className="mt-1 text-[11px] text-wave-dim">首个五星前序可能缺失，以 ≥ 标记抽数下界</p>
           </div>
           <span className="text-[11px] text-wave">
             {recordRange ? `数据截至 ${recordRange.latest}` : `最近 ${recentFiveStars.length} 条`}
@@ -312,7 +317,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
                   <div className="mt-0.5 truncate text-[11px] text-wave">{item.poolName} · {item.time.slice(0, 10)}</div>
                 </div>
                 <div className="flex shrink-0 items-baseline gap-0.5 rounded border border-[#d8bd84]/15 bg-[#d8bd84]/[0.05] px-2 py-1 text-sm font-semibold tabular-nums text-[#d8bd84]">
-                  <span>{item.pity}</span>
+                  <span>{item.isLowerBound ? '≥' : ''}{item.pity}</span>
                   <span className="text-[10px] font-normal">抽</span>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, RecordSummary, UpdateMockGachaRequest } from '../types';
+import type { ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, RecordSummary, UpdateMockGachaRequest } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -77,6 +77,10 @@ export const gachaApi = {
   // 获取统计数据
   getStats: (playerId?: string): Promise<GachaStats> => {
     return invoke('get_stats', { playerId });
+  },
+
+  getGachaInsights: (playerId: string, includeMock: boolean): Promise<GachaInsights> => {
+    return invoke('get_gacha_insights', { playerId, includeMock });
   },
 
   // 清空记录

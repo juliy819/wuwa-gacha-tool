@@ -101,6 +101,63 @@ export interface GachaStats {
   pools: PoolInfo[];
 }
 
+export interface PityDistributionBin {
+  start: number;
+  end: number;
+  label: string;
+  count: number;
+  percentage: number;
+}
+
+export interface CumulativePityPoint {
+  pull: number;
+  percentage: number;
+}
+
+export interface ProbabilityPoint {
+  pull: number;
+  percentage: number;
+  sample_size: number;
+}
+
+export interface PoolInsight {
+  pool_type: string;
+  pool_name: string;
+  record_count: number;
+  five_star_count: number;
+  complete_interval_count: number;
+  invalid_interval_count: number;
+  current_pity: number;
+  average_pity: number | null;
+  median_pity: number | null;
+  best_pity: number | null;
+  worst_pity: number | null;
+  early_count: number;
+  early_rate: number;
+  reliability: 'insufficient' | 'low' | 'medium' | 'high';
+  distribution: PityDistributionBin[];
+  cumulative: CumulativePityPoint[];
+  probability_curve: ProbabilityPoint[];
+  featured_count: number;
+  featured_cycle_count: number;
+  invalid_featured_cycle_count: number;
+  featured_average_pulls: number | null;
+  featured_median_pulls: number | null;
+  featured_best_pulls: number | null;
+  featured_worst_pulls: number | null;
+  featured_attempt_count: number;
+  featured_win_count: number;
+  featured_win_rate: number | null;
+  featured_guaranteed: boolean;
+  featured_distribution: PityDistributionBin[];
+}
+
+export interface GachaInsights {
+  include_mock: boolean;
+  total_records: number;
+  pools: PoolInsight[];
+}
+
 export interface GameSettings {
   game_dir: string;
 }

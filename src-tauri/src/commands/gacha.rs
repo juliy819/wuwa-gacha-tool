@@ -11,12 +11,12 @@ use crate::assets::GachaResource;
 use crate::db::{MockInsertRequest, MockUpdateRequest};
 use crate::gacha::decoder;
 use crate::gacha::fetcher::{
-    self, build_pool_name_to_id, get_display_pool_name, pool_type_to_api_name, ApiCardInfo,
-    GachaParams, POOL_TYPES,
+    self, build_pool_name_to_id, get_display_pool_name, hard_pity_for_pool, pool_type_to_api_name,
+    ApiCardInfo, GachaParams, POOL_TYPES,
 };
 use crate::gacha::parser::{
-    ClearRecordsResult, GachaImportResult, GachaRecord, GachaStats, GameDirValidation,
-    GameSettings, RecordSummary,
+    ClearRecordsResult, GachaImportResult, GachaInsights, GachaRecord, GachaStats,
+    GameDirValidation, GameSettings, RecordSummary,
 };
 use crate::AppState;
 
@@ -64,8 +64,9 @@ pub async fn insert_mock_gacha(
     if request.player_id.trim().is_empty() {
         return Err("请先选择玩家 UID".to_string());
     }
-    if !(1..=80).contains(&request.pulls) {
-        return Err("抽数必须在 1 到 80 之间".to_string());
+    let hard_pity = hard_pity_for_pool(&request.card_pool_type);
+    if !(1..=hard_pity).contains(&request.pulls) {
+        return Err(format!("抽数必须在 1 到 {hard_pity} 之间"));
     }
 
     let resources = crate::assets::get_gacha_resources(&state).await?;
@@ -612,6 +613,18 @@ pub fn get_stats(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
     Ok(GachaStats::from_records(&records))
+}
+
+/// 获取按卡池计算的五星完整区间洞察。
+#[tauri::command]
+pub fn get_gacha_insights(
+    state: State<'_, AppState>,
+    player_id: Option<String>,
+    include_mock: bool,
+) -> Result<GachaInsights, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let records = db.get_all_records(player_id.as_deref())?;
+    Ok(GachaInsights::from_records(&records, include_mock))
 }
 
 /// 清空记录

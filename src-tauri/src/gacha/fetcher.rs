@@ -71,6 +71,14 @@ pub fn is_limited_char_pool(pool_type: &str) -> bool {
     matches!(pool_type, "1" | "8" | "10" | "12")
 }
 
+pub fn hard_pity_for_pool(pool_type: &str) -> i32 {
+    if pool_type == "5" {
+        50
+    } else {
+        80
+    }
+}
+
 /// pool type ID → API 中文名（用于导出 JSON）
 pub fn pool_type_to_api_name(pool_type: &str) -> &str {
     POOL_TYPES
@@ -296,6 +304,14 @@ mod tests {
         assert_eq!(get_pool_group("10"), "UP角色池");
         assert_eq!(get_pool_group("2"), "UP武器池");
         assert_eq!(get_pool_group("3"), "常驻角色池");
+        assert!(is_limited_char_pool("1"));
+        assert!(is_limited_char_pool("8"));
+        assert!(is_limited_char_pool("10"));
+        assert!(is_limited_char_pool("12"));
+        assert!(!is_limited_char_pool("6"));
+        assert_eq!(hard_pity_for_pool("5"), 50);
+        assert_eq!(hard_pity_for_pool("6"), 80);
+        assert_eq!(hard_pity_for_pool("13"), 80);
     }
 
     #[test]

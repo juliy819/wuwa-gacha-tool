@@ -26,7 +26,7 @@ import {
 
 type ViewMode = 'list' | 'grid' | 'table';
 type RecordScope = 'five' | 'all';
-type RecordWithPity = { record: GachaRecord; pity: number };
+type RecordWithPity = { record: GachaRecord; pity: number; isLowerBound: boolean };
 
 const GRID_ROWS_PER_PAGE = 5;
 const GRID_MIN_ITEM_WIDTH = 108;
@@ -66,7 +66,7 @@ function RecordAvatar({ record, size = 'md' }: { record: GachaRecord; size?: 'sm
   );
 }
 
-function PityBadge({ pity }: { pity: number }) {
+function PityBadge({ pity, lowerBound = false }: { pity: number; lowerBound?: boolean }) {
   const isHigh = pity >= 66;
   return (
     <span className={`inline-flex items-baseline gap-0.5 rounded border px-2 py-1 text-xs font-semibold tabular-nums ${
@@ -74,7 +74,7 @@ function PityBadge({ pity }: { pity: number }) {
         ? 'border-[#d8bd84]/20 bg-[#d8bd84]/[0.07] text-[#d8bd84]'
         : 'border-[#6faaa0]/20 bg-[#6faaa0]/[0.07] text-[#8fc8be]'
     }`}>
-      {pity}<span className="text-[10px] font-normal">抽</span>
+      {lowerBound ? '≥' : ''}{pity}<span className="text-[10px] font-normal">抽</span>
     </span>
   );
 }
@@ -232,10 +232,14 @@ export default function RecordsPage() {
       return timeOrder !== 0 ? timeOrder : (b.id ?? 0) - (a.id ?? 0);
     });
     const pityByPool = new Map<string, number>();
+    const poolsWithFiveStar = new Set<string>();
     const result = ordered.map((record) => {
       const pity = (pityByPool.get(record.card_pool_type) ?? 0) + 1;
+      const isFiveStar = record.quality_level === QUALITY.FIVE_STAR;
+      const isLowerBound = isFiveStar && !poolsWithFiveStar.has(record.card_pool_type);
+      if (isFiveStar) poolsWithFiveStar.add(record.card_pool_type);
       pityByPool.set(record.card_pool_type, record.quality_level === QUALITY.FIVE_STAR ? 0 : pity);
-      return { record, pity };
+      return { record, pity, isLowerBound };
     });
     return result.reverse();
   }, [records]);
@@ -584,7 +588,7 @@ export default function RecordsPage() {
                 />
                 {viewMode === 'list' && (
                   <div className="record-list-track px-4">
-                    {pagedList.pageItems.map(({ record, pity }, index) => {
+                    {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       const barColor = getBarColor(pity);
                       const barWidth = Math.min((pity / 80) * 100, 100);
                       return (
@@ -602,7 +606,7 @@ export default function RecordsPage() {
                               />
                             </div>
                             <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums" style={{ color: barColor }}>
-                              {pity}
+                              {isLowerBound ? '≥' : ''}{pity}
                             </span>
                             <span className={`w-5 shrink-0 text-center text-[10px] font-bold ${record.is_off_rate ? 'text-[#d84848]' : 'text-transparent'}`}>
                               歪
@@ -616,7 +620,7 @@ export default function RecordsPage() {
 
                 {viewMode === 'grid' && (
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3 p-4">
-                    {pagedList.pageItems.map(({ record, pity }, index) => {
+                    {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       return (
                         <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''}`}>
                           <div className="relative aspect-square overflow-hidden rounded-md">
@@ -625,7 +629,7 @@ export default function RecordsPage() {
                           </div>
                           <div className="mt-2 truncate text-center text-xs text-tide">{record.name}</div>
                           <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave">
-                            <PityBadge pity={pity} />
+                            <PityBadge pity={pity} lowerBound={isLowerBound} />
                           </div>
                         </div>
                       );
@@ -647,7 +651,7 @@ export default function RecordsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
-                      {pagedList.pageItems.map(({ record, pity }, index) => {
+                      {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                         const isFive = record.quality_level === QUALITY.FIVE_STAR;
                         const color = QUALITY_COLORS[record.quality_level] ?? '#8a8a8a';
                         return (
@@ -664,7 +668,7 @@ export default function RecordsPage() {
                             </td>
                             <td className="px-3 py-2 text-wave">{record.resource_type === 'role' ? '角色' : '武器'}</td>
                             <td className="px-3 py-2 text-center" style={{ color }}>{QUALITY_LABELS[record.quality_level]}</td>
-                            <td className="px-3 py-2 text-center">{isFive ? <PityBadge pity={pity} /> : <span className="text-wave">-</span>}</td>
+                            <td className="px-3 py-2 text-center">{isFive ? <PityBadge pity={pity} lowerBound={isLowerBound} /> : <span className="text-wave">-</span>}</td>
                             <td className="px-3 py-2">
                               {record.is_mock ? (
                                 <div className="flex items-center justify-center gap-1">

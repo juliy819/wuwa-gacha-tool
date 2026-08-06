@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import Toast from './components/Toast';
 import StatusBar from './components/StatusBar';
@@ -11,6 +11,8 @@ import SettingsPage from './pages/SettingsPage';
 import { useGachaStore } from './store/useGachaStore';
 import { useUpdateStore } from './store/useUpdateStore';
 
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+
 function AnimatedRoutes() {
   const location = useLocation();
   return (
@@ -18,6 +20,7 @@ function AnimatedRoutes() {
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<Home />} />
         <Route path="/records" element={<RecordsPage />} />
+        <Route path="/analytics" element={<Suspense fallback={null}><AnalyticsPage /></Suspense>} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AnimatePresence>

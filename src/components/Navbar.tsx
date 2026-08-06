@@ -13,6 +13,7 @@ import WuwaControlIcon from './WuwaControlIcon';
 const navItems: Array<{ path: string; label: string; kind: ResonanceModeIconKind }> = [
   { path: '/', label: '首页', kind: 'origin' },
   { path: '/records', label: '记录', kind: 'echo' },
+  { path: '/analytics', label: '分析', kind: 'chart' },
   { path: '/settings', label: '设置', kind: 'calibration' },
 ];
 
@@ -104,6 +105,8 @@ export default function Navbar() {
               <Link
                 key={item.path}
                 to={item.path}
+                aria-label={item.label}
+                title={item.label}
                 data-active={isActive ? 'true' : 'false'}
                 className={`app-nav-link relative z-10 flex items-center gap-2 px-4 py-2 text-sm font-medium ${
                   isActive ? 'text-tide' : 'text-wave hover:text-tide-dim'

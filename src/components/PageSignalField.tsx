@@ -2,7 +2,7 @@ import { motion } from 'framer-motion';
 import { cn } from '../lib/utils';
 
 type PageSignalFieldProps = {
-  variant: 'records' | 'settings';
+  variant: 'records' | 'settings' | 'analysis';
   className?: string;
 };
 
@@ -10,6 +10,28 @@ const drawTransition = { duration: 0.72, ease: [0.16, 1, 0.3, 1] as const };
 
 export default function PageSignalField({ variant, className }: PageSignalFieldProps) {
   const pathMotion = { pathLength: [0, 1], opacity: [0, 1] };
+
+  if (variant === 'analysis') {
+    return (
+      <div className={cn('page-signal-field page-signal-analysis', className)} aria-hidden="true">
+        <svg viewBox="0 0 720 74" preserveAspectRatio="none">
+          <g fill="none" strokeWidth="0.8">
+            <motion.path d="M0 37H168C198 37 206 16 236 16S275 58 310 58 348 37 382 37H720" stroke="#b8b8b8" strokeOpacity="0.17" initial={{ pathLength: 0, opacity: 0 }} animate={pathMotion} transition={drawTransition} />
+            <motion.path d="M0 37H720" stroke="#d8bd84" strokeOpacity="0.19" initial={{ pathLength: 0, opacity: 0 }} animate={pathMotion} transition={{ ...drawTransition, delay: 0.1 }} />
+            <path d="M82 33v8M146 33v8M430 33v8M514 33v8M602 33v8" stroke="#d4d4d4" strokeOpacity="0.12" />
+          </g>
+          <motion.circle
+            r="2.2"
+            fill="#e1c98f"
+            filter="drop-shadow(0 0 4px rgba(216,189,132,0.72))"
+            animate={{ cx: [8, 184, 236, 310, 382, 710], cy: [37, 37, 16, 58, 37, 37], opacity: [0, 0.95, 1, 1, 0.85, 0] }}
+            transition={{ duration: 6.4, times: [0, 0.26, 0.4, 0.54, 0.68, 1], repeat: Infinity, repeatDelay: 1.2, ease: [0.37, 0, 0.63, 1] }}
+          />
+          <motion.circle cx="382" cy="37" fill="none" stroke="#d8bd84" strokeWidth="0.7" animate={{ r: [7, 24], opacity: [0.3, 0] }} transition={{ duration: 3.4, repeat: Infinity, ease: 'easeOut' }} />
+        </svg>
+      </div>
+    );
+  }
 
   if (variant === 'records') {
     return (
