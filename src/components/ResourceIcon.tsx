@@ -45,9 +45,10 @@ interface ResourceIconProps {
   alt: string;
   className?: string;
   fallback: ReactNode;
+  defer?: boolean;
 }
 
-export default function ResourceIcon({ resourceId, alt, className, fallback }: ResourceIconProps) {
+export default function ResourceIcon({ resourceId, alt, className, fallback, defer = false }: ResourceIconProps) {
   const [url, setUrl] = useState(() => iconCache.get(resourceId) ?? null);
   const [failed, setFailed] = useState(false);
 
@@ -56,18 +57,27 @@ export default function ResourceIcon({ resourceId, alt, className, fallback }: R
     setUrl(iconCache.get(resourceId) ?? null);
     setFailed(false);
 
-    loadResourceIcon(resourceId)
-      .then((nextUrl) => {
-        if (active) setUrl(nextUrl);
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      });
+    const cached = iconCache.get(resourceId);
+    if (cached) return () => { active = false; };
+
+    const load = () => {
+      loadResourceIcon(resourceId)
+        .then((nextUrl) => {
+          if (active) setUrl(nextUrl);
+        })
+        .catch(() => {
+          if (active) setFailed(true);
+        });
+    };
+
+    const timer = defer ? window.setTimeout(load, 550) : null;
+    if (!defer) load();
 
     return () => {
       active = false;
+      if (timer !== null) window.clearTimeout(timer);
     };
-  }, [resourceId]);
+  }, [defer, resourceId]);
 
   if (!url || failed) return fallback;
 

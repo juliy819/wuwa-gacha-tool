@@ -256,6 +256,45 @@ a[href]:focus-visible,
   to { transform: translateY(0); opacity: 1; }
 }
 
+.dashboard-enter {
+  animation: dashboardEnter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes dashboardEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.resonance-field-secondary { animation: resonanceFieldDash 9s linear infinite; }
+.resonance-field-primary { animation: resonanceFieldFade 1.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.resonance-field-primary-gold { animation: resonanceFieldGoldDash 13s linear infinite; }
+.resonance-field-orbit {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: resonanceFieldOrbit 24s linear infinite;
+}
+.resonance-field-scan { animation: resonanceFieldScan 10s cubic-bezier(0.37, 0, 0.63, 1) infinite; }
+
+@keyframes resonanceFieldDash { to { stroke-dashoffset: -54; } }
+@keyframes resonanceFieldGoldDash { to { stroke-dashoffset: -180; } }
+@keyframes resonanceFieldFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes resonanceFieldOrbit { to { transform: rotate(360deg); } }
+@keyframes resonanceFieldScan {
+  0% { opacity: 0; transform: translateX(80px); }
+  8% { opacity: 0.86; }
+  70% { opacity: 0.86; }
+  78%, 100% { opacity: 0; transform: translateX(735px); }
+}
+
+.ratio-dial-progress { animation: ratioDialProgress 720ms 180ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes ratioDialProgress { from { stroke-dasharray: 0 100; } }
+
+.status-ready-dot {
+  transform-origin: center;
+  animation: statusReadyPulse 2s ease-in-out infinite;
+}
+@keyframes statusReadyPulse { 50% { transform: scale(1.2); } }
+
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out forwards;
 }
@@ -607,18 +646,6 @@ a[href]:focus-visible,
   border: 1px solid rgba(212, 212, 212, 0.08);
   border-radius: 50%;
   box-shadow: 0 0 0 22px rgba(212, 212, 212, 0.018), 0 0 0 48px rgba(212, 212, 212, 0.01);
-}
-
-.page-entry-scan {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 30;
-  width: 13%;
-  pointer-events: none;
-  border-right: 1px solid rgba(200, 173, 120, 0.24);
-  background: linear-gradient(90deg, transparent, rgba(200, 173, 120, 0.025));
 }
 
 .instrument-surface-response {
@@ -2188,4 +2215,28 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
     width: 16px;
   }
 
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .resonance-field-secondary,
+  .resonance-field-primary-gold,
+  .resonance-field-orbit,
+  .resonance-field-scan,
+  .status-ready-dot,
+  .number-shimmer,
+  .pity-measure-point,
+  .app-shell::before,
+  .app-navbar::before,
+  .nav-active-surface::after,
+  .pool-active-surface::after,
+  .resonance-tab-surface::after,
+  .nav-active-node,
+  .pool-active-node,
+  .instrument-empty-core,
+  .instrument-empty-orbit,
+  .ratio-dial,
+  .settings-data-orbit,
+  .resonance-glyph-orbit {
+    animation: none !important;
+  }
 }

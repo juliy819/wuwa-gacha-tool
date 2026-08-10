@@ -8,6 +8,7 @@ interface GachaStore {
   recordsLoaded: boolean;
   recordsPlayerId: string | null;
   stats: GachaStats | null;
+  statsPlayerId: string | null;
   pools: string[];
   summaries: RecordSummary[];
   settings: GameSettings | null;
@@ -35,12 +36,14 @@ interface GachaStore {
 }
 
 let recordsRequestId = 0;
+let statsRequestId = 0;
 
 export const useGachaStore = create<GachaStore>((set, get) => ({
   records: [],
   recordsLoaded: false,
   recordsPlayerId: null,
   stats: null,
+  statsPlayerId: null,
   pools: [],
   summaries: [],
   settings: null,
@@ -67,10 +70,15 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   },
 
   fetchStats: async (playerId?: string) => {
+    const requestId = ++statsRequestId;
+    const requestedPlayerId = playerId ?? get().activePlayerId;
     try {
-      const stats = await gachaApi.getStats(playerId);
-      set({ stats });
+      const stats = await gachaApi.getStats(requestedPlayerId ?? undefined);
+      if (requestId !== statsRequestId) return;
+      set({ stats, statsPlayerId: requestedPlayerId });
     } catch {
+      if (requestId !== statsRequestId) return;
+      set({ stats: null, statsPlayerId: requestedPlayerId });
       // 静默失败，空数据时不需要提示
     }
   },
@@ -234,6 +242,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
           recordsLoaded: true,
           recordsPlayerId: activePlayerId,
           stats: null,
+          statsPlayerId: activePlayerId,
           loading: false,
           error: null,
         });
@@ -252,9 +261,6 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
 
   setActivePlayer: (playerId: string | null) => {
     set({ activePlayerId: playerId });
-    if (playerId) {
-      get().fetchStats(playerId);
-    }
   },
 
   refreshAll: async () => {

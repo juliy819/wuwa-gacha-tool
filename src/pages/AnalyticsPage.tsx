@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import ReactECharts from 'echarts-for-react';
+import AnalyticsChart from '../components/AnalyticsChart';
 import PageTransition from '../components/PageTransition';
 import PageSignalField from '../components/PageSignalField';
 import ResonanceEmptyState from '../components/ResonanceEmptyState';
@@ -580,7 +580,7 @@ export default function AnalyticsPage() {
                             <span><i data-tone="gold" />至少一个五星</span>
                             {LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? <span><i data-tone="cyan" />获得当期 UP</span> : null}
                           </div>
-                          <ReactECharts option={forecastOption} style={{ height: 270 }} notMerge lazyUpdate />
+                          <AnalyticsChart option={forecastOption} height={270} eager />
                         </div>
                         <aside className="analysis-forecast-summary">
                           <div className="analysis-forecast-now">
@@ -630,14 +630,14 @@ export default function AnalyticsPage() {
                           <div><span>HISTOGRAM / 1–80</span><h3>每次五星用了多少抽</h3></div>
                           <p>柱越高，说明该抽数范围内出金越常见</p>
                         </div>
-                        <ReactECharts option={distributionOption} style={{ height: 292 }} notMerge lazyUpdate />
+                        <AnalyticsChart option={distributionOption} height={292} prewarmDelay={120} />
                       </section>
                       <section className="analysis-chart-panel">
                         <div className="analysis-chart-heading">
                           <div><span>CONDITIONAL RATE / 1–80</span><h3>第 N 抽实际有多容易出金</h3></div>
                           <p>只看此前还没出五星的记录；这是历史估计，不是官方逐抽机制，金线为基础概率 0.8%</p>
                         </div>
-                        <ReactECharts option={probabilityOption} style={{ height: 292 }} notMerge lazyUpdate />
+                        <AnalyticsChart option={probabilityOption} height={292} prewarmDelay={240} />
                       </section>
                     </div>
                   ) : (
@@ -667,7 +667,7 @@ export default function AnalyticsPage() {
                           <div><span>HISTOGRAM / 1–160</span><h3>UP 角色获取成本分布</h3></div>
                           <p>金色虚线：50/50 与大保底下的长期理论期望 81.15 抽</p>
                         </div>
-                        <ReactECharts option={featuredOption} style={{ height: 320 }} notMerge lazyUpdate />
+                        <AnalyticsChart option={featuredOption} height={320} prewarmDelay={360} />
                       </div>
                     </section>
                   ) : null}

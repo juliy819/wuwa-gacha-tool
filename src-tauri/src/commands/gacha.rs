@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use chrono::{Duration, NaiveDateTime};
 use rand::seq::SliceRandom;
@@ -511,8 +512,27 @@ pub fn get_all_records(
     state: State<'_, AppState>,
     player_id: Option<String>,
 ) -> Result<Vec<GachaRecord>, String> {
+    let started = Instant::now();
+    let target = player_id
+        .as_deref()
+        .map(masked_player_id)
+        .unwrap_or_else(|| "all".to_string());
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_all_records(player_id.as_deref())
+    let result = db.get_all_records(player_id.as_deref());
+    match &result {
+        Ok(records) => log::info!(
+            target: "app::performance",
+            "event=command_completed command=get_all_records target={target} duration_ms={} records={}",
+            started.elapsed().as_millis(),
+            records.len()
+        ),
+        Err(error) => log::warn!(
+            target: "app::performance",
+            "event=command_failed command=get_all_records target={target} duration_ms={} error={error}",
+            started.elapsed().as_millis()
+        ),
+    }
+    result
 }
 
 /// 导出指定玩家的抽卡数据为 JSON 文件（格式与导入一致）
@@ -594,15 +614,35 @@ fn serialize_gacha_records(
 /// 获取所有玩家 ID
 #[tauri::command]
 pub fn get_pools(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let started = Instant::now();
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_player_ids()
+    let result = db.get_player_ids();
+    if let Ok(pools) = &result {
+        log::info!(
+            target: "app::performance",
+            "event=command_completed command=get_pools duration_ms={} players={}",
+            started.elapsed().as_millis(),
+            pools.len()
+        );
+    }
+    result
 }
 
 /// 获取每个玩家的记录数量和时间范围
 #[tauri::command]
 pub fn get_record_summaries(state: State<'_, AppState>) -> Result<Vec<RecordSummary>, String> {
+    let started = Instant::now();
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_record_summaries()
+    let result = db.get_record_summaries();
+    if let Ok(summaries) = &result {
+        log::info!(
+            target: "app::performance",
+            "event=command_completed command=get_record_summaries duration_ms={} players={}",
+            started.elapsed().as_millis(),
+            summaries.len()
+        );
+    }
+    result
 }
 
 /// 获取统计数据
@@ -611,9 +651,21 @@ pub fn get_stats(
     state: State<'_, AppState>,
     player_id: Option<String>,
 ) -> Result<GachaStats, String> {
+    let started = Instant::now();
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let query_started = Instant::now();
     let records = db.get_all_records(player_id.as_deref())?;
-    Ok(GachaStats::from_records(&records))
+    let query_ms = query_started.elapsed().as_millis();
+    let compute_started = Instant::now();
+    let stats = GachaStats::from_records(&records);
+    log::info!(
+        target: "app::performance",
+        "event=command_completed command=get_stats duration_ms={} query_ms={query_ms} compute_ms={} records={}",
+        started.elapsed().as_millis(),
+        compute_started.elapsed().as_millis(),
+        records.len()
+    );
+    Ok(stats)
 }
 
 /// 获取按卡池计算的五星完整区间洞察。

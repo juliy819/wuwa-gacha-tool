@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
 import { getVersion } from '@tauri-apps/api/app';
 import {
   getSyncFreshness,
@@ -13,7 +12,8 @@ import ResonanceIcon from './ResonanceModeIcon';
 
 export default function StatusBar() {
   const [appVersion, setAppVersion] = useState('');
-  const { summaries, activePlayerId } = useGachaStore();
+  const summaries = useGachaStore((state) => state.summaries);
+  const activePlayerId = useGachaStore((state) => state.activePlayerId);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -137,11 +137,7 @@ export default function StatusBar() {
       </div>
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
-          <motion.div
-            animate={{ scale: [1, 1.2, 1] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="w-1.5 h-1.5 rounded-full bg-[#7ab88a]"
-          />
+          <div className="status-ready-dot h-1.5 w-1.5 rounded-full bg-[#7ab88a]" />
           就绪
         </span>
       </div>

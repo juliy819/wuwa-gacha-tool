@@ -19,23 +19,21 @@ import type { CloudGachaLink } from '../types';
 type ScanMode = 'dir' | 'cloud' | 'url' | 'json';
 
 export default function Home() {
-  const {
-    activePlayerId,
-    addToast,
-    fetchStats,
-    fetchRecords,
-    fetchPools,
-    fetchSettings,
-    importJson,
-    records,
-    recordsLoaded,
-    recordsPlayerId,
-    scanGacha,
-    scanGachaByUrl,
-    scanning,
-    settings,
-    stats,
-  } = useGachaStore();
+  const activePlayerId = useGachaStore((state) => state.activePlayerId);
+  const addToast = useGachaStore((state) => state.addToast);
+  const fetchStats = useGachaStore((state) => state.fetchStats);
+  const fetchRecords = useGachaStore((state) => state.fetchRecords);
+  const importJson = useGachaStore((state) => state.importJson);
+  const initialized = useGachaStore((state) => state.initialized);
+  const records = useGachaStore((state) => state.records);
+  const recordsLoaded = useGachaStore((state) => state.recordsLoaded);
+  const recordsPlayerId = useGachaStore((state) => state.recordsPlayerId);
+  const scanGacha = useGachaStore((state) => state.scanGacha);
+  const scanGachaByUrl = useGachaStore((state) => state.scanGachaByUrl);
+  const scanning = useGachaStore((state) => state.scanning);
+  const settings = useGachaStore((state) => state.settings);
+  const stats = useGachaStore((state) => state.stats);
+  const statsPlayerId = useGachaStore((state) => state.statsPlayerId);
   const createRipple = useClickRipple();
   const [showScanModal, setShowScanModal] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('dir');
@@ -62,17 +60,20 @@ export default function Home() {
   }, [scanMode, showScanModal]);
 
   useEffect(() => {
-    fetchSettings();
-    fetchPools();
-  }, []);
+    if (!activePlayerId) return;
+    if (statsPlayerId === activePlayerId) return;
+    fetchStats(activePlayerId);
+  }, [activePlayerId, fetchStats, statsPlayerId]);
 
   useEffect(() => {
     if (!activePlayerId) return;
-    fetchStats(activePlayerId);
     if (!recordsLoaded || recordsPlayerId !== activePlayerId) {
-      fetchRecords();
+      const timer = window.setTimeout(() => {
+        fetchRecords();
+      }, 280);
+      return () => window.clearTimeout(timer);
     }
-  }, [activePlayerId, fetchRecords, fetchStats, recordsLoaded, recordsPlayerId]);
+  }, [activePlayerId, fetchRecords, recordsLoaded, recordsPlayerId]);
 
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return;
@@ -222,7 +223,9 @@ export default function Home() {
             </button>
           </header>
 
-          {stats && stats.total_draws > 0 ? (
+          {!initialized || (activePlayerId && statsPlayerId !== activePlayerId) ? (
+            <div className="resonance-panel min-h-[360px]" aria-busy="true" aria-label="Loading gacha overview" />
+          ) : stats && stats.total_draws > 0 ? (
             <HomeDashboard stats={stats} records={records} />
           ) : (
             <ResonanceEmptyState

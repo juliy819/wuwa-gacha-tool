@@ -12,6 +12,8 @@
     "check": "tsc -b --noEmit",
     "test:cloud-gacha": "node --test tests/cloud-gacha-script.test.mjs",
     "test:sync": "node --test tests/sync-freshness.test.mjs",
+    "perf:startup": "node scripts/perf-startup.mjs",
+    "perf:startup:build": "tauri build --no-bundle && npm run perf:startup",
     "tauri": "tauri"
   },
   "dependencies": {

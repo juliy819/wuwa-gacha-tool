@@ -10,16 +10,19 @@ import ResonanceActionIcon from './ResonanceActionIcon';
 import ResonanceIcon, { type ResonanceModeIconKind } from './ResonanceModeIcon';
 import WuwaControlIcon from './WuwaControlIcon';
 
-const navItems: Array<{ path: string; label: string; kind: ResonanceModeIconKind }> = [
+const navItems: Array<{ path: string; label: string; kind: ResonanceModeIconKind; preload?: () => Promise<unknown> }> = [
   { path: '/', label: '首页', kind: 'origin' },
-  { path: '/records', label: '记录', kind: 'echo' },
-  { path: '/analytics', label: '分析', kind: 'chart' },
-  { path: '/settings', label: '设置', kind: 'calibration' },
+  { path: '/records', label: '记录', kind: 'echo', preload: () => import('../pages/RecordsPage') },
+  { path: '/analytics', label: '分析', kind: 'chart', preload: () => import('../pages/AnalyticsPage') },
+  { path: '/settings', label: '设置', kind: 'calibration', preload: () => import('../pages/SettingsPage') },
 ];
 
 export default function Navbar() {
   const location = useLocation();
-  const { pools, activePlayerId, setActivePlayer, refreshAll } = useGachaStore();
+  const pools = useGachaStore((state) => state.pools);
+  const activePlayerId = useGachaStore((state) => state.activePlayerId);
+  const setActivePlayer = useGachaStore((state) => state.setActivePlayer);
+  const refreshAll = useGachaStore((state) => state.refreshAll);
   const availableUpdate = useUpdateStore((state) => state.availableUpdate);
   const [menuOpen, setMenuOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,7 +42,6 @@ export default function Navbar() {
       width: activeLink.offsetWidth,
     });
   }, [location.pathname]);
-
   useEffect(() => {
     if (!menuOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -105,6 +107,8 @@ export default function Navbar() {
               <Link
                 key={item.path}
                 to={item.path}
+                onMouseEnter={item.preload}
+                onFocus={item.preload}
                 aria-label={item.label}
                 title={item.label}
                 data-active={isActive ? 'true' : 'false'}

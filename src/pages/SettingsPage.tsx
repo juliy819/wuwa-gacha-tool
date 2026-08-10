@@ -45,7 +45,14 @@ function stripUpdateNotesFooter(body: string): string {
 }
 
 export default function SettingsPage() {
-  const { settings, fetchSettings, saveGameDir, clearRecords, pools, addToast, summaries: storeSummaries, fetchSummaries } = useGachaStore();
+  const settings = useGachaStore((state) => state.settings);
+  const fetchSettings = useGachaStore((state) => state.fetchSettings);
+  const saveGameDir = useGachaStore((state) => state.saveGameDir);
+  const clearRecords = useGachaStore((state) => state.clearRecords);
+  const pools = useGachaStore((state) => state.pools);
+  const addToast = useGachaStore((state) => state.addToast);
+  const storeSummaries = useGachaStore((state) => state.summaries);
+  const fetchSummaries = useGachaStore((state) => state.fetchSummaries);
   const [gameDirInput, setGameDirInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -57,7 +64,9 @@ export default function SettingsPage() {
   const [deleting, setDeleting] = useState(false);
   const [lastBackupPath, setLastBackupPath] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
-  const { availableUpdate, checking: checkingUpdate, manualCheck } = useUpdateStore();
+  const availableUpdate = useUpdateStore((state) => state.availableUpdate);
+  const checkingUpdate = useUpdateStore((state) => state.checking);
+  const manualCheck = useUpdateStore((state) => state.manualCheck);
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(0);
   const [appVersion, setAppVersion] = useState('');

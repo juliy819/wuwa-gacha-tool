@@ -1,6 +1,3 @@
-import { useEffect, useRef } from 'react';
-import { motion, useAnimationFrame } from 'framer-motion';
-
 const secondarySignal = 'M0 68 C114 68 143 69 205 68 C250 67 266 77 304 77 C341 77 360 58 391 58 C424 58 438 72 465 72 C501 72 516 46 548 46 C585 46 603 73 639 73 C684 73 714 67 759 67 C817 67 850 68 900 68';
 type WaveMode = {
   spatialFrequency: number;
@@ -17,8 +14,8 @@ type StringDynamics = {
 const buildDynamicStringPath = (config: StringDynamics, cycleProgress: number) => {
   const time = cycleProgress * Math.PI * 2;
 
-  return Array.from({ length: 61 }, (_, index) => {
-    const progress = index / 60;
+  return Array.from({ length: WAVE_SEGMENTS + 1 }, (_, index) => {
+    const progress = index / WAVE_SEGMENTS;
     const x = progress * 900;
     const anchoredEnvelope = Math.sin(progress * Math.PI) ** 1.45;
     const displacement = config.modes.reduce((sum, mode) => (
@@ -67,7 +64,7 @@ const silverDynamics: StringDynamics = {
   ],
 };
 
-const WAVE_DURATION = 13;
+const WAVE_SEGMENTS = 30;
 
 const primarySignal = buildDynamicStringPath(primaryDynamics, 0);
 const goldHarmonic = buildDynamicStringPath(goldDynamics, 0);
@@ -75,31 +72,6 @@ const softGoldHarmonic = buildDynamicStringPath(softGoldDynamics, 0);
 const silverHarmonic = buildDynamicStringPath(silverDynamics, 0);
 
 export default function ResonanceField() {
-  const primaryRef = useRef<SVGPathElement>(null);
-  const primaryGoldRef = useRef<SVGPathElement>(null);
-  const goldRef = useRef<SVGPathElement>(null);
-  const softGoldRef = useRef<SVGPathElement>(null);
-  const silverRef = useRef<SVGPathElement>(null);
-
-  useEffect(() => {
-    primaryRef.current?.setAttribute('d', primarySignal);
-    primaryGoldRef.current?.setAttribute('d', primarySignal);
-    goldRef.current?.setAttribute('d', goldHarmonic);
-    softGoldRef.current?.setAttribute('d', softGoldHarmonic);
-    silverRef.current?.setAttribute('d', silverHarmonic);
-  }, []);
-
-  useAnimationFrame((time) => {
-    const setPath = (element: SVGPathElement | null, dynamics: StringDynamics, duration: number) => {
-      element?.setAttribute('d', buildDynamicStringPath(dynamics, (time / 1000 % duration) / duration));
-    };
-    setPath(primaryRef.current, primaryDynamics, WAVE_DURATION);
-    setPath(primaryGoldRef.current, primaryDynamics, WAVE_DURATION);
-    setPath(goldRef.current, goldDynamics, WAVE_DURATION);
-    setPath(softGoldRef.current, softGoldDynamics, WAVE_DURATION);
-    setPath(silverRef.current, silverDynamics, WAVE_DURATION);
-  });
-
   return (
     <div className="pointer-events-none absolute inset-y-[-22px] left-[176px] right-[138px] overflow-hidden" aria-hidden="true">
       <svg viewBox="0 0 900 128" preserveAspectRatio="none" className="h-full w-full">
@@ -162,57 +134,48 @@ export default function ResonanceField() {
           <path d="M0 64H900" stroke="#d4d4d4" strokeOpacity="0.07" strokeWidth="0.7" />
           <path d="M0 104H900" stroke="#d4d4d4" strokeOpacity="0.05" strokeWidth="0.7" />
 
-          <motion.path
+          <path
+            className="resonance-field-secondary"
             d={secondarySignal}
             fill="none"
             stroke="url(#resonance-phase)"
             strokeWidth="0.85"
             strokeDasharray="2 7"
-            animate={{ strokeDashoffset: [0, -54] }}
-            transition={{ duration: 9, repeat: Infinity, ease: 'linear' }}
           />
-          <motion.path
-            ref={silverRef}
+          <path
             d={silverHarmonic}
             fill="none"
             stroke="url(#resonance-phase)"
             strokeWidth="0.72"
           />
-          <motion.path
-            ref={softGoldRef}
+          <path
             d={softGoldHarmonic}
             fill="none"
             stroke="url(#resonance-gold-string-soft)"
             strokeWidth="0.85"
           />
-          <motion.path
-            ref={goldRef}
+          <path
             d={goldHarmonic}
             fill="none"
             stroke="url(#resonance-gold-string)"
             strokeWidth="1.05"
             filter="url(#resonance-gold-glow)"
           />
-          <motion.path
-            ref={primaryRef}
+          <path
+            className="resonance-field-primary"
             d={primarySignal}
             fill="none"
             stroke="url(#resonance-signal)"
             strokeWidth="1.2"
             filter="url(#resonance-glow)"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 1.35, ease: [0.16, 1, 0.3, 1] }}
           />
-          <motion.path
-            ref={primaryGoldRef}
+          <path
+            className="resonance-field-primary-gold"
             d={primarySignal}
             fill="none"
             stroke="url(#resonance-gold-string-soft)"
             strokeWidth="1"
             strokeDasharray="18 72"
-            animate={{ strokeDashoffset: [0, -180] }}
-            transition={{ duration: WAVE_DURATION, repeat: Infinity, ease: 'linear' }}
           />
 
           <g transform="translate(480 64)">
@@ -221,24 +184,17 @@ export default function ResonanceField() {
             <path d="M46 10A47 47 0 0 1 15 44M-15 44A47 47 0 0 1-46 10" fill="none" stroke="#d8bd84" strokeOpacity="0.34" strokeWidth="0.85" />
             <path d="M-33-9A34 34 0 0 1-10-32M10-32A34 34 0 0 1 33-9M33 9A34 34 0 0 1 10 32M-10 32A34 34 0 0 1-33 9" fill="none" stroke="#d8bd84" strokeOpacity="0.18" strokeWidth="0.7" strokeDasharray="3 5" />
             <path d="M-19-4L-9-14M19 4L9 14M-4 19L-14 9M4-19L14-9" stroke="#d4d4d4" strokeOpacity="0.11" strokeWidth="0.7" />
-            <motion.g
-              animate={{ rotate: 360 }}
-              transition={{ duration: 24, repeat: Infinity, ease: 'linear' }}
-            >
+            <g className="resonance-field-orbit">
               <path d="M0-38A38 38 0 0 1 21-31" fill="none" stroke="#e1c98f" strokeOpacity="0.72" strokeWidth="1.15" />
               <rect x="-2" y="-40" width="4" height="4" transform="rotate(45 0 -38)" fill="#d8bd84" fillOpacity="0.82" />
-            </motion.g>
+            </g>
             <path d="M-8 0H8M0-8V8" stroke="#d4d4d4" strokeOpacity="0.28" strokeWidth="0.7" />
             <rect x="-3" y="-3" width="6" height="6" transform="rotate(45)" fill="#d8bd84" fillOpacity="0.2" stroke="#e1c98f" strokeOpacity="0.86" strokeWidth="0.8" />
             <circle cx="-46" cy="0" r="1.7" fill="#d8bd84" fillOpacity="0.54" />
             <circle cx="46" cy="0" r="1.7" fill="#d4d4d4" fillOpacity="0.24" />
           </g>
 
-          <motion.g
-            initial={{ x: 80, opacity: 0 }}
-            animate={{ x: [80, 735], opacity: [0, 0.86, 0.86, 0] }}
-            transition={{ duration: 7.8, times: [0, 0.1, 0.9, 1], repeat: Infinity, repeatDelay: 2.2, ease: [0.37, 0, 0.63, 1] }}
-          >
+          <g className="resonance-field-scan">
             <rect x="-84" y="27" width="84" height="69" fill="url(#resonance-scan)" />
             <path d="M0 26V97" stroke="#d8bd84" strokeOpacity="0.64" strokeWidth="0.85" />
             <path d="M-18 31H0M-11 95H0" stroke="#d8bd84" strokeOpacity="0.28" strokeWidth="0.7" />
@@ -248,7 +204,7 @@ export default function ResonanceField() {
                 <path d="M-7 0H-3M3 0H7" stroke="#e1c98f" strokeOpacity={0.52 - index * 0.08} strokeWidth="0.7" />
               </g>
             ))}
-          </motion.g>
+          </g>
         </g>
       </svg>
     </div>

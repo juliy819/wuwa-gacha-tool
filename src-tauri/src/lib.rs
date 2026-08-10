@@ -6,6 +6,7 @@ mod logging;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Instant;
 
 use tauri::Manager;
 
@@ -38,8 +39,14 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir)?;
 
             let db_path = app_data_dir.join("gacha.db");
+            let database_started = Instant::now();
             let database = db::Database::new(&db_path)
                 .map_err(|error| format!("Failed to initialize database: {error}"))?;
+            log::info!(
+                target: "app::performance",
+                "event=database_initialized duration_ms={}",
+                database_started.elapsed().as_millis()
+            );
             let http = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(20))
                 .build()

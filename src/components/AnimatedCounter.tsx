@@ -15,8 +15,8 @@ function useAnimatedCounter(
   options: UseAnimatedCounterOptions = {}
 ): number {
   const { duration = 1200, delay = 0, easing = easeOutExpo } = options;
-  const [current, setCurrent] = useState(0);
-  const prevTarget = useRef(0);
+  const [current, setCurrent] = useState(target);
+  const prevTarget = useRef(target);
   const animFrame = useRef<number>(0);
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
@@ -83,21 +83,20 @@ function PityBadge({ pity, lowerBound = false }: { pity: number; lowerBound?: bo
 }
 
 export default function RecordsPage() {
-  const {
-    records,
-    recordsLoaded,
-    recordsPlayerId,
-    activePlayerId,
-    initialized,
-    fetchRecords,
-    fetchStats,
-    loading,
-    error,
-    addToast,
-  } = useGachaStore();
+  const records = useGachaStore((state) => state.records);
+  const recordsLoaded = useGachaStore((state) => state.recordsLoaded);
+  const recordsPlayerId = useGachaStore((state) => state.recordsPlayerId);
+  const activePlayerId = useGachaStore((state) => state.activePlayerId);
+  const initialized = useGachaStore((state) => state.initialized);
+  const fetchRecords = useGachaStore((state) => state.fetchRecords);
+  const fetchStats = useGachaStore((state) => state.fetchStats);
+  const loading = useGachaStore((state) => state.loading);
+  const error = useGachaStore((state) => state.error);
+  const addToast = useGachaStore((state) => state.addToast);
   const [activePoolType, setActivePoolType] = useState('all');
   const [scope, setScope] = useState<RecordScope>('five');
   const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(50);
@@ -324,7 +323,7 @@ export default function RecordsPage() {
   }, [gridItemsPerPage, viewMode]);
 
   const filteredRecords = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
     return allRecordsWithPity.filter(({ record }) => {
       if (activePoolType !== 'all' && record.card_pool_type !== activePoolType) return false;
       if (effectiveScope === 'five' && record.quality_level !== QUALITY.FIVE_STAR) return false;
@@ -332,7 +331,7 @@ export default function RecordsPage() {
       return [record.name, record.card_pool_name, record.time]
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
     });
-  }, [allRecordsWithPity, activePoolType, effectiveScope, query]);
+  }, [allRecordsWithPity, activePoolType, deferredQuery, effectiveScope]);
 
   const lowerBoundCount = filteredRecords.filter(({ isLowerBound, record }) => isLowerBound && record.quality_level === QUALITY.FIVE_STAR).length;
   const pagedList = useMemo(() => {
