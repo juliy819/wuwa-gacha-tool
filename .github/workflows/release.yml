@@ -20,6 +20,10 @@ on:
 permissions:
   contents: write  # 用于创建 Release、推送 tag
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # ----------------------------------------------------------------
   # 阶段 1：生成 changelog + 解析 tag（轻量任务，跑在 ubuntu-latest）
@@ -29,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      base_sha: ${{ steps.source.outputs.sha }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -38,6 +43,12 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           ref: main  # 显式 checkout 到 main HEAD，避开 detached HEAD on tag 的浅克隆问题
+
+      - name: Capture release source revision
+        id: source
+        shell: bash
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Resolve release tag
         id: version
@@ -94,25 +105,19 @@ jobs:
               found && /^version = / { sub(/"[0-9.]+(\.[0-9]+)*"/, "\"" ver "\""); found=0; print; next }
               { print }
             ' src-tauri/Cargo.lock > src-tauri/Cargo.lock.tmp && mv src-tauri/Cargo.lock.tmp src-tauri/Cargo.lock
-            # 提交 bump 提交
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git config user.name "github-actions[bot]"
-            git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
-            git commit -m "chore(release): bump version to $VER"
-            git push
-            echo "✓ Version bumped to $VER and committed"
+            echo "✓ Version files prepared for $VER"
           fi
 
-      - name: Push release tag
-        shell: bash
-        run: |
-          set -e
-          TAG="${{ steps.version.outputs.tag }}"
-          # 在 bump commit 之后打 tag，确保 tag 指向包含正确版本号的 commit
-          # 用 -f 处理 push tag 触发时版本号不一致的场景：
-          # 此时 bump commit 创建在原 tag 之后，需要把 tag 移到 bump commit
-          git tag -f "$TAG"
-          git push origin -f "$TAG"
+      - name: Upload versioned source files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-source-files
+          path: |
+            package.json
+            src-tauri/Cargo.toml
+            src-tauri/tauri.conf.json
+            src-tauri/Cargo.lock
+          if-no-files-found: error
 
       - name: Generate changelog
         shell: bash
@@ -236,7 +241,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ needs.prepare.outputs.base_sha }}
+
+      - name: Apply versioned source files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-files
+          path: .
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -367,7 +378,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: main
+          ref: ${{ needs.prepare.outputs.base_sha }}
+
+      - name: Apply versioned source files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-files
+          path: .
 
       - name: Set up Node
         uses: actions/setup-node@v5
@@ -424,6 +441,19 @@ jobs:
     needs: [ prepare, build-windows, build-linux ]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ needs.prepare.outputs.base_sha }}
+
+      - name: Apply versioned source files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-source-files
+          path: .
+
       - name: Download changelog
         uses: actions/download-artifact@v4
         with:
@@ -443,6 +473,59 @@ jobs:
           echo ""
           echo "=== Sizes ==="
           du -sh artifacts/* 2>/dev/null | sort -k2
+
+      - name: Commit version and push release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          TRIGGER_EVENT: ${{ github.event_name }}
+          TRIGGER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin main --tags --force
+          REMOTE_MAIN_SHA=$(git rev-parse origin/main)
+          if [ "$REMOTE_MAIN_SHA" != "$RELEASE_BASE_SHA" ]; then
+            echo "❌ main changed during release build"
+            echo "Built from: $RELEASE_BASE_SHA"
+            echo "Current main: $REMOTE_MAIN_SHA"
+            echo "Please rerun the release workflow from the latest main."
+            exit 1
+          fi
+
+          if [ "$TRIGGER_EVENT" = "workflow_dispatch" ]; then
+            if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              echo "❌ Tag $RELEASE_TAG already exists; refusing to overwrite it for a manual release"
+              exit 1
+            fi
+            TAG_REFSPEC="refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          else
+            if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+              echo "❌ Trigger tag $RELEASE_TAG is missing"
+              exit 1
+            fi
+            CURRENT_TAG_SHA=$(git rev-list -n 1 "$RELEASE_TAG")
+            if [ "$CURRENT_TAG_SHA" != "$TRIGGER_SHA" ]; then
+              echo "❌ Trigger tag moved during the release build"
+              echo "Triggered from: $TRIGGER_SHA"
+              echo "Current tag: $CURRENT_TAG_SHA"
+              exit 1
+            fi
+            TAG_REFSPEC="+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          fi
+
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): bump version to ${RELEASE_TAG#v}"
+          else
+            echo "✓ Version files already match ${RELEASE_TAG#v}; no bump commit needed"
+          fi
+
+          git tag -f "$RELEASE_TAG" HEAD
+          git push --atomic origin "HEAD:refs/heads/main" "$TAG_REFSPEC"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
