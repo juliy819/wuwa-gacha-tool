@@ -1468,6 +1468,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .analysis-sidebar {
   width: 220px;
   flex: none;
+  overflow-x: hidden;
   overflow-y: auto;
   border-right: 1px solid rgba(255, 255, 255, 0.055);
   background:
@@ -1748,6 +1749,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .records-page { background: rgba(30, 30, 30, 0.5); }
 .records-workbench { border-top: 1px solid rgba(255, 255, 255, 0.045); }
 .records-sidebar {
+  overflow-x: hidden;
   background:
     url('./assets/resonance-contours.png') 78% 15% / 680px 680px,
     linear-gradient(180deg, rgba(38, 38, 38, 0.97), rgba(31, 31, 31, 0.97));
@@ -1799,6 +1801,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .pool-active-surface {
   position: absolute;
   inset: 0;
+  overflow: hidden;
   background:
     linear-gradient(90deg, rgba(200, 173, 120, 0.075), transparent 42%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.022));

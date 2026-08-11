@@ -543,12 +543,26 @@ export default function RecordsPage() {
 
               <span className="ml-auto text-xs text-wave">找到 <span className="tabular-nums text-tide">{pagedList.total}</span> 条</span>
             </div>
-            {lowerBoundCount > 0 && (
-              <div className="records-confidence-note">
-                <ResonanceIcon kind="info" size={13} />
-                <span>本次筛选包含 {lowerBoundCount} 条首个可见五星，抽数以 <b>≥</b> 标记，表示记录范围可能早于当前数据。</span>
-              </div>
-            )}
+            <AnimatePresence initial={false}>
+              {lowerBoundCount > 0 && (
+                <motion.div
+                  key="records-confidence-note"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{
+                    height: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+                    opacity: { duration: 0.14, ease: [0.4, 0, 1, 1] },
+                  }}
+                  className="overflow-hidden"
+                >
+                  <div className="records-confidence-note">
+                    <ResonanceIcon kind="info" size={13} />
+                    <span>本次筛选包含 {lowerBoundCount} 条首个可见五星，抽数以 <b>≥</b> 标记，表示记录范围可能早于当前数据。</span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             <AnimatePresence initial={false} mode="wait">
             {recordsLoading ? (
