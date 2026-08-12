@@ -1,6 +1,6 @@
 [package]
 name = "wuwa-gacha-tool"
-version = "0.3.2"
+version = "0.4.0"
 description = "Wuwa Gacha Tool"
 authors = ["juliy"]
 edition = "2021"
