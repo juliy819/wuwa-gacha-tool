@@ -802,14 +802,28 @@ a[href]:focus-visible,
   fill: none;
   stroke: currentColor;
   stroke-width: 1;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
   overflow: visible;
 }
-.wuwa-control-faint { opacity: 0.24; }
-.wuwa-control-node { fill: currentColor; stroke: none; transition: fill 180ms ease, filter 180ms ease; }
-.utility-control:hover .wuwa-control-node,
-.window-control:hover .wuwa-control-node { fill: #c8ad78; filter: drop-shadow(0 0 3px rgba(200, 173, 120, 0.32)); }
+.wuwa-control-glyph path {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 180ms ease, stroke 180ms ease, transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.wuwa-control-refresh-wave,
+.wuwa-control-maximize-guides { opacity: 0.34; }
+.wuwa-control-minimize-frame { opacity: 0.3; }
+.utility-control:is(:hover, :focus-visible) .wuwa-control-refresh-track-leading,
+.utility-control:is(:hover, :focus-visible) .wuwa-control-refresh-tip-leading { transform: translateX(0.8px); }
+.utility-control:is(:hover, :focus-visible) .wuwa-control-refresh-track-trailing,
+.utility-control:is(:hover, :focus-visible) .wuwa-control-refresh-tip-trailing { transform: translateX(-0.8px); }
+.utility-control:is(:hover, :focus-visible) .wuwa-control-refresh-wave { opacity: 0.78; transform: scaleX(1.06); }
+.window-control:is(:hover, :focus-visible) .wuwa-control-minimize-frame { opacity: 0.18; transform: translateY(-0.5px); }
+.window-control:is(:hover, :focus-visible) .wuwa-control-minimize-arrow { transform: translateY(1.2px); }
+.window-control:is(:hover, :focus-visible) .wuwa-control-minimize-dock { opacity: 0.82; transform: scaleX(1.14); }
+.window-control:is(:hover, :focus-visible) .wuwa-control-maximize-corners { transform: scale(1.12); }
+.window-control:is(:hover, :focus-visible) .wuwa-control-maximize-guides { opacity: 0.62; transform: scale(0.88); }
 .wuwa-control-glyph-spin { animation: wuwaControlOrbit 1.05s linear infinite; }
 @keyframes wuwaControlOrbit { to { transform: rotate(360deg); } }
 
@@ -847,6 +861,184 @@ a:hover .resonance-action-icon::before { inset: -1px; opacity: 0.56; }
 button:active .resonance-action-icon,
 a:active .resonance-action-icon { transform: scale(0.9); }
 .tide-btn .resonance-action-icon-gold { color: #776642; }
+
+.nav-semantic-icon,
+.app-nav-link:is(:hover, :focus-visible) .nav-semantic-icon { transform: none; }
+.nav-semantic-icon { overflow: visible; }
+.nav-semantic-icon::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+}
+.nav-semantic-icon svg > * {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 180ms ease, transform 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.nav-semantic-icon-origin::after {
+  left: 50%;
+  top: 1px;
+  width: 1px;
+  height: 18px;
+  background: linear-gradient(transparent, currentColor 34%, currentColor 66%, transparent);
+  transform: translateX(-50%) scaleY(0.16);
+}
+.app-nav-link:is(:hover, :focus-visible) .nav-semantic-icon-origin::after {
+  animation: navOriginBeam 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.app-nav-link:is(:hover, :focus-visible) .resonance-origin-wave {
+  animation: navOriginPulse 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.app-nav-link:is(:hover, :focus-visible) .resonance-origin-guides { opacity: 0.72; transform: scaleX(1.18); }
+.nav-semantic-icon-echo::after {
+  left: 1px;
+  top: 50%;
+  width: 18px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  transform: translate(-7px, -50%) scaleX(0.24);
+}
+.app-nav-link:is(:hover, :focus-visible) .nav-semantic-icon-echo::after {
+  animation: navEchoSweep 560ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.app-nav-link:is(:hover, :focus-visible) .resonance-echo-upper { transform: translate(1.2px, -0.5px); }
+.app-nav-link:is(:hover, :focus-visible) .resonance-echo-core { animation: navEchoCore 500ms cubic-bezier(0.16, 1, 0.3, 1); }
+.app-nav-link:is(:hover, :focus-visible) .resonance-echo-lower { transform: translate(-1.2px, 0.5px); }
+.app-nav-link:is(:hover, :focus-visible) .resonance-echo-ghost { opacity: 0.7; transform: scaleX(1.12); }
+.nav-semantic-icon-chart::after {
+  left: 3px;
+  bottom: 2px;
+  width: 15px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, currentColor 20%, currentColor 80%, transparent);
+  transform: scaleX(0.2);
+}
+.app-nav-link:is(:hover, :focus-visible) .nav-semantic-icon-chart::after {
+  animation: navChartBaseline 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.resonance-chart-bar { transform-origin: center bottom; }
+.app-nav-link:is(:hover, :focus-visible) .resonance-chart-bar-1 { animation: navChartLift 420ms 0ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.app-nav-link:is(:hover, :focus-visible) .resonance-chart-bar-2 { animation: navChartLift 440ms 45ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.app-nav-link:is(:hover, :focus-visible) .resonance-chart-bar-3 { animation: navChartLift 460ms 90ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.app-nav-link:is(:hover, :focus-visible) .resonance-chart-trend {
+  opacity: 0.78;
+  stroke-dasharray: 24;
+  animation: navChartTrace 520ms 70ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.nav-semantic-icon-calibration::after {
+  inset: 1px;
+  background:
+    linear-gradient(currentColor, currentColor) center top / 1px 3px no-repeat,
+    linear-gradient(currentColor, currentColor) right center / 3px 1px no-repeat,
+    linear-gradient(currentColor, currentColor) center bottom / 1px 3px no-repeat,
+    linear-gradient(currentColor, currentColor) left center / 3px 1px no-repeat;
+  transform: rotate(-24deg) scale(0.78);
+}
+.app-nav-link:is(:hover, :focus-visible) .nav-semantic-icon-calibration::after {
+  animation: navCalibrationTicks 520ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.app-nav-link:is(:hover, :focus-visible) .resonance-calibration-ring { transform: rotate(24deg); }
+.app-nav-link:is(:hover, :focus-visible) .resonance-calibration-core { opacity: 0.82; transform: rotate(-10deg) scale(1.06); }
+.app-nav-link[data-active='true']:not(:hover):not(:focus-visible) .resonance-origin-guides { animation: navActiveSignal 3.4s ease-in-out infinite; }
+.app-nav-link[data-active='true']:not(:hover):not(:focus-visible) .resonance-echo-ghost { animation: navActiveSignal 3.6s 0.4s ease-in-out infinite; }
+.app-nav-link[data-active='true']:not(:hover):not(:focus-visible) .resonance-chart-bar-3 { animation: navActiveSignal 3.8s 0.8s ease-in-out infinite; }
+.app-nav-link[data-active='true']:not(:hover):not(:focus-visible) .resonance-calibration-core { animation: navActiveSignal 4s 1.2s ease-in-out infinite; }
+@keyframes navOriginPulse {
+  0% { transform: scaleY(0.92); }
+  54% { transform: scaleY(1.16); }
+  100% { transform: scaleY(1); }
+}
+@keyframes navOriginBeam {
+  0% { opacity: 0; transform: translateX(-50%) scaleY(0.12); }
+  42% { opacity: 0.72; transform: translateX(-50%) scaleY(1); }
+  100% { opacity: 0; transform: translateX(-50%) scaleY(0.26); }
+}
+@keyframes navEchoSweep {
+  0% { opacity: 0; transform: translate(-7px, -50%) scaleX(0.24); }
+  38% { opacity: 0.72; }
+  100% { opacity: 0; transform: translate(7px, -50%) scaleX(0.72); }
+}
+@keyframes navEchoCore {
+  0% { transform: scaleX(0.9); }
+  58% { transform: scaleX(1.12); }
+  100% { transform: scaleX(1); }
+}
+@keyframes navChartLift {
+  0% { opacity: 0.46; transform: scaleY(0.48); }
+  68% { opacity: 1; transform: scaleY(1.12); }
+  100% { opacity: 1; transform: scaleY(1.03); }
+}
+@keyframes navChartTrace {
+  from { stroke-dashoffset: 24; transform: translateY(1px); }
+  to { stroke-dashoffset: 0; transform: translateY(0); }
+}
+@keyframes navChartBaseline {
+  0% { opacity: 0; transform: scaleX(0.2); }
+  48% { opacity: 0.7; transform: scaleX(1); }
+  100% { opacity: 0; transform: scaleX(0.72); }
+}
+@keyframes navCalibrationTicks {
+  0% { opacity: 0; transform: rotate(-24deg) scale(0.78); }
+  58% { opacity: 0.66; transform: rotate(8deg) scale(1.04); }
+  100% { opacity: 0; transform: rotate(0) scale(1); }
+}
+@keyframes navActiveSignal {
+  0%, 100% { opacity: 0.38; filter: none; }
+  50% { opacity: 0.72; filter: drop-shadow(0 0 2px rgba(200, 173, 120, 0.24)); }
+}
+
+.core-action-btn { transition: color 180ms ease, box-shadow 240ms ease, transform 180ms cubic-bezier(0.16, 1, 0.3, 1); }
+.core-action-btn:not(:disabled):active { transform: translateY(1px) scale(0.985); }
+.core-action-icon { overflow: hidden; }
+.core-action-icon svg > * {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: opacity 180ms ease, transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.core-action-icon-scan::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 5px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgba(119, 102, 66, 0.68), transparent);
+  transform: translateX(-7px) skewX(-10deg);
+}
+.core-action-btn-scan:not(:disabled):is(:hover, :focus-visible) { box-shadow: inset 0 0 0 1px rgba(119, 102, 66, 0.12), 0 4px 16px rgba(119, 102, 66, 0.08); }
+.core-action-btn-scan:not(:disabled):is(:hover, :focus-visible) .core-action-icon-scan::after {
+  animation: coreScanSweep 560ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.core-action-btn-scan:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-scan path:first-child { transform: scale(1.08); }
+.core-action-btn-scan:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-scan path:nth-child(2) { transform: scaleX(1.08); }
+.core-action-btn-scan:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-scan path:nth-child(3) { opacity: 0.68; }
+.core-action-btn-scan:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-scan .resonance-mode-node {
+  animation: coreScanNode 560ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.core-action-btn-insert:not(:disabled):is(:hover, :focus-visible) { box-shadow: inset 0 0 0 1px rgba(119, 102, 66, 0.14), 0 4px 16px rgba(119, 102, 66, 0.1); }
+.core-action-btn-insert:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-add path:first-child { transform: scale(1.16); }
+.core-action-btn-insert:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-add path:nth-child(2) { opacity: 0.7; transform: scale(0.92); }
+.core-action-btn-insert:not(:disabled):is(:hover, :focus-visible) .resonance-mode-icon-add .resonance-mode-node {
+  animation: coreInsertNode 460ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes coreScanSweep {
+  0% { opacity: 0; transform: translateX(-7px) skewX(-10deg); }
+  28% { opacity: 0.85; }
+  100% { opacity: 0; transform: translateX(22px) skewX(-10deg); }
+}
+@keyframes coreScanNode {
+  0%, 100% { transform: scale(1); }
+  48% { transform: scale(1.42); }
+}
+@keyframes coreInsertNode {
+  0% { transform: scale(0.72); }
+  62% { transform: rotate(90deg) scale(1.32); }
+  100% { transform: rotate(90deg) scale(1); }
+}
 
 .page-scroll { scrollbar-gutter: stable; }
 .page-container { position: relative; }
@@ -2239,7 +2431,14 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   .instrument-empty-orbit,
   .ratio-dial,
   .settings-data-orbit,
-  .resonance-glyph-orbit {
+  .resonance-glyph-orbit,
+  .nav-semantic-icon::after,
+  .nav-semantic-icon svg > *,
+  .wuwa-control-glyph path,
+  .core-action-icon::after,
+  .core-action-icon svg > * {
     animation: none !important;
+    transition: none !important;
   }
+
 }

@@ -400,8 +400,8 @@ export default function RecordsPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={openInsertDialog} disabled={!activePlayerId} className="tide-btn flex h-9 items-center gap-2 px-3 text-xs" title="插入五星记录">
-              <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="add" size={14} /></ResonanceActionIcon>插入五星
+            <button onClick={openInsertDialog} disabled={!activePlayerId} className="tide-btn core-action-btn core-action-btn-insert flex h-9 items-center gap-2 px-3 text-xs" title="插入五星记录">
+              <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-insert"><ResonanceIcon kind="add" size={14} /></ResonanceActionIcon>插入五星
             </button>
             <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="记录布局">
               {([

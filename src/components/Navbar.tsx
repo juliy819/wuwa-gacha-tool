@@ -116,7 +116,12 @@ export default function Navbar() {
                   isActive ? 'text-tide' : 'text-wave hover:text-tide-dim'
                 }`}
               >
-                <ResonanceActionIcon size="sm" tone={isActive ? 'gold' : 'default'} framed={false}>
+                <ResonanceActionIcon
+                  size="sm"
+                  tone={isActive ? 'gold' : 'default'}
+                  framed={false}
+                  className={`nav-semantic-icon nav-semantic-icon-${item.kind}`}
+                >
                   <ResonanceIcon kind={item.kind} />
                 </ResonanceActionIcon>
                 <span>{item.label}</span>

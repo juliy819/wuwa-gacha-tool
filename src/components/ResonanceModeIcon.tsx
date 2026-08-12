@@ -58,23 +58,24 @@ export default function ResonanceModeIcon({ kind, size = 18, detail, className }
       case 'origin':
         return (
           <>
-            <path d="M2 11h3l2.1-3.6 2.7 6.2L13 5.2l2.2 5.8H18" />
-            <path d="M3 15h5M12 15h5M10 3v2M10 15v2" opacity="0.34" />
+            <path className="resonance-origin-wave" d="M2 11h3l2.1-3.6 2.7 6.2L13 5.2l2.2 5.8H18" />
+            <path className="resonance-origin-guides" d="M3 15h5M12 15h5M10 3v2M10 15v2" opacity="0.34" />
           </>
         );
       case 'echo':
         return (
           <>
-            <path d="M3 4.5h5.2L10 6.3h7M3 10h14M3 15.5h5.2L10 13.7h7" />
-            <path d="M5.3 7.5h9.4M5.3 12.5h9.4" opacity="0.34" />
-            <rect x="8.8" y="8.8" width="2.4" height="2.4" transform="rotate(45 10 10)" />
+            <path className="resonance-echo-upper" d="M3 5h4l2 2h8" />
+            <path className="resonance-echo-core" d="M3 10h4.5L9 7.8l2.1 4.4 1.5-2.2H17" />
+            <path className="resonance-echo-lower" d="M3 15h4l2-2h8" />
+            <path className="resonance-echo-ghost" d="M5 7.5h2.2M12.8 7.5H15M5 12.5h2.2M12.8 12.5H15" opacity="0.34" />
           </>
         );
       case 'calibration':
         return (
           <>
-            <path d="M7.1 3.2A7 7 0 0 0 3.2 7.1M12.9 3.2A7 7 0 0 1 16.8 7.1M16.8 12.9a7 7 0 0 1-3.9 3.9M7.1 16.8a7 7 0 0 1-3.9-3.9" />
-            <path d="M10 5.5v2M10 12.5v2M5.5 10h2M12.5 10h2M8.4 8.4l3.2 3.2M11.6 8.4l-3.2 3.2" opacity="0.52" />
+            <path className="resonance-calibration-ring" d="M7.1 3.2A7 7 0 0 0 3.2 7.1M12.9 3.2A7 7 0 0 1 16.8 7.1M16.8 12.9a7 7 0 0 1-3.9 3.9M7.1 16.8a7 7 0 0 1-3.9-3.9" />
+            <path className="resonance-calibration-core" d="M10 5.5v2M10 12.5v2M5.5 10h2M12.5 10h2M8.4 8.4l3.2 3.2M11.6 8.4l-3.2 3.2" opacity="0.52" />
           </>
         );
       case 'directory':
@@ -140,7 +141,7 @@ export default function ResonanceModeIcon({ kind, size = 18, detail, className }
             <path d="M7.1 3.1A7.3 7.3 0 0 0 3.1 7.2M12.9 3.1A7.3 7.3 0 0 1 16.9 7.2M16.9 12.8a7.3 7.3 0 0 1-4 4.1M7.1 16.9a7.3 7.3 0 0 1-4-4.1" />
             <path d="M5.4 10h3.1l1.5-4.2 1.5 8.4L13 10h3.1" />
             <path d="M10 2v2.1M10 15.9V18M2 10h2.1M15.9 10H18" opacity="0.42" />
-            <rect x="8.9" y="8.9" width="2.2" height="2.2" transform="rotate(45 10 10)" />
+            <path className="resonance-mode-node" d="M10 8.45 11.55 10 10 11.55 8.45 10Z" />
           </>
         );
       case 'add':
@@ -148,7 +149,7 @@ export default function ResonanceModeIcon({ kind, size = 18, detail, className }
           <>
             <path d="M10 2.5v5M10 12.5v5M2.5 10h5M12.5 10h5" />
             <path d="M5 5h2.3L10 7.7 12.7 5H15M5 15h2.3l2.7-2.7 2.7 2.7H15" opacity="0.42" />
-            <rect x="8.4" y="8.4" width="3.2" height="3.2" transform="rotate(45 10 10)" />
+            <path className="resonance-mode-node" d="M10 7.75 12.25 10 10 12.25 7.75 10Z" />
           </>
         );
       case 'save':
@@ -293,8 +294,10 @@ export default function ResonanceModeIcon({ kind, size = 18, detail, className }
       case 'chart':
         return (
           <>
-            <path d="M3 17V9h3v8M8.5 17V5h3v12M14 17V3h3v14" />
-            <path d="M3 7h3l2-3 2.5 2L14 2.5h3" opacity="0.42" />
+            <path className="resonance-chart-bar resonance-chart-bar-1" d="M3 17V9h3v8" />
+            <path className="resonance-chart-bar resonance-chart-bar-2" d="M8.5 17V5h3v12" />
+            <path className="resonance-chart-bar resonance-chart-bar-3" d="M14 17V3h3v14" />
+            <path className="resonance-chart-trend" d="M3 7h3l2-3 2.5 2L14 2.5h3" opacity="0.42" />
           </>
         );
       case 'target':
@@ -385,7 +388,7 @@ export default function ResonanceModeIcon({ kind, size = 18, detail, className }
       width={size}
       height={size}
       data-detail={resolvedDetail}
-      className={cn('resonance-mode-icon overflow-visible', className)}
+      className={cn('resonance-mode-icon overflow-visible', `resonance-mode-icon-${kind}`, className)}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.28"

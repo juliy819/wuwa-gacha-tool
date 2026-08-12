@@ -217,8 +217,8 @@ export default function Home() {
               <h1 className="page-title text-xl font-semibold text-tide">抽卡概览</h1>
               <p className="page-subtitle mt-1 text-xs text-wave">重点数据按卡池独立统计</p>
             </div>
-            <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple relative z-10 flex items-center gap-2 px-4 py-2">
-              <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
+            <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn core-action-btn core-action-btn-scan click-ripple relative z-10 flex items-center gap-2 px-4 py-2">
+              <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
               扫描抽卡
             </button>
           </header>
@@ -234,8 +234,8 @@ export default function Home() {
               description="扫描游戏记录或导入已有 JSON 文件"
               className="resonance-panel min-h-[360px]"
             >
-              <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn click-ripple mt-1 flex items-center gap-2 px-4 py-2">
-                <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
+              <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn core-action-btn core-action-btn-scan click-ripple mt-1 flex items-center gap-2 px-4 py-2">
+                <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
                 开始扫描
               </button>
             </ResonanceEmptyState>
