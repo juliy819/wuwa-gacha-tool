@@ -9,6 +9,7 @@ import ResonanceIcon from './ResonanceModeIcon';
 interface HomeDashboardProps {
   stats: GachaStats;
   records: GachaRecord[];
+  confirmedBoundaryPools?: ReadonlySet<string>;
 }
 
 interface FiveStarResult {
@@ -28,7 +29,10 @@ const PITY_MILESTONES = [20, 40, 60, 80];
 const OPTIONAL_POOL_TYPES = new Set(['8', '9', '12', '13']);
 const RATIO_DIAL_TICKS = Array.from({ length: 16 }, (_, index) => index * 22.5);
 
-function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
+function buildRecentFiveStars(
+  records: GachaRecord[],
+  confirmedBoundaryPools: ReadonlySet<string>,
+): FiveStarResult[] {
   const pityByPool = new Map<string, number>();
   const poolsWithFiveStar = new Set<string>();
   const results: FiveStarResult[] = [];
@@ -39,7 +43,8 @@ function buildRecentFiveStars(records: GachaRecord[]): FiveStarResult[] {
     pityByPool.set(record.card_pool_type, pity);
 
     if (record.quality_level === QUALITY.FIVE_STAR) {
-      const isLowerBound = !poolsWithFiveStar.has(record.card_pool_type);
+      const isLowerBound = !poolsWithFiveStar.has(record.card_pool_type)
+        && !confirmedBoundaryPools.has(record.card_pool_type);
       poolsWithFiveStar.add(record.card_pool_type);
       results.push({
         id: `${record.card_pool_type}-${record.time}-${record.resource_id}-${index}`,
@@ -176,8 +181,11 @@ function PityRow({ pool }: { pool: PoolInfo }) {
   );
 }
 
-export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
-  const recentFiveStars = useMemo(() => buildRecentFiveStars(records), [records]);
+export default function HomeDashboard({ stats, records, confirmedBoundaryPools = new Set() }: HomeDashboardProps) {
+  const recentFiveStars = useMemo(
+    () => buildRecentFiveStars(records, confirmedBoundaryPools),
+    [confirmedBoundaryPools, records],
+  );
   const recordRange = useMemo(() => {
     if (records.length === 0) return null;
     return {
@@ -258,7 +266,7 @@ export default function HomeDashboard({ stats, records }: HomeDashboardProps) {
             <h2 className="panel-heading flex items-center gap-2 text-sm font-medium text-tide">
               <ResonanceIcon kind="trophy" size={15} /> 最近五星
             </h2>
-            <p className="mt-1 text-[11px] text-wave-dim">首个五星前序可能缺失，以 ≥ 标记抽数下界</p>
+            <p className="mt-1 text-[11px] text-wave-dim">未确认历史起点的首个五星以 ≥ 标记抽数下界</p>
           </div>
           <span className="text-[11px] text-wave">
             {recordRange ? `数据截至 ${recordRange.latest}` : `最近 ${recentFiveStars.length} 条`}

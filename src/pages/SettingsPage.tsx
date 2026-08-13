@@ -29,7 +29,7 @@ import {
   SYNC_DANGER_DAYS,
   type SyncFreshness,
 } from '../lib/utils';
-import type { GameDirValidation, RecordSummary } from '../types';
+import type { GameDirValidation, PoolBoundaryStatus, RecordSummary } from '../types';
 
 type DeleteTarget = { playerId: string | null };
 
@@ -63,6 +63,10 @@ export default function SettingsPage() {
   const [confirmationText, setConfirmationText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [lastBackupPath, setLastBackupPath] = useState<string | null>(null);
+  const [boundaryStatuses, setBoundaryStatuses] = useState<Record<string, PoolBoundaryStatus[]>>({});
+  const [boundaryPlayerId, setBoundaryPlayerId] = useState<string | null>(null);
+  const [boundaryConfirmation, setBoundaryConfirmation] = useState<PoolBoundaryStatus | null>(null);
+  const [boundarySaving, setBoundarySaving] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
   const availableUpdate = useUpdateStore((state) => state.availableUpdate);
   const checkingUpdate = useUpdateStore((state) => state.checking);
@@ -83,6 +87,43 @@ export default function SettingsPage() {
   useEffect(() => {
     if (settings) setGameDirInput(settings.game_dir);
   }, [settings]);
+
+  useEffect(() => {
+    if (pools.length === 0) {
+      setBoundaryStatuses({});
+      return;
+    }
+    let cancelled = false;
+    Promise.all(pools.map(async (playerId) => [playerId, await gachaApi.getPoolBoundaryStatuses(playerId)] as const))
+      .then((entries) => { if (!cancelled) setBoundaryStatuses(Object.fromEntries(entries)); })
+      .catch(() => { if (!cancelled) setBoundaryStatuses({}); });
+    return () => { cancelled = true; };
+  }, [pools, storeSummaries]);
+
+  const refreshBoundaryStatuses = async (playerId: string) => {
+    const statuses = await gachaApi.getPoolBoundaryStatuses(playerId);
+    setBoundaryStatuses((current) => ({ ...current, [playerId]: statuses }));
+  };
+
+  const handleBoundaryConfirmation = async () => {
+    if (!boundaryPlayerId || !boundaryConfirmation) return;
+    setBoundarySaving(true);
+    const confirmed = !boundaryConfirmation.confirmed;
+    try {
+      await gachaApi.setPoolBoundaryConfirmed(boundaryPlayerId, boundaryConfirmation.pool_type, confirmed);
+      await Promise.all([
+        refreshBoundaryStatuses(boundaryPlayerId),
+        fetchSummaries(),
+        useGachaStore.getState().fetchStats(boundaryPlayerId),
+      ]);
+      addToast('success', confirmed ? '已将该卡池现存记录确认为完整起点' : '已恢复首段历史边界提示');
+      setBoundaryConfirmation(null);
+    } catch (error) {
+      addToast('error', String(error));
+    } finally {
+      setBoundarySaving(false);
+    }
+  };
 
   useEffect(() => {
     const path = gameDirInput.trim();
@@ -592,6 +633,7 @@ export default function SettingsPage() {
                   <div className="divide-y divide-white/[0.05]">
                     {pools.map((playerId) => {
                       const summary = summaryByPlayer.get(playerId);
+                      const boundaries = boundaryStatuses[playerId];
                       const f = freshnessInfo.get(playerId);
                       const freshness = f?.freshness ?? 'fresh';
                       const isWarn = freshness === 'warn';
@@ -666,6 +708,15 @@ export default function SettingsPage() {
                             )}
                           </div>
                           <div className="relative flex shrink-0 items-center gap-1">
+                            <button
+                              onClick={() => setBoundaryPlayerId(playerId)}
+                              disabled={!boundaries}
+                              className="flex h-8 items-center gap-1.5 rounded-md px-2 text-[10px] text-wave transition-colors hover:bg-white/[0.05] hover:text-tide disabled:cursor-default disabled:opacity-40"
+                              title="管理卡池历史起点"
+                            >
+                              {!boundaries ? <LoaderCircle size={11} className="animate-spin" /> : <ResonanceIcon kind="traces" size={12} />}
+                              历史起点
+                            </button>
                             <button onClick={() => handleExport(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
                             <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon></button>
                           </div>
@@ -758,6 +809,98 @@ export default function SettingsPage() {
                 </div>
               </div>
             </>}
+        </Modal>
+
+        <Modal
+          open={boundaryPlayerId !== null && boundaryConfirmation === null}
+          onClose={() => { setBoundaryPlayerId(null); setBoundaryConfirmation(null); }}
+          closeDisabled={boundarySaving}
+          className="max-w-2xl border-white/[0.08] bg-[#242424]"
+          labelledBy="boundary-management-dialog-title"
+        >
+          {boundaryPlayerId && boundaryStatuses[boundaryPlayerId] && <>
+              <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-md bg-[#c9ab78]/10 p-2 text-[#c9ab78]"><ResonanceIcon kind="database" size={19} /></div>
+                  <div>
+                    <h2 id="boundary-management-dialog-title" className="text-base font-medium text-tide">卡池历史起点</h2>
+                    <p className="mt-1 text-xs text-wave">UID {boundaryPlayerId}</p>
+                  </div>
+                </div>
+                <ResonanceCloseButton onClick={() => setBoundaryPlayerId(null)} disabled={boundarySaving} />
+              </div>
+
+              <div className="max-h-[65vh] space-y-4 overflow-y-auto p-5">
+                <p className="text-xs leading-5 text-wave">若确认首条记录前不存在更早垫抽，可将该卡池现存记录认定为完整起点。</p>
+                <section>
+                  <div className="divide-y divide-white/[0.05] overflow-hidden rounded-md border border-white/[0.06]">
+                    {boundaryStatuses[boundaryPlayerId].map((boundary) => (
+                      <div key={boundary.pool_type} className="flex items-center justify-between gap-4 px-3 py-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-tide">
+                            <span>{boundary.pool_name}</span>
+                            <span className={`rounded border px-1.5 py-px text-[9px] ${boundary.confirmed ? 'border-[#6faaa0]/20 text-[#8fc8be]' : 'border-[#c9ab78]/20 text-[#c9ab78]'}`}>
+                              {boundary.confirmed ? '起点已确认' : '首段为下界'}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[10px] leading-4 text-wave">
+                            首个五星 {boundary.first_five_star_name} · {boundary.first_five_star_time.slice(0, 10)} · 可见 {boundary.visible_pulls} 抽
+                            {!boundary.confirmed && '，当前不参与完整区间统计'}
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setBoundaryConfirmation(boundary)}
+                          className="shrink-0 rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[10px] text-wave hover:border-white/[0.14] hover:text-tide"
+                        >
+                          {boundary.confirmed ? '撤销确认' : '确认起点'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+                <p className="text-[10px] leading-5 text-wave">确认只影响边界标记与统计口径，不会修改、补造或删除记录；以后导入更早记录时会自动失效。</p>
+              </div>
+            </>}
+        </Modal>
+
+        <Modal
+          open={boundaryConfirmation !== null}
+          onClose={() => setBoundaryConfirmation(null)}
+          closeDisabled={boundarySaving}
+          className="max-w-md border-[#c9ab78]/20 bg-[#242424]"
+          labelledBy="boundary-dialog-title"
+        >
+          {boundaryConfirmation && <>
+            <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
+              <div>
+                <h2 id="boundary-dialog-title" className="text-base font-medium text-tide">
+                  {boundaryConfirmation.confirmed ? '撤销历史起点确认' : '确认现存记录为完整起点'}
+                </h2>
+                <p className="mt-1 text-xs text-wave">{boundaryConfirmation.pool_name}</p>
+              </div>
+              <ResonanceCloseButton onClick={() => setBoundaryConfirmation(null)} disabled={boundarySaving} />
+            </div>
+            <div className="space-y-4 p-5 text-xs leading-5 text-wave">
+              {boundaryConfirmation.confirmed ? (
+                <p>撤销后，首页和记录页会重新将首个五星显示为 <span className="text-[#c9ab78]">≥{boundaryConfirmation.visible_pulls} 抽</span>，记录页恢复边界提示，并从完整区间、平均值和概率分布中排除。原始记录不会改变。</p>
+              ) : (
+                <>
+                  <p>仅当你确定该卡池开放以来的记录已经完整覆盖，且首条记录之前不存在垫抽时再确认。</p>
+                  <div className="rounded-md border border-[#c9ab78]/15 bg-[#c9ab78]/[0.04] px-3 py-2.5 text-[#d9c28f]">
+                    确认后，首个五星将按 {boundaryConfirmation.visible_pulls} 抽纳入首页和分析统计；首页、记录页不再显示 ≥，记录页也不再显示该卡池的边界提示。
+                  </div>
+                  <p>以后导入更早记录时，本次确认会自动失效并恢复边界提示。</p>
+                </>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={() => setBoundaryConfirmation(null)} disabled={boundarySaving} className="px-4 py-2 text-sm text-wave hover:text-tide">取消</button>
+                <button onClick={handleBoundaryConfirmation} disabled={boundarySaving} className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40">
+                  {boundarySaving && <LoaderCircle size={12} className="animate-spin" />}
+                  {boundaryConfirmation.confirmed ? '确认撤销' : '确认完整起点'}
+                </button>
+              </div>
+            </div>
+          </>}
         </Modal>
 
         <Modal

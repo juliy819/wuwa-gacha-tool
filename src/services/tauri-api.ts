@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
+import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -92,6 +92,14 @@ export const gachaApi = {
   },
   getResourceAcquisitionInsights: (playerId?: string, includeMock = false): Promise<ResourceAcquisitionInsight[]> => {
     return invoke('get_resource_acquisition_insights', { playerId, includeMock });
+  },
+
+  getPoolBoundaryStatuses: (playerId: string): Promise<PoolBoundaryStatus[]> => {
+    return invoke('get_pool_boundary_statuses', { playerId });
+  },
+
+  setPoolBoundaryConfirmed: (playerId: string, poolType: string, confirmed: boolean): Promise<void> => {
+    return invoke('set_pool_boundary_confirmed', { playerId, poolType, confirmed });
   },
 
   // 清空记录

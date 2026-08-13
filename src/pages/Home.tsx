@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
@@ -46,6 +46,7 @@ export default function Home() {
   const [cloudLink, setCloudLink] = useState<CloudGachaLink | null>(null);
   const [cloudOpening, setCloudOpening] = useState(false);
   const [cloudError, setCloudError] = useState('');
+  const [confirmedBoundaryPoolTypes, setConfirmedBoundaryPoolTypes] = useState<string[]>([]);
   const scanContentRef = useRef<HTMLDivElement>(null);
   const [scanContentHeight, setScanContentHeight] = useState<number | null>(null);
 
@@ -74,6 +75,31 @@ export default function Home() {
       return () => window.clearTimeout(timer);
     }
   }, [activePlayerId, fetchRecords, recordsLoaded, recordsPlayerId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activePlayerId) {
+      setConfirmedBoundaryPoolTypes([]);
+      return;
+    }
+    gachaApi.getPoolBoundaryStatuses(activePlayerId)
+      .then((boundaries) => {
+        if (!cancelled) {
+          setConfirmedBoundaryPoolTypes(
+            boundaries.filter((boundary) => boundary.confirmed).map((boundary) => boundary.pool_type),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setConfirmedBoundaryPoolTypes([]);
+      });
+    return () => { cancelled = true; };
+  }, [activePlayerId]);
+
+  const confirmedBoundaryPools = useMemo(
+    () => new Set(confirmedBoundaryPoolTypes),
+    [confirmedBoundaryPoolTypes],
+  );
 
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return;
@@ -226,7 +252,11 @@ export default function Home() {
           {!initialized || (activePlayerId && statsPlayerId !== activePlayerId) ? (
             <div className="resonance-panel min-h-[360px]" aria-busy="true" aria-label="Loading gacha overview" />
           ) : stats && stats.total_draws > 0 ? (
-            <HomeDashboard stats={stats} records={records} />
+            <HomeDashboard
+              stats={stats}
+              records={records}
+              confirmedBoundaryPools={confirmedBoundaryPools}
+            />
           ) : (
             <ResonanceEmptyState
               variant="scan"

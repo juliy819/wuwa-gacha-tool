@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::gacha::fetcher::{
     self, get_display_pool_name, get_pool_group, hard_pity_for_pool, is_limited_char_pool,
@@ -277,7 +277,15 @@ pub struct GachaInsights {
 }
 
 impl GachaStats {
+    #[cfg(test)]
     pub fn from_records(records: &[GachaRecord]) -> Self {
+        Self::from_records_with_boundaries(records, &HashSet::new())
+    }
+
+    pub fn from_records_with_boundaries(
+        records: &[GachaRecord],
+        confirmed_boundaries: &HashSet<String>,
+    ) -> Self {
         if records.is_empty() {
             return Self::default();
         }
@@ -332,8 +340,8 @@ impl GachaStats {
             0.0
         };
 
-        // 首页和分析页统一使用完整周期：首个可见 UP/五星不参与平均，
-        // 因为它之前的垫抽历史可能不在当前记录中。
+        // 首页和分析页统一使用完整周期：未确认历史起点时，首个可见
+        // UP/五星不参与平均；用户确认后，首段按现有记录完整计入。
         let mut up_role_cycles = Vec::new();
         let mut up_weapon_cycles = Vec::new();
         for (_, pool_type) in POOL_TYPES.iter() {
@@ -352,7 +360,7 @@ impl GachaStats {
                     if record.is_off_rate {
                         continue;
                     }
-                    if seen_up {
+                    if seen_up || confirmed_boundaries.contains(*pool_type) {
                         up_role_cycles.push(pulls_since_up);
                     }
                     seen_up = true;
@@ -364,7 +372,7 @@ impl GachaStats {
                 for record in pool_records {
                     pity += 1;
                     if record.is_five_star() {
-                        if seen_five_star {
+                        if seen_five_star || confirmed_boundaries.contains(*pool_type) {
                             up_weapon_cycles.push(pity);
                         }
                         seen_five_star = true;
@@ -427,7 +435,7 @@ impl GachaStats {
             for r in &pool_records {
                 pity += 1;
                 if r.is_five_star() {
-                    if seen_five_star {
+                    if seen_five_star || confirmed_boundaries.contains(*pool_type_str) {
                         pool_pity_counts.push(pity);
                     }
                     seen_five_star = true;
@@ -483,7 +491,16 @@ impl GachaStats {
 }
 
 impl GachaInsights {
+    #[cfg(test)]
     pub fn from_records(records: &[GachaRecord], include_mock: bool) -> Self {
+        Self::from_records_with_boundaries(records, include_mock, &HashSet::new())
+    }
+
+    pub fn from_records_with_boundaries(
+        records: &[GachaRecord],
+        include_mock: bool,
+        confirmed_boundaries: &HashSet<String>,
+    ) -> Self {
         let filtered: Vec<GachaRecord> = records
             .iter()
             .filter(|record| include_mock || !record.is_mock)
@@ -523,7 +540,7 @@ impl GachaInsights {
                         five_star_count += 1;
                         // The first observed five-star may have pulls before the
                         // retained history. Only later intervals have both bounds.
-                        if seen_five_star {
+                        if seen_five_star || confirmed_boundaries.contains(&pool_type) {
                             bounded_intervals.push(pity);
                         }
                         seen_five_star = true;
@@ -531,13 +548,15 @@ impl GachaInsights {
 
                         if tracks_featured {
                             if record.is_off_rate {
-                                if seen_featured && !lost_since_featured {
+                                if (seen_featured || confirmed_boundaries.contains(&pool_type))
+                                    && !lost_since_featured
+                                {
                                     featured_attempt_count += 1;
                                 }
                                 lost_since_featured = true;
                             } else {
                                 featured_count += 1;
-                                if seen_featured {
+                                if seen_featured || confirmed_boundaries.contains(&pool_type) {
                                     featured_cycles.push(pulls_since_featured);
                                     if !lost_since_featured {
                                         featured_attempt_count += 1;
@@ -650,9 +669,18 @@ struct CharacterPullAccumulator {
     is_lower_bound: bool,
 }
 
+#[cfg(test)]
 pub fn character_pull_insights(
     records: &[GachaRecord],
     include_mock: bool,
+) -> Vec<CharacterPullInsight> {
+    character_pull_insights_with_boundaries(records, include_mock, &HashSet::new())
+}
+
+pub fn character_pull_insights_with_boundaries(
+    records: &[GachaRecord],
+    include_mock: bool,
+    confirmed_boundaries: &HashSet<String>,
 ) -> Vec<CharacterPullInsight> {
     let mut by_pool: HashMap<String, Vec<GachaRecord>> = HashMap::new();
     for record in records
@@ -684,7 +712,8 @@ pub fn character_pull_insights(
             if !record.is_five_star() {
                 continue;
             }
-            let current_is_lower_bound = !seen_five_star;
+            let current_is_lower_bound =
+                !seen_five_star && !confirmed_boundaries.contains(&pool_type);
             seen_five_star = true;
             // Imported historical rows do not always carry a reliable is_off_rate
             // flag. The standard-character resource IDs are the authoritative
@@ -749,9 +778,18 @@ pub fn character_pull_insights(
 
 /// 返回所有池型可点击的五星资源获取档案。活动角色池会把前置歪常驻并入下一只 UP，
 /// 其它池型按每个五星独立成段，不在前端重复推导。
+#[cfg(test)]
 pub fn resource_acquisition_insights(
     records: &[GachaRecord],
     include_mock: bool,
+) -> Vec<ResourceAcquisitionInsight> {
+    resource_acquisition_insights_with_boundaries(records, include_mock, &HashSet::new())
+}
+
+pub fn resource_acquisition_insights_with_boundaries(
+    records: &[GachaRecord],
+    include_mock: bool,
+    confirmed_boundaries: &HashSet<String>,
 ) -> Vec<ResourceAcquisitionInsight> {
     let mut by_pool: HashMap<String, Vec<GachaRecord>> = HashMap::new();
     for record in records.iter().filter(|r| include_mock || !r.is_mock) {
@@ -773,7 +811,7 @@ pub fn resource_acquisition_insights(
             if !record.is_five_star() {
                 continue;
             }
-            let lower = !seen_five;
+            let lower = !seen_five && !confirmed_boundaries.contains(&pool_type);
             seen_five = true;
             let is_off = limited_char
                 && record.resource_type == "role"
@@ -1441,6 +1479,71 @@ mod tests {
         assert_eq!(pool.complete_interval_count, 0);
         assert_eq!(pool.invalid_interval_count, 1);
         assert!(pool.distribution.iter().all(|bin| bin.count == 0));
+    }
+
+    #[test]
+    fn confirmed_boundary_includes_first_five_star_in_every_insight() {
+        let records = vec![
+            record(1, "12", 3, "2026-01-01 00:00:01"),
+            record(2, "12", 3, "2026-01-01 00:00:02"),
+            record(3, "12", 5, "2026-01-01 00:00:03"),
+        ];
+        let confirmed = HashSet::from(["12".to_string()]);
+
+        let stats = GachaStats::from_records_with_boundaries(&records, &confirmed);
+        assert_eq!(stats.avg_five_star_pity, 3.0);
+
+        let insights = GachaInsights::from_records_with_boundaries(&records, false, &confirmed);
+        assert_eq!(insights.pools[0].complete_interval_count, 1);
+        assert_eq!(insights.pools[0].average_pity, Some(3.0));
+
+        let acquisitions =
+            resource_acquisition_insights_with_boundaries(&records, false, &confirmed);
+        assert_eq!(acquisitions[0].total_pulls, 3);
+        assert!(!acquisitions[0].is_lower_bound);
+        assert!(!acquisitions[0].records[0].is_lower_bound);
+    }
+
+    #[test]
+    fn confirmed_boundary_makes_first_limited_up_cycle_complete() {
+        let mut off_rate = record(1, "1", 5, "2026-01-01 00:00:01");
+        off_rate.resource_id = 1104;
+        off_rate.is_off_rate = true;
+        let mut featured = record(2, "1", 5, "2026-01-01 00:00:02");
+        featured.resource_id = 2001;
+        featured.name = "限定角色".to_string();
+        let confirmed = HashSet::from(["1".to_string()]);
+
+        let characters = character_pull_insights_with_boundaries(
+            &[off_rate.clone(), featured.clone()],
+            false,
+            &confirmed,
+        );
+        assert_eq!(characters[0].complete_cycle_count, 1);
+        assert_eq!(characters[0].total_pulls, 2);
+        assert!(!characters[0].is_lower_bound);
+
+        let insights = GachaInsights::from_records_with_boundaries(
+            &[off_rate.clone(), featured.clone()],
+            false,
+            &confirmed,
+        );
+        assert_eq!(insights.pools[0].featured_cycle_count, 1);
+        assert_eq!(insights.pools[0].featured_average_pulls, Some(2.0));
+        assert_eq!(insights.pools[0].featured_attempt_count, 1);
+        assert_eq!(insights.pools[0].featured_win_count, 0);
+
+        let direct_up =
+            GachaInsights::from_records_with_boundaries(&[featured.clone()], false, &confirmed);
+        assert_eq!(direct_up.pools[0].featured_cycle_count, 1);
+        assert_eq!(direct_up.pools[0].featured_attempt_count, 1);
+        assert_eq!(direct_up.pools[0].featured_win_count, 1);
+        assert_eq!(direct_up.pools[0].featured_win_rate, Some(100.0));
+
+        let acquisitions =
+            resource_acquisition_insights_with_boundaries(&[off_rate, featured], false, &confirmed);
+        assert_eq!(acquisitions[0].total_pulls, 2);
+        assert!(!acquisitions[0].is_lower_bound);
     }
 
     #[test]

@@ -531,11 +531,11 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="analysis-method-note">
                       <ResonanceIcon kind="traces" size={15} />
-                      <span>每次五星后重新从第 1 抽计数。首个可见五星不知道此前垫了多少抽，当前垫抽又尚未出金，因此两者都不参与平均。</span>
+                      <span>每次五星后重新从第 1 抽计数。未确认历史起点时首个可见五星不参与平均；当前垫抽尚未出金，始终不参与平均。</span>
                       <em style={{ color: reliability.tone }}>{reliability.label}</em>
                     </div>
                     <div className="analysis-metric-grid">
-                      <Metric label="统计出金次数" value={`${activePool.complete_interval_count} 次`} detail={`${activePool.five_star_count} 个五星，首个不计入`} />
+                      <Metric label="统计出金次数" value={`${activePool.complete_interval_count} 次`} detail={`${activePool.five_star_count} 个五星 · 已纳入的有效区间`} />
                         <Metric label="平均多少抽出金" value={formatPull(activePool.average_pity)} detail="官方综合概率期望 54.1 抽" tone="#d8bd84" />
                       <Metric label="一半在多少抽内" value={formatPull(activePool.median_pity)} detail="历史记录的中位数" />
                       <Metric label="最快出金" value={formatPull(activePool.best_pity)} detail="上个五星后的最短等待" tone="#bfc4c0" />

@@ -16,9 +16,9 @@ use crate::gacha::fetcher::{
     ApiCardInfo, GachaParams, POOL_TYPES,
 };
 use crate::gacha::parser::{
-    character_pull_insights, resource_acquisition_insights, CharacterPullInsight,
-    ClearRecordsResult, GachaImportResult, GachaInsights, GachaRecord, GachaStats,
-    GameDirValidation, GameSettings, RecordSummary, ResourceAcquisitionInsight,
+    character_pull_insights_with_boundaries, resource_acquisition_insights_with_boundaries,
+    CharacterPullInsight, ClearRecordsResult, GachaImportResult, GachaInsights, GachaRecord,
+    GachaStats, GameDirValidation, GameSettings, RecordSummary, ResourceAcquisitionInsight,
 };
 use crate::AppState;
 
@@ -681,9 +681,13 @@ pub fn get_stats(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let query_started = Instant::now();
     let records = db.get_all_records(player_id.as_deref())?;
+    let confirmed_boundaries = match player_id.as_deref() {
+        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        None => Default::default(),
+    };
     let query_ms = query_started.elapsed().as_millis();
     let compute_started = Instant::now();
-    let stats = GachaStats::from_records(&records);
+    let stats = GachaStats::from_records_with_boundaries(&records, &confirmed_boundaries);
     log::info!(
         target: "app::performance",
         "event=command_completed command=get_stats duration_ms={} query_ms={query_ms} compute_ms={} records={}",
@@ -692,6 +696,16 @@ pub fn get_stats(
         records.len()
     );
     Ok(stats)
+}
+
+#[derive(Debug, Serialize)]
+pub struct PoolBoundaryStatus {
+    pool_type: String,
+    pool_name: String,
+    first_five_star_name: String,
+    first_five_star_time: String,
+    visible_pulls: i32,
+    confirmed: bool,
 }
 
 /// 获取按卡池计算的五星完整区间洞察。
@@ -703,7 +717,15 @@ pub fn get_gacha_insights(
 ) -> Result<GachaInsights, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
-    Ok(GachaInsights::from_records(&records, include_mock))
+    let confirmed = match player_id.as_deref() {
+        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        None => Default::default(),
+    };
+    Ok(GachaInsights::from_records_with_boundaries(
+        &records,
+        include_mock,
+        &confirmed,
+    ))
 }
 
 /// 获取限定角色的可识别抽取成本。
@@ -715,7 +737,15 @@ pub fn get_character_pull_insights(
 ) -> Result<Vec<CharacterPullInsight>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
-    Ok(character_pull_insights(&records, include_mock))
+    let confirmed = match player_id.as_deref() {
+        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        None => Default::default(),
+    };
+    Ok(character_pull_insights_with_boundaries(
+        &records,
+        include_mock,
+        &confirmed,
+    ))
 }
 
 #[tauri::command]
@@ -726,7 +756,63 @@ pub fn get_resource_acquisition_insights(
 ) -> Result<Vec<ResourceAcquisitionInsight>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
-    Ok(resource_acquisition_insights(&records, include_mock))
+    let confirmed = match player_id.as_deref() {
+        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        None => Default::default(),
+    };
+    Ok(resource_acquisition_insights_with_boundaries(
+        &records,
+        include_mock,
+        &confirmed,
+    ))
+}
+
+#[tauri::command]
+pub fn get_pool_boundary_statuses(
+    state: State<'_, AppState>,
+    player_id: String,
+) -> Result<Vec<PoolBoundaryStatus>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let records = db.get_all_records(Some(&player_id))?;
+    let confirmed = db.confirmed_pool_boundaries(&player_id)?;
+    let mut boundaries = Vec::new();
+    for (_, pool_type) in POOL_TYPES.iter() {
+        let mut pool_records: Vec<_> = records
+            .iter()
+            .filter(|record| !record.is_mock && record.card_pool_type == *pool_type)
+            .collect();
+        pool_records.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
+        let Some(first_five_index) = pool_records
+            .iter()
+            .position(|record| record.quality_level == 5)
+        else {
+            continue;
+        };
+        let first_five = pool_records[first_five_index];
+        boundaries.push(PoolBoundaryStatus {
+            pool_type: pool_type.to_string(),
+            pool_name: get_display_pool_name(pool_type).to_string(),
+            first_five_star_name: first_five.name.clone(),
+            first_five_star_time: first_five.time.clone(),
+            visible_pulls: first_five_index as i32 + 1,
+            confirmed: confirmed.contains(*pool_type),
+        });
+    }
+    Ok(boundaries)
+}
+
+#[tauri::command]
+pub fn set_pool_boundary_confirmed(
+    state: State<'_, AppState>,
+    player_id: String,
+    pool_type: String,
+    confirmed: bool,
+) -> Result<(), String> {
+    if !POOL_TYPES.iter().any(|(_, value)| *value == pool_type) {
+        return Err("未知卡池，无法确认历史起点".to_string());
+    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.set_pool_boundary_confirmed(&player_id, &pool_type, confirmed)
 }
 
 /// 清空记录

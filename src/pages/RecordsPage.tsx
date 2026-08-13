@@ -125,6 +125,7 @@ export default function RecordsPage() {
   const [mutating, setMutating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<GachaRecord | null>(null);
   const [acquisitionInsights, setAcquisitionInsights] = useState<ResourceAcquisitionInsight[]>([]);
+  const [confirmedBoundaryPoolTypes, setConfirmedBoundaryPoolTypes] = useState<string[] | null>(null);
   const [selectedAcquisition, setSelectedAcquisition] = useState<ResourceAcquisitionInsight | null>(null);
   const contentRef = useRef<HTMLElement>(null);
   const poolNavRef = useRef<HTMLElement>(null);
@@ -156,6 +157,29 @@ export default function RecordsPage() {
       .catch(() => { if (current) setAcquisitionInsights([]); });
     return () => { current = false; };
   }, [activePlayerId, recordsLoaded, recordsPlayerId, records.length]);
+
+  useEffect(() => {
+    let current = true;
+    if (!activePlayerId || !recordsLoaded || recordsPlayerId !== activePlayerId) {
+      setConfirmedBoundaryPoolTypes(null);
+      return;
+    }
+    gachaApi.getPoolBoundaryStatuses(activePlayerId)
+      .then((statuses) => {
+        if (current) {
+          setConfirmedBoundaryPoolTypes(
+            statuses.filter((status) => status.confirmed).map((status) => status.pool_type),
+          );
+        }
+      })
+      .catch(() => { if (current) setConfirmedBoundaryPoolTypes([]); });
+    return () => { current = false; };
+  }, [activePlayerId, recordsLoaded, recordsPlayerId, records.length]);
+
+  const confirmedBoundaryPools = useMemo(
+    () => new Set(confirmedBoundaryPoolTypes ?? []),
+    [confirmedBoundaryPoolTypes],
+  );
 
   const loadResources = async () => {
     if (resources.length > 0 || resourcesLoading) return;
@@ -271,13 +295,16 @@ export default function RecordsPage() {
     const result = ordered.map((record) => {
       const pity = (pityByPool.get(record.card_pool_type) ?? 0) + 1;
       const isFiveStar = record.quality_level === QUALITY.FIVE_STAR;
-      const isLowerBound = isFiveStar && !poolsWithFiveStar.has(record.card_pool_type);
+      const isLowerBound = isFiveStar
+        && confirmedBoundaryPoolTypes !== null
+        && !poolsWithFiveStar.has(record.card_pool_type)
+        && !confirmedBoundaryPools.has(record.card_pool_type);
       if (isFiveStar) poolsWithFiveStar.add(record.card_pool_type);
       pityByPool.set(record.card_pool_type, record.quality_level === QUALITY.FIVE_STAR ? 0 : pity);
       return { record, pity, isLowerBound };
     });
     return result.reverse();
-  }, [records]);
+  }, [records, confirmedBoundaryPoolTypes, confirmedBoundaryPools]);
 
   const poolStats = useMemo(() => {
     const stats = new Map<string, { name: string; count: number; fiveStar: number; currentPity: number }>();

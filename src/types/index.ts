@@ -199,6 +199,15 @@ export interface GachaInsights {
   pools: PoolInsight[];
 }
 
+export interface PoolBoundaryStatus {
+  pool_type: string;
+  pool_name: string;
+  first_five_star_name: string;
+  first_five_star_time: string;
+  visible_pulls: number;
+  confirmed: boolean;
+}
+
 export interface GameSettings {
   game_dir: string;
 }

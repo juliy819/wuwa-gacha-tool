@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -142,6 +142,15 @@ impl Database {
                     player_id TEXT PRIMARY KEY,
                     last_imported_at TEXT,
                     is_inferred INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS pool_history_boundaries (
+                    player_id TEXT NOT NULL,
+                    card_pool_type TEXT NOT NULL,
+                    earliest_time TEXT NOT NULL,
+                    earliest_time_count INTEGER NOT NULL,
+                    confirmed_at TEXT NOT NULL,
+                    PRIMARY KEY (player_id, card_pool_type)
                 );
                 ",
             )
@@ -1074,6 +1083,80 @@ impl Database {
         Ok(())
     }
 
+    pub fn confirmed_pool_boundaries(&self, player_id: &str) -> Result<HashSet<String>, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT b.card_pool_type
+             FROM pool_history_boundaries b
+             WHERE b.player_id = ?1
+               AND b.earliest_time = (
+                   SELECT MIN(r.time) FROM gacha_records r
+                   WHERE r.player_id = b.player_id AND r.card_pool_type = b.card_pool_type AND r.is_mock = 0
+               )
+               AND b.earliest_time_count = (
+                   SELECT COUNT(*) FROM gacha_records r
+                   WHERE r.player_id = b.player_id AND r.card_pool_type = b.card_pool_type
+                     AND r.time = b.earliest_time AND r.is_mock = 0
+               )"
+        ).map_err(|e| e.to_string())?;
+        let confirmed = stmt
+            .query_map(params![player_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(confirmed)
+    }
+
+    pub fn set_pool_boundary_confirmed(
+        &self,
+        player_id: &str,
+        pool_type: &str,
+        confirmed: bool,
+    ) -> Result<(), String> {
+        if !confirmed {
+            self.conn.execute(
+                "DELETE FROM pool_history_boundaries WHERE player_id = ?1 AND card_pool_type = ?2",
+                params![player_id, pool_type],
+            ).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        let earliest_time: String = self.conn.query_row(
+            "SELECT MIN(time) FROM gacha_records WHERE player_id = ?1 AND card_pool_type = ?2 AND is_mock = 0",
+            params![player_id, pool_type],
+            |row| row.get::<_, Option<String>>(0),
+        ).map_err(|e| e.to_string())?
+            .ok_or_else(|| "该卡池没有可确认的记录".to_string())?;
+        let earliest_time_count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM gacha_records
+             WHERE player_id = ?1 AND card_pool_type = ?2 AND time = ?3 AND is_mock = 0",
+                // Only official history can establish or invalidate this boundary.
+                params![player_id, pool_type, earliest_time],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        self.conn
+            .execute(
+                "INSERT INTO pool_history_boundaries
+             (player_id, card_pool_type, earliest_time, earliest_time_count, confirmed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(player_id, card_pool_type) DO UPDATE SET
+               earliest_time = excluded.earliest_time,
+               earliest_time_count = excluded.earliest_time_count,
+               confirmed_at = excluded.confirmed_at",
+                params![
+                    player_id,
+                    pool_type,
+                    earliest_time,
+                    earliest_time_count,
+                    current_datetime()
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     fn create_backup(&self) -> Result<Option<String>, String> {
         let Some(db_path) = &self.path else {
             return Ok(None);
@@ -1121,9 +1204,18 @@ impl Database {
                         params![pid],
                     )
                     .map_err(|e| e.to_string())?;
+                self.conn
+                    .execute(
+                        "DELETE FROM pool_history_boundaries WHERE player_id = ?1",
+                        params![pid],
+                    )
+                    .map_err(|e| e.to_string())?;
             } else {
                 self.conn
                     .execute("DELETE FROM player_import_info", [])
+                    .map_err(|e| e.to_string())?;
+                self.conn
+                    .execute("DELETE FROM pool_history_boundaries", [])
                     .map_err(|e| e.to_string())?;
             }
             return Ok(ClearRecordsResult {
@@ -1149,12 +1241,19 @@ impl Database {
                 params![pid],
             )
             .map_err(|e| e.to_string())?;
+            tx.execute(
+                "DELETE FROM pool_history_boundaries WHERE player_id = ?1",
+                params![pid],
+            )
+            .map_err(|e| e.to_string())?;
             deleted_count
         } else {
             let deleted_count = tx
                 .execute("DELETE FROM gacha_records", [])
                 .map_err(|e| e.to_string())?;
             tx.execute("DELETE FROM player_import_info", [])
+                .map_err(|e| e.to_string())?;
+            tx.execute("DELETE FROM pool_history_boundaries", [])
                 .map_err(|e| e.to_string())?;
             deleted_count
         };
@@ -1528,6 +1627,25 @@ mod tests {
             assert!(validate_resource_for_pool(pool_type, &limited).is_err());
         }
         assert!(validate_resource_for_pool("1", &limited).is_ok());
+    }
+
+    #[test]
+    fn confirmed_boundary_expires_when_earlier_official_history_arrives() {
+        let db = test_database();
+        db.merge_records(&[record("12", 2001, "2026-01-02 00:00:00")])
+            .unwrap();
+        db.set_pool_boundary_confirmed("10001", "12", true).unwrap();
+        assert!(db
+            .confirmed_pool_boundaries("10001")
+            .unwrap()
+            .contains("12"));
+
+        db.merge_records(&[record("12", 2002, "2026-01-01 00:00:00")])
+            .unwrap();
+        assert!(!db
+            .confirmed_pool_boundaries("10001")
+            .unwrap()
+            .contains("12"));
     }
 
     #[test]
