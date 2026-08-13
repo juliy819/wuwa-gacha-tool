@@ -8,7 +8,17 @@ use crate::gacha::fetcher::{get_display_pool_name, hard_pity_for_pool, is_limite
 use crate::gacha::parser::{ClearRecordsResult, GachaRecord, GameSettings, RecordSummary};
 
 const STANDARD_FIVE_STAR_CHAR_IDS: &[i64] = &[1104, 1203, 1301, 1405, 1503];
-type OccurrenceKey = (String, String, String, i64, i32, String, i32);
+type OccurrenceKey = (
+    String,
+    String,
+    String,
+    i64,
+    i32,
+    String,
+    i32,
+    bool,
+    Option<String>,
+);
 
 fn current_datetime() -> String {
     use chrono::{Local, TimeZone};
@@ -356,6 +366,8 @@ impl Database {
                 record.quality_level,
                 record.resource_type.clone(),
                 record.count,
+                record.is_mock,
+                record.mock_batch_id.clone(),
             );
             let occurrence_no = occurrence_counts.entry(occurrence_key).or_insert(0);
             let current_occurrence_no = *occurrence_no;
@@ -370,15 +382,16 @@ impl Database {
             let current_order = *order_in_timestamp;
             *order_in_timestamp += 1;
 
-            // Imported records are deduplicated only against real records. A
-            // matching mock row must not hide a later official import.
-            let existing_real_id: Option<i64> = tx
+            // Real and mock histories have separate identities. In particular,
+            // a matching mock row must never hide a later official import.
+            let existing_id: Option<i64> = tx
                 .query_row(
                     "SELECT id FROM gacha_records
                      WHERE player_id = ?1 AND card_pool_type = ?2 AND time = ?3
                        AND resource_id = ?4 AND quality_level = ?5 AND resource_type = ?6
-                       AND count = ?7 AND is_mock = 0
-                     ORDER BY occurrence_no ASC LIMIT 1 OFFSET ?8",
+                       AND count = ?7 AND is_mock = ?8
+                       AND (?8 = 0 OR mock_batch_id = ?9 OR (mock_batch_id IS NULL AND ?9 IS NULL))
+                     ORDER BY occurrence_no ASC LIMIT 1 OFFSET ?10",
                     params![
                         record.player_id,
                         record.card_pool_type,
@@ -387,6 +400,8 @@ impl Database {
                         record.quality_level,
                         record.resource_type,
                         record.count,
+                        record.is_mock as i32,
+                        record.mock_batch_id,
                         current_occurrence_no,
                     ],
                     |row| row.get(0),
@@ -394,17 +409,18 @@ impl Database {
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            if let Some(existing_real_id) = existing_real_id {
+            if let Some(existing_id) = existing_id {
                 // 名称和歪率属于展示/派生信息，可随当前规则刷新。
                 tx.execute(
                     "UPDATE gacha_records
                      SET card_pool_name = ?1, name = ?2, is_off_rate = ?3
-                     WHERE id = ?4 AND is_mock = 0",
+                     WHERE id = ?4 AND is_mock = ?5",
                     params![
                         record.card_pool_name,
                         record.name,
                         record.is_off_rate as i32,
-                        existing_real_id,
+                        existing_id,
+                        record.is_mock as i32,
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -430,8 +446,9 @@ impl Database {
                 tx.execute(
                     "INSERT INTO gacha_records
                      (player_id, card_pool_type, card_pool_name, resource_id, quality_level,
-                      resource_type, name, count, time, is_off_rate, occurrence_no, order_in_timestamp)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                      resource_type, name, count, time, is_off_rate, occurrence_no, order_in_timestamp,
+                      is_mock, mock_batch_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                     params![
                         record.player_id,
                         record.card_pool_type,
@@ -445,6 +462,8 @@ impl Database {
                         record.is_off_rate as i32,
                         next_occurrence_no,
                         current_order,
+                        record.is_mock as i32,
+                        record.mock_batch_id,
                     ],
                 )
                 .map_err(|e| e.to_string())?;
@@ -2212,6 +2231,27 @@ mod tests {
         assert_eq!(matching.len(), 2);
         assert_eq!(matching.iter().filter(|record| record.is_mock).count(), 1);
         assert_eq!(matching.iter().filter(|record| !record.is_mock).count(), 1);
+    }
+
+    #[test]
+    fn imported_mock_batch_is_idempotent_and_keeps_its_identity() {
+        let db = test_database();
+        let mut mock = record("3", 21010013, "2026-01-31 23:59:59");
+        mock.name = "训练长刃".to_string();
+        mock.is_mock = true;
+        mock.mock_batch_id = Some("exported-batch".to_string());
+
+        let first = db.merge_records(&[mock.clone(), mock.clone()]).unwrap();
+        let second = db.merge_records(&[mock.clone(), mock]).unwrap();
+        assert_eq!(first.added_count, 2);
+        assert_eq!(second.added_count, 0);
+
+        let records = db.get_all_records(Some("10001")).unwrap();
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().all(|record| record.is_mock));
+        assert!(records
+            .iter()
+            .all(|record| record.mock_batch_id.as_deref() == Some("exported-batch")));
     }
 
     #[test]

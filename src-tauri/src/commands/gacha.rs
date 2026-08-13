@@ -454,6 +454,16 @@ pub fn import_gacha_json(
     result
 }
 
+#[derive(Debug, Deserialize)]
+struct ImportedCardInfo {
+    #[serde(flatten)]
+    card: ApiCardInfo,
+    #[serde(rename = "isMock", default)]
+    is_mock: bool,
+    #[serde(rename = "mockBatchId", default)]
+    mock_batch_id: Option<String>,
+}
+
 fn import_gacha_json_inner(
     state: State<'_, AppState>,
     file_path: String,
@@ -479,22 +489,26 @@ fn import_gacha_json_inner(
             continue;
         }
 
-        let cards: Vec<ApiCardInfo> = serde_json::from_value(cards_value.clone())
+        let cards: Vec<ImportedCardInfo> = serde_json::from_value(cards_value.clone())
             .map_err(|e| format!("解析卡池 {} 数据失败: {}", pool_type_key, e))?;
 
-        for card in cards {
+        for imported in cards {
+            let card = imported.card;
             // API 返回的 cardPoolType 是中文名，反查 pool type ID
             let actual_pool_type = name_to_id
                 .get(&card.card_pool_type)
                 .cloned()
                 .unwrap_or_else(|| pool_type_key.clone());
             let actual_pool_name = get_display_pool_name(&actual_pool_type).to_string();
-            all_records.push(GachaRecord::from_api(
-                &card,
-                &player_id,
-                &actual_pool_name,
-                &actual_pool_type,
-            ));
+            let mut record =
+                GachaRecord::from_api(&card, &player_id, &actual_pool_name, &actual_pool_type);
+            record.is_mock = imported.is_mock;
+            record.mock_batch_id = if imported.is_mock {
+                imported.mock_batch_id
+            } else {
+                None
+            };
+            all_records.push(record);
         }
     }
 
@@ -587,7 +601,7 @@ fn serialize_gacha_records(
                 } else {
                     "武器"
                 };
-                json!({
+                let mut card = json!({
                     "cardPoolType": pool_type_to_api_name(&r.card_pool_type),
                     "resourceId": r.resource_id,
                     "qualityLevel": r.quality_level,
@@ -595,7 +609,19 @@ fn serialize_gacha_records(
                     "name": r.name,
                     "count": r.count,
                     "time": r.time,
-                })
+                });
+                if r.is_mock {
+                    let object = card.as_object_mut().expect("card JSON must be an object");
+                    object.insert("isMock".to_string(), serde_json::Value::Bool(true));
+                    object.insert(
+                        "mockBatchId".to_string(),
+                        r.mock_batch_id
+                            .clone()
+                            .map(serde_json::Value::String)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                }
+                card
             })
             .collect();
         if !cards.is_empty() {
@@ -850,7 +876,7 @@ mod tests {
             time: time.to_string(),
             is_off_rate: false,
             is_mock: id == 99,
-            mock_batch_id: None,
+            mock_batch_id: (id == 99).then(|| "mock-export-batch".to_string()),
         };
         let json = serialize_gacha_records(
             "10001",
@@ -869,6 +895,53 @@ mod tests {
             .map(|record| record["name"].as_str().unwrap())
             .collect();
         assert_eq!(names, ["较新的真实记录", "中间记录", "后插入的旧 mock"]);
+        let mock = value["3"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["name"] == "后插入的旧 mock")
+            .unwrap();
+        assert_eq!(mock["isMock"], true);
+        assert_eq!(mock["mockBatchId"], "mock-export-batch");
+        let real = value["3"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["name"] == "较新的真实记录")
+            .unwrap();
+        assert!(real.get("isMock").is_none());
+        assert!(real.get("mockBatchId").is_none());
+    }
+
+    #[test]
+    fn import_card_metadata_is_optional_and_restores_mock_identity() {
+        let legacy: ImportedCardInfo = serde_json::from_value(json!({
+            "cardPoolType": "角色常驻唤取",
+            "resourceId": 1301,
+            "qualityLevel": 5,
+            "resourceType": "角色",
+            "name": "鉴心",
+            "count": 1,
+            "time": "2026-01-01 00:00:00"
+        }))
+        .unwrap();
+        assert!(!legacy.is_mock);
+        assert!(legacy.mock_batch_id.is_none());
+
+        let mock: ImportedCardInfo = serde_json::from_value(json!({
+            "cardPoolType": "角色常驻唤取",
+            "resourceId": 1301,
+            "qualityLevel": 5,
+            "resourceType": "角色",
+            "name": "鉴心",
+            "count": 1,
+            "time": "2026-01-01 00:00:00",
+            "isMock": true,
+            "mockBatchId": "mock-export-batch"
+        }))
+        .unwrap();
+        assert!(mock.is_mock);
+        assert_eq!(mock.mock_batch_id.as_deref(), Some("mock-export-batch"));
     }
 
     #[test]
