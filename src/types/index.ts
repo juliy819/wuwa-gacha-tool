@@ -199,6 +199,21 @@ export interface GachaInsights {
   pools: PoolInsight[];
 }
 
+export interface GachaImportPreview {
+  player_id: string;
+  imported_count: number;
+  official_count: number;
+  mock_count: number;
+  added_count: number;
+  duplicate_count: number;
+  existing_count: number;
+  total_count_after_import: number;
+  earliest_time: string;
+  latest_time: string;
+  pool_names: string[];
+  file_hash: string;
+}
+
 export interface PoolBoundaryStatus {
   pool_type: string;
   pool_name: string;

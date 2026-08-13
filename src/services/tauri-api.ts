@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
+import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, InsertMockGachaRequest, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -54,8 +54,12 @@ export const gachaApi = {
   },
 
   // 从本地 JSON 文件导入抽卡数据
-  importGachaJson: (filePath: string): Promise<GachaImportResult> => {
-    return invoke('import_gacha_json', { filePath });
+  importGachaJson: (filePath: string, expectedFileHash?: string): Promise<GachaImportResult> => {
+    return invoke('import_gacha_json', { filePath, expectedFileHash });
+  },
+
+  previewGachaJsonImport: (filePath: string): Promise<GachaImportPreview> => {
+    return invoke('preview_gacha_json_import', { filePath });
   },
 
   // 获取所有记录

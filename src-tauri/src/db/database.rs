@@ -342,6 +342,19 @@ impl Database {
 
     /// 增量合并抽卡记录。同池同秒允许出现多条完全相同的记录。
     pub fn merge_records(&self, records: &[GachaRecord]) -> Result<MergeStats, String> {
+        self.merge_records_transactionally(records, true)
+    }
+
+    /// 使用正式合并逻辑计算结果，但回滚所有写入。
+    pub fn preview_merge_records(&self, records: &[GachaRecord]) -> Result<MergeStats, String> {
+        self.merge_records_transactionally(records, false)
+    }
+
+    fn merge_records_transactionally(
+        &self,
+        records: &[GachaRecord],
+        commit: bool,
+    ) -> Result<MergeStats, String> {
         if records.is_empty() {
             return Ok(MergeStats {
                 imported_count: 0,
@@ -479,7 +492,11 @@ impl Database {
                 added_count += 1;
             }
         }
-        tx.commit().map_err(|e| e.to_string())?;
+        if commit {
+            tx.commit().map_err(|e| e.to_string())?;
+        } else {
+            tx.rollback().map_err(|e| e.to_string())?;
+        }
 
         Ok(MergeStats {
             imported_count: records.len(),
@@ -1716,6 +1733,29 @@ mod tests {
         assert_eq!(second.added_count, 0);
         assert_eq!(second.duplicate_count, 2);
         assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn preview_merge_matches_import_without_writing_records() {
+        let db = test_database();
+        let existing = record("1", 101, "2026-06-01 12:00:00");
+        db.merge_records(&[existing.clone()]).unwrap();
+        let snapshot = vec![
+            existing,
+            record("1", 102, "2026-05-01 12:00:00"),
+            record("2", 201, "2026-04-01 12:00:00"),
+        ];
+
+        let preview = db.preview_merge_records(&snapshot).unwrap();
+        assert_eq!(preview.imported_count, 3);
+        assert_eq!(preview.added_count, 2);
+        assert_eq!(preview.duplicate_count, 1);
+        assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 1);
+
+        let imported = db.merge_records(&snapshot).unwrap();
+        assert_eq!(imported.added_count, preview.added_count);
+        assert_eq!(imported.duplicate_count, preview.duplicate_count);
+        assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 3);
     }
 
     #[test]

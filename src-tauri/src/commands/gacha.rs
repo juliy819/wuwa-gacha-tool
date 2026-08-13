@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
 use chrono::{Duration, NaiveDateTime};
@@ -434,6 +436,7 @@ pub async fn fetch_gacha_data_by_url(
 pub fn import_gacha_json(
     state: State<'_, AppState>,
     file_path: String,
+    expected_file_hash: Option<String>,
 ) -> Result<GachaImportResult, String> {
     let extension = std::path::Path::new(&file_path)
         .extension()
@@ -443,7 +446,7 @@ pub fn import_gacha_json(
         target: "app::gacha",
         "event=json_import_started extension={extension}"
     );
-    let result = import_gacha_json_inner(state, file_path);
+    let result = import_gacha_json_inner(state, file_path, expected_file_hash.as_deref());
     if let Err(error) = &result {
         log::error!(
             target: "app::gacha",
@@ -464,12 +467,28 @@ struct ImportedCardInfo {
     mock_batch_id: Option<String>,
 }
 
-fn import_gacha_json_inner(
-    state: State<'_, AppState>,
-    file_path: String,
-) -> Result<GachaImportResult, String> {
+#[derive(Debug, Serialize)]
+pub struct GachaImportPreview {
+    player_id: String,
+    imported_count: usize,
+    official_count: usize,
+    mock_count: usize,
+    added_count: usize,
+    duplicate_count: usize,
+    existing_count: usize,
+    total_count_after_import: usize,
+    earliest_time: String,
+    latest_time: String,
+    pool_names: Vec<String>,
+    file_hash: String,
+}
+
+fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, String), String> {
     let content =
-        std::fs::read_to_string(&file_path).map_err(|e| format!("读取文件失败: {}", e))?;
+        std::fs::read_to_string(file_path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    let file_hash = format!("{:016x}", hasher.finish());
 
     let parsed: HashMap<String, serde_json::Value> =
         serde_json::from_str(&content).map_err(|e| format!("解析 JSON 失败: {}", e))?;
@@ -484,7 +503,6 @@ fn import_gacha_json_inner(
     let mut all_records: Vec<GachaRecord> = Vec::new();
 
     for (pool_type_key, cards_value) in &parsed {
-        // 跳过 uid 字段
         if pool_type_key == "uid" {
             continue;
         }
@@ -494,7 +512,6 @@ fn import_gacha_json_inner(
 
         for imported in cards {
             let card = imported.card;
-            // API 返回的 cardPoolType 是中文名，反查 pool type ID
             let actual_pool_type = name_to_id
                 .get(&card.card_pool_type)
                 .cloned()
@@ -515,6 +532,58 @@ fn import_gacha_json_inner(
     if all_records.is_empty() {
         return Err("JSON 文件中没有有效的抽卡记录".to_string());
     }
+
+    Ok((player_id, all_records, file_hash))
+}
+
+fn ensure_preview_matches_file(expected_file_hash: Option<&str>, file_hash: &str) -> Result<(), String> {
+    if expected_file_hash.is_some_and(|expected| expected != file_hash) {
+        return Err("JSON 文件在预检后发生变化，请重新预检".to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn preview_gacha_json_import(
+    state: State<'_, AppState>,
+    file_path: String,
+) -> Result<GachaImportPreview, String> {
+    let (player_id, records, file_hash) = parse_gacha_json_file(&file_path)?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let stats = db.preview_merge_records(&records)?;
+    let existing_count = db.get_all_records(Some(&player_id))?.len();
+    let earliest_time = records.iter().map(|record| record.time.as_str()).min().unwrap().to_string();
+    let latest_time = records.iter().map(|record| record.time.as_str()).max().unwrap().to_string();
+    let mut pool_names: Vec<_> = records
+        .iter()
+        .map(|record| record.card_pool_name.clone())
+        .collect();
+    pool_names.sort();
+    pool_names.dedup();
+
+    Ok(GachaImportPreview {
+        player_id,
+        imported_count: stats.imported_count,
+        official_count: records.iter().filter(|record| !record.is_mock).count(),
+        mock_count: records.iter().filter(|record| record.is_mock).count(),
+        added_count: stats.added_count,
+        duplicate_count: stats.duplicate_count,
+        existing_count,
+        total_count_after_import: existing_count + stats.added_count,
+        earliest_time,
+        latest_time,
+        pool_names,
+        file_hash,
+    })
+}
+
+fn import_gacha_json_inner(
+    state: State<'_, AppState>,
+    file_path: String,
+    expected_file_hash: Option<&str>,
+) -> Result<GachaImportResult, String> {
+    let (player_id, all_records, file_hash) = parse_gacha_json_file(&file_path)?;
+    ensure_preview_matches_file(expected_file_hash, &file_hash)?;
 
     // JSON 可能是任意时间生成的离线快照，不能作为一次当前官方同步。
     merge_and_load_player(&state, &player_id, &all_records, Vec::new(), false)
@@ -1036,5 +1105,12 @@ mod tests {
         assert!(parse_gacha_time("2026-01-01T00:00:00").is_ok());
         assert!(parse_gacha_time("2026-01-01 00:00").is_err());
         assert!(parse_gacha_time("2026-02-30 00:00:00").is_err());
+    }
+
+    #[test]
+    fn import_requires_a_new_preview_after_file_changes() {
+        assert!(ensure_preview_matches_file(Some("old"), "new").is_err());
+        assert!(ensure_preview_matches_file(Some("same"), "same").is_ok());
+        assert!(ensure_preview_matches_file(None, "legacy-call").is_ok());
     }
 }

@@ -27,7 +27,7 @@ interface GachaStore {
   saveGameDir: (dir: string) => Promise<void>;
   scanGacha: (gameDir: string) => Promise<void>;
   scanGachaByUrl: (url: string) => Promise<void>;
-  importJson: (filePath: string) => Promise<void>;
+  importJson: (filePath: string, expectedFileHash?: string) => Promise<void>;
   clearRecords: (playerId?: string) => Promise<ClearRecordsResult | null>;
   setActivePlayer: (playerId: string | null) => void;
   refreshAll: () => Promise<void>;
@@ -198,10 +198,10 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
     }
   },
 
-  importJson: async (filePath: string) => {
+  importJson: async (filePath: string, expectedFileHash?: string) => {
     set({ scanning: true, error: null });
     try {
-      const result = await gachaApi.importGachaJson(filePath);
+      const result = await gachaApi.importGachaJson(filePath, expectedFileHash);
       const playerId = result.player_id;
 
       recordsRequestId += 1;

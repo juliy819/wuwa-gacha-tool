@@ -14,7 +14,7 @@ import ResonanceIcon from '../components/ResonanceModeIcon';
 import { useClickRipple } from '../hooks/useClickRipple';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
-import type { CloudGachaLink } from '../types';
+import type { CloudGachaLink, GachaImportPreview } from '../types';
 
 type ScanMode = 'dir' | 'cloud' | 'url' | 'json';
 
@@ -40,6 +40,8 @@ export default function Home() {
   const [gameDirInput, setGameDirInput] = useState('');
   const [urlInput, setUrlInput] = useState('');
   const [jsonPath, setJsonPath] = useState('');
+  const [importPreview, setImportPreview] = useState<GachaImportPreview | null>(null);
+  const [previewingImport, setPreviewingImport] = useState(false);
   const [extractedUrl, setExtractedUrl] = useState('');
   const [extractingUrl, setExtractingUrl] = useState(false);
   const [urlExtractError, setUrlExtractError] = useState('');
@@ -161,7 +163,10 @@ export default function Home() {
 
   const handleSelectJson = async () => {
     const selected = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
-    if (selected) setJsonPath(selected as string);
+    if (selected) {
+      setJsonPath(selected as string);
+      setImportPreview(null);
+    }
   };
 
   const handleSelectGameDir = async () => {
@@ -175,8 +180,31 @@ export default function Home() {
 
   const handleImportJson = async () => {
     if (!jsonPath) return;
-    await importJson(jsonPath);
-    if (!useGachaStore.getState().error) setShowScanModal(false);
+    setPreviewingImport(true);
+    try {
+      const preview = await gachaApi.previewGachaJsonImport(jsonPath);
+      setImportPreview(preview);
+      setShowScanModal(false);
+    } catch (error) {
+      addToast('error', String(error));
+    } finally {
+      setPreviewingImport(false);
+    }
+  };
+
+  const handleConfirmImportJson = async () => {
+    if (!jsonPath || !importPreview) return;
+    await importJson(jsonPath, importPreview.file_hash);
+    if (!useGachaStore.getState().error) {
+      setImportPreview(null);
+      setShowScanModal(false);
+    }
+  };
+
+  const closeImportPreview = () => {
+    if (scanning) return;
+    setImportPreview(null);
+    setShowScanModal(true);
   };
 
   const handleExtractUrl = async () => {
@@ -477,13 +505,16 @@ export default function Home() {
                       <input
                         type="text"
                         value={jsonPath}
-                        onChange={(event) => setJsonPath(event.target.value)}
+                        onChange={(event) => {
+                          setJsonPath(event.target.value);
+                          setImportPreview(null);
+                        }}
                         placeholder="选择或输入 JSON 文件路径"
                         className="glass-input flex-1 px-3 py-2 text-sm"
                       />
                       <button
                         onClick={handleSelectJson}
-                        disabled={scanning}
+                        disabled={scanning || previewingImport}
                         className="rounded-lg border border-white/[0.1] px-3 py-2 text-sm text-wave transition-colors hover:text-tide disabled:opacity-50"
                       >
                         选择文件
@@ -512,7 +543,7 @@ export default function Home() {
                       : scanMode === 'url'
                         ? handleScanByUrl
                         : handleImportJson}
-                  disabled={scanning || cloudOpening || (scanMode === 'dir'
+                  disabled={scanning || cloudOpening || previewingImport || (scanMode === 'dir'
                     ? !gameDirInput.trim()
                     : scanMode === 'url'
                       ? !urlInput.trim()
@@ -521,12 +552,12 @@ export default function Home() {
                         : false)}
                   className="tide-btn flex flex-1 items-center justify-center gap-2 px-4 py-2 disabled:opacity-50"
                 >
-                  {scanning || cloudOpening ? (
+                  {scanning || cloudOpening || previewingImport ? (
                     <>
                       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
                         <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
                       </motion.div>
-                      {cloudOpening ? '正在打开...' : scanMode === 'dir' ? '扫描中...' : '导入中...'}
+                      {cloudOpening ? '正在打开...' : previewingImport ? '正在预检...' : scanMode === 'dir' ? '扫描中...' : '导入中...'}
                     </>
                   ) : (
                     <>
@@ -542,7 +573,7 @@ export default function Home() {
                       {scanMode === 'cloud'
                         ? cloudLink ? '导入此链接' : '打开云鸣潮'
                         : scanMode === 'json'
-                          ? '开始导入'
+                          ? '预检导入'
                           : scanMode === 'url'
                             ? '导入链接'
                             : '开始扫描'}
@@ -550,6 +581,68 @@ export default function Home() {
                   )}
                 </button>
               </div>
+        </Modal>
+
+        <Modal
+          open={importPreview !== null}
+          onClose={closeImportPreview}
+          closeDisabled={scanning}
+          className="max-w-lg border-white/[0.08] bg-[#242424]"
+          labelledBy="import-preview-dialog-title"
+        >
+          {importPreview && <>
+            <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-md bg-[#c9ab78]/10 p-2 text-[#c9ab78]"><ResonanceIcon kind="ingress" size={19} /></div>
+                <div>
+                  <h2 id="import-preview-dialog-title" className="text-base font-medium text-tide">确认导入 JSON</h2>
+                  <p className="mt-1 text-xs text-wave">目标 UID {importPreview.player_id} · 当前已有 {importPreview.existing_count.toLocaleString()} 条</p>
+                </div>
+              </div>
+              <ResonanceCloseButton onClick={closeImportPreview} disabled={scanning} />
+            </div>
+
+            <div className="space-y-4 p-5">
+              <div className="grid grid-cols-2 overflow-hidden rounded-md border border-white/[0.06] text-xs">
+                {([
+                  ['文件记录', `${importPreview.imported_count.toLocaleString()} 条`],
+                  ['预计新增', `${importPreview.added_count.toLocaleString()} 条`],
+                  ['正式记录', `${importPreview.official_count.toLocaleString()} 条`],
+                  ['模拟记录', `${importPreview.mock_count.toLocaleString()} 条`],
+                  ['已存在', `${importPreview.duplicate_count.toLocaleString()} 条`],
+                  ['导入后总数', `${importPreview.total_count_after_import.toLocaleString()} 条`],
+                ] as const).map(([label, value]) => (
+                  <div key={label} className="border-b border-white/[0.05] px-3 py-2.5 odd:border-r [&:nth-last-child(-n+2)]:border-b-0">
+                    <div className="text-[10px] text-wave">{label}</div>
+                    <div className={`mt-1 font-medium tabular-nums ${label === '预计新增' ? 'text-[#8fc8be]' : 'text-tide'}`}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-2 text-xs leading-5 text-wave">
+                <div className="flex gap-2"><span className="shrink-0 text-tide">记录范围</span><span>{importPreview.earliest_time} 至 {importPreview.latest_time}</span></div>
+                <div className="flex gap-2"><span className="shrink-0 text-tide">涉及卡池</span><span>{importPreview.pool_names.join('、')}</span></div>
+              </div>
+
+              <div className={`rounded-md border px-3 py-2.5 text-xs leading-5 ${
+                importPreview.added_count > 0
+                  ? 'border-[#6faaa0]/15 bg-[#6faaa0]/[0.04] text-[#9bc8c0]'
+                  : 'border-white/[0.06] bg-white/[0.02] text-wave'
+              }`}>
+                {importPreview.added_count > 0
+                  ? `确认后将向 UID ${importPreview.player_id} 新增 ${importPreview.added_count.toLocaleString()} 条记录；重复记录不会再次写入。`
+                  : '文件中的记录已全部存在，确认导入不会新增数据。'}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <button onClick={closeImportPreview} disabled={scanning} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">返回</button>
+                <button onClick={handleConfirmImportJson} disabled={scanning} className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40">
+                  {scanning && <LoaderCircle size={12} className="animate-spin" />}
+                  {scanning ? '正在导入...' : '确认导入'}
+                </button>
+              </div>
+            </div>
+          </>}
         </Modal>
       </div>
     </PageTransition>
