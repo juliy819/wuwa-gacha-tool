@@ -1,7 +1,11 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
+  ArrowDown,
+  ArrowUp,
+  ChevronsLeft,
+  ChevronsRight,
   LoaderCircle,
 } from 'lucide-react';
 import PageTransition from '../components/PageTransition';
@@ -13,6 +17,7 @@ import ResonanceCloseButton from '../components/ResonanceCloseButton';
 import ResonanceActionIcon from '../components/ResonanceActionIcon';
 import ResonanceIcon from '../components/ResonanceModeIcon';
 import ResourceIcon from '../components/ResourceIcon';
+import type { RecordNavigationState, RecordNavigationTarget } from '../lib/recordNavigation';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 import {
@@ -20,6 +25,7 @@ import {
   QUALITY,
   QUALITY_COLORS,
   QUALITY_LABELS,
+  type AcquisitionRecordInsight,
   type GachaRecord,
   type GachaResource,
   type ResourceAcquisitionInsight,
@@ -27,12 +33,56 @@ import {
 
 type ViewMode = 'list' | 'grid' | 'table';
 type RecordScope = 'five' | 'all';
+type SortOrder = 'desc' | 'asc';
+type ListGrouping = 'five-star' | 'featured';
 type RecordWithPity = { record: GachaRecord; pity: number; isLowerBound: boolean };
+type FeaturedAcquisitionRow = {
+  target: GachaRecord;
+  segments: AcquisitionRecordInsight[];
+  totalPulls: number;
+  isLowerBound: boolean;
+  acquisitionIndex: number;
+};
+type FeaturedListRow =
+  | { kind: 'featured'; row: FeaturedAcquisitionRow }
+  | { kind: 'record'; item: RecordWithPity };
+
+interface RecordPreferences {
+  viewMode: ViewMode;
+  scope: RecordScope;
+  sortOrder: SortOrder;
+  listGrouping: ListGrouping;
+  itemsPerPage: number;
+}
 
 const GRID_ROWS_PER_PAGE = 5;
 const GRID_MIN_ITEM_WIDTH = 108;
 const GRID_GAP = 12;
 const GRID_HORIZONTAL_PADDING = 32;
+const RECORD_PREFERENCES_KEY = 'wuwa-record-preferences-v1';
+const LIMITED_ROLE_POOL_TYPES = new Set(['1', '8', '10', '12']);
+const DEFAULT_RECORD_PREFERENCES: RecordPreferences = {
+  viewMode: 'list',
+  scope: 'five',
+  sortOrder: 'desc',
+  listGrouping: 'five-star',
+  itemsPerPage: 50,
+};
+
+function loadRecordPreferences(): RecordPreferences {
+  try {
+    const stored = JSON.parse(localStorage.getItem(RECORD_PREFERENCES_KEY) ?? '{}') as Partial<RecordPreferences>;
+    return {
+      viewMode: ['list', 'grid', 'table'].includes(stored.viewMode ?? '') ? stored.viewMode! : DEFAULT_RECORD_PREFERENCES.viewMode,
+      scope: stored.scope === 'all' ? 'all' : 'five',
+      sortOrder: stored.sortOrder === 'asc' ? 'asc' : 'desc',
+      listGrouping: stored.listGrouping === 'featured' ? 'featured' : 'five-star',
+      itemsPerPage: [25, 50, 100].includes(stored.itemsPerPage ?? 0) ? stored.itemsPerPage! : DEFAULT_RECORD_PREFERENCES.itemsPerPage,
+    };
+  } catch {
+    return DEFAULT_RECORD_PREFERENCES;
+  }
+}
 
 const getRecordKey = (record: GachaRecord, index: number) =>
   record.id !== undefined && record.id !== null
@@ -99,6 +149,9 @@ function PityBadge({ pity, lowerBound = false }: { pity: number; lowerBound?: bo
 }
 
 export default function RecordsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [preferences] = useState(loadRecordPreferences);
   const records = useGachaStore((state) => state.records);
   const recordsLoaded = useGachaStore((state) => state.recordsLoaded);
   const recordsPlayerId = useGachaStore((state) => state.recordsPlayerId);
@@ -110,12 +163,15 @@ export default function RecordsPage() {
   const error = useGachaStore((state) => state.error);
   const addToast = useGachaStore((state) => state.addToast);
   const [activePoolType, setActivePoolType] = useState('all');
-  const [scope, setScope] = useState<RecordScope>('five');
+  const [scope, setScope] = useState<RecordScope>(preferences.scope);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [viewMode, setViewMode] = useState<ViewMode>(preferences.viewMode);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(preferences.sortOrder);
+  const [listGrouping, setListGrouping] = useState<ListGrouping>(preferences.listGrouping);
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(50);
+  const [pageInput, setPageInput] = useState('1');
+  const [itemsPerPage, setItemsPerPage] = useState(preferences.itemsPerPage);
   const [pageSizeMenuOpen, setPageSizeMenuOpen] = useState(false);
   const [gridColumns, setGridColumns] = useState(10);
   const [resources, setResources] = useState<GachaResource[]>([]);
@@ -125,12 +181,31 @@ export default function RecordsPage() {
   const [mutating, setMutating] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<GachaRecord | null>(null);
   const [acquisitionInsights, setAcquisitionInsights] = useState<ResourceAcquisitionInsight[]>([]);
+  const [acquisitionInsightsLoaded, setAcquisitionInsightsLoaded] = useState(false);
   const [confirmedBoundaryPoolTypes, setConfirmedBoundaryPoolTypes] = useState<string[] | null>(null);
   const [selectedAcquisition, setSelectedAcquisition] = useState<ResourceAcquisitionInsight | null>(null);
+  const [selectedAcquisitionRecordId, setSelectedAcquisitionRecordId] = useState<number | null>(null);
+  const [pendingTarget, setPendingTarget] = useState<RecordNavigationTarget | null>(null);
+  const [highlightedRecordId, setHighlightedRecordId] = useState<number | null>(null);
   const contentRef = useRef<HTMLElement>(null);
   const poolNavRef = useRef<HTMLElement>(null);
   const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
   const previousGridPageSizeRef = useRef(gridColumns * GRID_ROWS_PER_PAGE);
+  const highlightTimerRef = useRef<number | null>(null);
+  const suppressNextPageResetRef = useRef(false);
+
+  useEffect(() => {
+    const nextPreferences = { viewMode, scope, sortOrder, listGrouping, itemsPerPage };
+    try {
+      localStorage.setItem(RECORD_PREFERENCES_KEY, JSON.stringify(nextPreferences));
+    } catch {
+      // Preferences are optional; private storage modes may reject writes.
+    }
+  }, [itemsPerPage, listGrouping, scope, sortOrder, viewMode]);
+
+  useEffect(() => () => {
+    if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+  }, []);
 
   useEffect(() => {
     setActivePoolType('all');
@@ -146,15 +221,22 @@ export default function RecordsPage() {
   useEffect(() => {
     if (!activePlayerId || !recordsLoaded || recordsPlayerId !== activePlayerId) {
       setAcquisitionInsights([]);
+      setAcquisitionInsightsLoaded(!activePlayerId);
       return;
     }
     let current = true;
+    setAcquisitionInsightsLoaded(false);
     gachaApi.getResourceAcquisitionInsights(activePlayerId, true)
       .then((result) => {
         if (!current) return;
         setAcquisitionInsights(result);
+        setAcquisitionInsightsLoaded(true);
       })
-      .catch(() => { if (current) setAcquisitionInsights([]); });
+      .catch(() => {
+        if (!current) return;
+        setAcquisitionInsights([]);
+        setAcquisitionInsightsLoaded(true);
+      });
     return () => { current = false; };
   }, [activePlayerId, recordsLoaded, recordsPlayerId, records.length]);
 
@@ -285,7 +367,7 @@ export default function RecordsPage() {
     return () => observer.disconnect();
   }, []);
 
-  const allRecordsWithPity = useMemo<RecordWithPity[]>(() => {
+  const chronologicalRecordsWithPity = useMemo<RecordWithPity[]>(() => {
     const ordered = [...records].sort((a, b) => {
       const timeOrder = a.time.localeCompare(b.time);
       return timeOrder !== 0 ? timeOrder : (b.id ?? 0) - (a.id ?? 0);
@@ -303,8 +385,13 @@ export default function RecordsPage() {
       pityByPool.set(record.card_pool_type, record.quality_level === QUALITY.FIVE_STAR ? 0 : pity);
       return { record, pity, isLowerBound };
     });
-    return result.reverse();
+    return result;
   }, [records, confirmedBoundaryPoolTypes, confirmedBoundaryPools]);
+
+  const allRecordsWithPity = useMemo(
+    () => sortOrder === 'desc' ? [...chronologicalRecordsWithPity].reverse() : chronologicalRecordsWithPity,
+    [chronologicalRecordsWithPity, sortOrder],
+  );
 
   const poolStats = useMemo(() => {
     const stats = new Map<string, { name: string; count: number; fiveStar: number; currentPity: number }>();
@@ -316,14 +403,15 @@ export default function RecordsPage() {
       if (record.quality_level === QUALITY.FIVE_STAR) entry.fiveStar += 1;
     });
     const resolvedCurrentPity = new Set<string>();
-    allRecordsWithPity.forEach(({ record, pity }) => {
+    for (let index = chronologicalRecordsWithPity.length - 1; index >= 0; index -= 1) {
+      const { record, pity } = chronologicalRecordsWithPity[index];
       const entry = stats.get(record.card_pool_type);
-      if (!entry || resolvedCurrentPity.has(record.card_pool_type)) return;
+      if (!entry || resolvedCurrentPity.has(record.card_pool_type)) continue;
       entry.currentPity = record.quality_level === QUALITY.FIVE_STAR ? 0 : pity;
       resolvedCurrentPity.add(record.card_pool_type);
-    });
+    }
     return stats;
-  }, [records, allRecordsWithPity]);
+  }, [records, chronologicalRecordsWithPity]);
 
   const visiblePoolTypes = useMemo(
     () => POOL_TYPES.filter((pool) => (poolStats.get(pool.type)?.count ?? 0) > 0),
@@ -385,6 +473,78 @@ export default function RecordsPage() {
     });
   }, [allRecordsWithPity, activePoolType, deferredQuery, effectiveScope]);
 
+  const allFeaturedAcquisitions = useMemo(() => {
+    const recordsById = new Map(records.flatMap((record) => record.id == null ? [] : [[record.id, record] as const]));
+    const rows: FeaturedAcquisitionRow[] = [];
+
+    acquisitionInsights.forEach((insight) => {
+      if (!LIMITED_ROLE_POOL_TYPES.has(insight.pool_type)) return;
+      const byAcquisition = new Map<number, AcquisitionRecordInsight[]>();
+      insight.records.forEach((record) => {
+        const group = byAcquisition.get(record.acquisition_index) ?? [];
+        group.push(record);
+        byAcquisition.set(record.acquisition_index, group);
+      });
+      byAcquisition.forEach((segments, acquisitionIndex) => {
+        const targetSegment = segments.find((segment) => segment.is_target);
+        const target = targetSegment?.id == null ? null : recordsById.get(targetSegment.id);
+        if (!target || target.is_off_rate) return;
+        const totalPulls = segments.reduce((sum, segment) => sum + segment.pity, 0);
+        const row = {
+          target,
+          segments,
+          totalPulls,
+          isLowerBound: segments.some((segment) => segment.is_lower_bound),
+          acquisitionIndex,
+        };
+        rows.push(row);
+      });
+    });
+
+    rows.sort((a, b) => {
+      const timeOrder = a.target.time.localeCompare(b.target.time);
+      const stableOrder = timeOrder !== 0 ? timeOrder : (b.target.id ?? 0) - (a.target.id ?? 0);
+      return sortOrder === 'desc' ? -stableOrder : stableOrder;
+    });
+    return rows;
+  }, [acquisitionInsights, records, sortOrder]);
+
+  const featuredAcquisitions = useMemo(() => {
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
+    return allFeaturedAcquisitions.filter(({ target, segments, totalPulls }) => {
+      if (activePoolType !== 'all' && target.card_pool_type !== activePoolType) return false;
+      if (pityRange && (totalPulls < pityRange.min || totalPulls > pityRange.max)) return false;
+      if (!normalizedQuery) return true;
+      return [target.name, target.card_pool_name, target.time, ...segments.map((segment) => segment.name)]
+        .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
+    });
+  }, [activePoolType, allFeaturedAcquisitions, deferredQuery, pityRange]);
+
+  const groupedRecordIds = useMemo(() => new Set(
+    allFeaturedAcquisitions.flatMap(({ segments }) => segments.flatMap(({ id }) => id == null ? [] : [id])),
+  ), [allFeaturedAcquisitions]);
+
+  const featuredListRows = useMemo<FeaturedListRow[]>(() => {
+    const rows: FeaturedListRow[] = featuredAcquisitions.map((row) => ({ kind: 'featured', row }));
+    if (activePoolType === 'all') {
+      filteredRecords.forEach((item) => {
+        const { record } = item;
+        const belongsToCompletedGroup = record.id != null && groupedRecordIds.has(record.id);
+        if (!LIMITED_ROLE_POOL_TYPES.has(record.card_pool_type) || !belongsToCompletedGroup) {
+          rows.push({ kind: 'record', item });
+        }
+      });
+      rows.sort((a, b) => {
+        const aRecord = a.kind === 'featured' ? a.row.target : a.item.record;
+        const bRecord = b.kind === 'featured' ? b.row.target : b.item.record;
+        const timeOrder = aRecord.time.localeCompare(bRecord.time);
+        const stableOrder = timeOrder !== 0 ? timeOrder : (bRecord.id ?? 0) - (aRecord.id ?? 0);
+        return sortOrder === 'desc' ? -stableOrder : stableOrder;
+      });
+    }
+    return rows;
+  }, [activePoolType, featuredAcquisitions, filteredRecords, groupedRecordIds, sortOrder]);
+
   const lowerBoundCount = filteredRecords.filter(({ isLowerBound, record }) => isLowerBound && record.quality_level === QUALITY.FIVE_STAR).length;
   const pagedList = useMemo(() => {
     const totalPages = Math.max(1, Math.ceil(filteredRecords.length / effectiveItemsPerPage));
@@ -397,8 +557,98 @@ export default function RecordsPage() {
       pageItems: filteredRecords.slice(start, start + effectiveItemsPerPage),
     };
   }, [filteredRecords, currentPage, effectiveItemsPerPage]);
+  const featuredPagedList = useMemo(() => {
+    const totalPages = Math.max(1, Math.ceil(featuredListRows.length / effectiveItemsPerPage));
+    const safeCurrentPage = Math.min(currentPage, totalPages);
+    const start = (safeCurrentPage - 1) * effectiveItemsPerPage;
+    return {
+      total: featuredListRows.length,
+      totalPages,
+      safeCurrentPage,
+      pageItems: featuredListRows.slice(start, start + effectiveItemsPerPage),
+    };
+  }, [currentPage, effectiveItemsPerPage, featuredListRows]);
+  const canShowFeaturedGrouping = viewMode === 'list'
+    && (activePoolType === 'all' || LIMITED_ROLE_POOL_TYPES.has(activePoolType));
+  const showingFeaturedAcquisitions = canShowFeaturedGrouping && listGrouping === 'featured';
+  const activePagedList = showingFeaturedAcquisitions ? featuredPagedList : pagedList;
+  const activeLowerBoundCount = showingFeaturedAcquisitions
+    ? featuredListRows.filter((item) => item.kind === 'featured' ? item.row.isLowerBound : item.item.isLowerBound).length
+    : lowerBoundCount;
 
-  useEffect(() => setCurrentPage(1), [activePoolType, scope, query, viewMode, itemsPerPage]);
+  const queueRecordTarget = (target: RecordNavigationTarget) => {
+    suppressNextPageResetRef.current = Boolean(
+      (target.poolType && target.poolType !== activePoolType)
+      || query
+      || scope !== 'five'
+      || listGrouping !== 'five-star',
+    );
+    if (target.poolType) setActivePoolType(target.poolType);
+    setQuery('');
+    setScope('five');
+    setListGrouping('five-star');
+    setPendingTarget(target);
+  };
+
+  useEffect(() => {
+    const target = (location.state as RecordNavigationState | null)?.recordTarget;
+    if (!target || !recordsLoaded || recordsPlayerId !== activePlayerId) return;
+    queueRecordTarget(target);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [activePlayerId, location.pathname, location.state, navigate, recordsLoaded, recordsPlayerId]);
+
+  useEffect(() => {
+    if (!pendingTarget) return;
+    if (pendingTarget.recordId === undefined) {
+      setCurrentPage(1);
+      setPendingTarget(null);
+      return;
+    }
+    const targetIndex = filteredRecords.findIndex(({ record }) => record.id === pendingTarget.recordId);
+    if (targetIndex < 0) {
+      addToast('info', '未在当前玩家记录中找到目标记录');
+      setPendingTarget(null);
+      return;
+    }
+    setCurrentPage(Math.floor(targetIndex / effectiveItemsPerPage) + 1);
+  }, [addToast, effectiveItemsPerPage, filteredRecords, pendingTarget]);
+
+  useEffect(() => {
+    const targetId = pendingTarget?.recordId;
+    if (targetId === undefined || !pagedList.pageItems.some(({ record }) => record.id === targetId)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(`[data-record-id="${targetId}"]`);
+      if (!element) return;
+      const scrollContainer = element.closest<HTMLElement>('.records-view-stage');
+      if (scrollContainer) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const centeredTop = scrollContainer.scrollTop
+          + elementRect.top - containerRect.top
+          - (scrollContainer.clientHeight - elementRect.height) / 2;
+        scrollContainer.scrollTo({ top: Math.max(0, centeredTop), behavior: 'smooth' });
+      } else {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      }
+      setHighlightedRecordId(targetId);
+      if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = window.setTimeout(() => setHighlightedRecordId(null), 2400);
+      setPendingTarget(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pagedList.pageItems, pendingTarget]);
+
+  useEffect(() => {
+    if (suppressNextPageResetRef.current) {
+      suppressNextPageResetRef.current = false;
+      return;
+    }
+    setCurrentPage(1);
+  }, [activePoolType, scope, query, viewMode, itemsPerPage, listGrouping, sortOrder]);
+
+  useEffect(() => {
+    setPageInput(String(activePagedList.safeCurrentPage));
+  }, [activePagedList.safeCurrentPage]);
 
   useEffect(() => {
     if (!pageSizeMenuOpen) return;
@@ -410,6 +660,13 @@ export default function RecordsPage() {
   }, [pageSizeMenuOpen]);
   useEffect(() => setPageSizeMenuOpen(false), [viewMode]);
 
+  const commitPageInput = () => {
+    const parsed = Number.parseInt(pageInput, 10);
+    const nextPage = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), activePagedList.totalPages) : activePagedList.safeCurrentPage;
+    setCurrentPage(nextPage);
+    setPageInput(String(nextPage));
+  };
+
   const totalFiveStar = records.filter((record) => record.quality_level === QUALITY.FIVE_STAR).length;
   const offRateCount = records.filter((record) => record.quality_level === QUALITY.FIVE_STAR && record.is_off_rate).length;
   const recordRange = useMemo(() => {
@@ -420,6 +677,7 @@ export default function RecordsPage() {
 
   const clearFilters = () => {
     setActivePoolType('all');
+    setListGrouping('five-star');
     setScope('five');
     setQuery('');
   };
@@ -427,11 +685,35 @@ export default function RecordsPage() {
   const openAcquisition = (record: GachaRecord) => {
     if (record.quality_level !== QUALITY.FIVE_STAR || (record.is_off_rate && record.card_pool_group === 'UP角色池')) return;
     const insight = acquisitionInsights.find((item) => item.pool_type === record.card_pool_type && item.resource_id === record.resource_id);
-    if (insight) setSelectedAcquisition(insight);
+    if (insight) {
+      setSelectedAcquisition(insight);
+      setSelectedAcquisitionRecordId(record.id ?? null);
+    }
+  };
+
+  const acquisitionRecords = useMemo(
+    () => selectedAcquisition ? [...selectedAcquisition.records].reverse() : [],
+    [selectedAcquisition],
+  );
+  const selectedAcquisitionIndex = acquisitionRecords.findIndex((record) => record.id === selectedAcquisitionRecordId);
+  const stepAcquisition = (direction: -1 | 1) => {
+    if (acquisitionRecords.length === 0) return;
+    const currentIndex = selectedAcquisitionIndex >= 0 ? selectedAcquisitionIndex : 0;
+    const nextIndex = Math.min(Math.max(currentIndex + direction, 0), acquisitionRecords.length - 1);
+    setSelectedAcquisitionRecordId(acquisitionRecords[nextIndex]?.id ?? null);
+  };
+
+  const locateAcquisitionRecord = (recordId: number | null | undefined) => {
+    if (recordId == null || !selectedAcquisition) return;
+    const poolType = selectedAcquisition.pool_type;
+    setSelectedAcquisition(null);
+    setSelectedAcquisitionRecordId(null);
+    queueRecordTarget({ recordId, poolType, source: 'acquisition-trace' });
   };
 
   const cacheValid = recordsLoaded && recordsPlayerId === activePlayerId;
   const recordsLoading = !initialized || !cacheValid || loading;
+  const activeRecordsLoading = recordsLoading || (showingFeaturedAcquisitions && !acquisitionInsightsLoaded);
 
   return (
     <PageTransition>
@@ -532,7 +814,10 @@ export default function RecordsPage() {
                 return (
                   <button
                     key={pool.type}
-                    onClick={() => setActivePoolType(pool.type)}
+                    onClick={() => {
+                      setActivePoolType(pool.type);
+                      if (!LIMITED_ROLE_POOL_TYPES.has(pool.type)) setListGrouping('five-star');
+                    }}
                     data-pool-type={pool.type}
                     data-seq={String(poolIndex + 1).padStart(2, '0')}
                     className={`pool-filter relative w-full py-2.5 pl-9 pr-3 text-left ${
@@ -551,7 +836,7 @@ export default function RecordsPage() {
           </aside>
 
           <main ref={contentRef} className="records-main flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div className="records-toolbar flex min-h-[59px] flex-wrap items-center gap-y-2 px-4 py-3">
+            <div className="records-toolbar flex min-h-[59px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
               <motion.div
                 initial={false}
                 animate={{
@@ -579,6 +864,45 @@ export default function RecordsPage() {
                 </div>
               </motion.div>
 
+              <AnimatePresence initial={false}>
+                {canShowFeaturedGrouping ? (
+                  <motion.div
+                    key="featured-grouping"
+                    initial={{ width: 0, opacity: 0 }}
+                    animate={{ width: 150, opacity: 1 }}
+                    exit={{ width: 0, opacity: 0 }}
+                    transition={{
+                      width: { duration: 0.24, ease: [0.4, 0, 0.2, 1] },
+                      opacity: { duration: 0.16, ease: [0.4, 0, 0.2, 1] },
+                    }}
+                    className="shrink-0 overflow-hidden"
+                  >
+                    <div className="flex w-[150px] items-center gap-0.5 whitespace-nowrap rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="列表统计方式">
+                      {(['five-star', 'featured'] as const).map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setListGrouping(value)}
+                          aria-pressed={listGrouping === value}
+                          className={`relative flex-1 rounded px-2.5 py-1.5 text-xs ${listGrouping === value ? 'text-tide' : 'text-wave hover:text-tide'}`}
+                        >
+                          {listGrouping === value ? (
+                            <motion.span
+                              layoutId="record-list-grouping-indicator"
+                              className="resonance-tab-indicator absolute inset-0"
+                              transition={{ type: 'spring', stiffness: 440, damping: 36 }}
+                            >
+                              <span className="resonance-tab-surface" />
+                            </motion.span>
+                          ) : null}
+                          <span className="relative z-10">{value === 'five-star' ? '五星成本' : activePoolType === 'all' ? 'UP 合并' : 'UP 获取'}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                ) : null}
+              </AnimatePresence>
+
               <div className="relative min-w-[180px] flex-1 md:max-w-[320px]">
                 <input
                   value={query}
@@ -593,10 +917,19 @@ export default function RecordsPage() {
                 )}
               </div>
 
-              <span className="ml-auto text-xs text-wave">找到 <span className="tabular-nums text-tide">{pagedList.total}</span> 条</span>
+              <button
+                type="button"
+                onClick={() => setSortOrder((current) => current === 'desc' ? 'asc' : 'desc')}
+                className="ml-auto flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/[0.06] bg-white/[0.025] px-2.5 text-xs text-wave hover:bg-white/[0.05] hover:text-tide"
+                title={sortOrder === 'desc' ? '当前最新优先，点击切换为最早优先' : '当前最早优先，点击切换为最新优先'}
+              >
+                {sortOrder === 'desc' ? <ArrowDown size={13} /> : <ArrowUp size={13} />}
+                {sortOrder === 'desc' ? '最新优先' : '最早优先'}
+              </button>
+              <span className="shrink-0 whitespace-nowrap text-xs text-wave">找到 <span className="tabular-nums text-tide">{activePagedList.total}</span> 条</span>
             </div>
             <AnimatePresence initial={false}>
-              {lowerBoundCount > 0 && (
+              {activeLowerBoundCount > 0 && (
                 <motion.div
                   key="records-confidence-note"
                   initial={{ height: 0, opacity: 0 }}
@@ -610,14 +943,14 @@ export default function RecordsPage() {
                 >
                   <div className="records-confidence-note">
                     <ResonanceIcon kind="info" size={13} />
-                    <span>本次筛选包含 {lowerBoundCount} 条首个可见五星，抽数以 <b>≥</b> 标记，表示记录范围可能早于当前数据。</span>
+                    <span>本次筛选包含 {activeLowerBoundCount} 条历史起点不完整的{showingFeaturedAcquisitions ? activePoolType === 'all' ? '五星获取' : ' UP 获取' : '首个可见五星'}，抽数以 <b>≥</b> 标记。</span>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
             <AnimatePresence initial={false} mode="wait">
-            {recordsLoading ? (
+            {activeRecordsLoading ? (
               <motion.div
                 key="records-loading"
                 animate={{ opacity: 1, y: 0 }}
@@ -655,7 +988,7 @@ export default function RecordsPage() {
                   <Link to="/" className="instrument-link-button">前往首页</Link>
                 </ResonanceEmptyState>
               </motion.div>
-            ) : pagedList.total === 0 ? (
+            ) : activePagedList.total === 0 ? (
               <motion.div
                 key="records-no-results"
                 initial={{ opacity: 0, y: 5 }}
@@ -664,7 +997,7 @@ export default function RecordsPage() {
                 transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                 className="flex flex-1"
               >
-                <ResonanceEmptyState variant="filter" title="没有符合条件的记录" description="当前卡池、范围或搜索词没有匹配项" compact className="w-full">
+                <ResonanceEmptyState variant="filter" title="没有符合条件的记录" description={showingFeaturedAcquisitions ? activePoolType === 'all' ? '当前筛选下没有匹配的 UP 合并或其它五星记录' : '当前筛选下没有完整归属到 UP 角色的获取记录' : '当前卡池、范围或搜索词没有匹配项'} compact className="w-full">
                   <button onClick={clearFilters} className="text-xs text-[#8fc8be] hover:text-[#b0d9d2]">清除筛选条件</button>
                 </ResonanceEmptyState>
               </motion.div>
@@ -696,7 +1029,7 @@ export default function RecordsPage() {
                         <div className="flex min-w-0 flex-1 items-center gap-2">
                           <div className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]">
                             <div
-                              className="h-full rounded"
+                              className="record-pity-progress-fill h-full rounded"
                               style={{ width: `${Math.min((activePoolCurrentPity / 80) * 100, 100)}%`, backgroundColor: getBarColor(activePoolCurrentPity) }}
                             />
                           </div>
@@ -709,11 +1042,69 @@ export default function RecordsPage() {
                         </div>
                       </div>
                     )}
-                    {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
+                    {showingFeaturedAcquisitions ? featuredPagedList.pageItems.map((item, index) => {
+                      if (item.kind === 'record') {
+                        const { record, pity, isLowerBound } = item.item;
+                        const barColor = getBarColor(pity);
+                        const barWidth = Math.min((pity / 80) * 100, 100);
+                        return (
+                          <div key={getRecordKey(record, index)} data-record-id={record.id} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate) openAcquisition(record); }} className={`record-list-row flex min-h-[64px] items-center gap-3 py-2.5 ${record.is_off_rate ? 'record-row-off-rate' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
+                            <RecordAvatar record={record} />
+                            <div className="w-24 shrink-0 min-w-0">
+                              <div className="truncate text-sm text-tide" title={record.name}>{record.name}</div>
+                              <div className="mt-0.5 text-[10px] tabular-nums text-wave">{record.time.slice(0, 10)}</div>
+                            </div>
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <div className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]">
+                                <div className="record-pity-progress-fill h-full rounded" style={{ width: `${barWidth}%`, backgroundColor: barColor }} />
+                              </div>
+                              <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums" style={{ color: barColor }}>
+                                {isLowerBound ? '≥' : ''}{pity}
+                              </span>
+                              <span className={`w-5 shrink-0 text-center text-[10px] font-bold ${record.is_off_rate ? 'text-[#d84848]' : 'text-transparent'}`}>歪</span>
+                            </div>
+                          </div>
+                        );
+                      }
+                      const { row } = item;
+                      const offRateCount = row.segments.filter((segment) => segment.is_off_rate).length;
+                      return (
+                        <div
+                          key={`featured-${row.target.id ?? row.target.time}-${row.acquisitionIndex}`}
+                          data-record-id={row.target.id}
+                          data-seq={String(index + 1).padStart(2, '0')}
+                          onClick={() => openAcquisition(row.target)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openAcquisition(row.target); }}
+                          className={`record-list-row record-featured-row flex min-h-[72px] cursor-pointer items-center gap-3 py-2.5 ${row.target.id === highlightedRecordId ? 'record-target-highlight' : ''}`}
+                        >
+                          <RecordAvatar record={row.target} />
+                          <div className="w-28 min-w-0 shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <div className="truncate text-sm text-tide" title={row.target.name}>{row.target.name}</div>
+                              {offRateCount > 0 ? <span className="shrink-0 rounded border border-[#d84848]/25 bg-[#d84848]/[0.08] px-1 py-0.5 text-[9px] text-[#d99a9a]">含 {offRateCount} 歪</span> : null}
+                            </div>
+                            <div className="mt-0.5 text-[10px] tabular-nums text-wave">{row.target.time.slice(0, 10)}</div>
+                          </div>
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <div className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]" aria-label={`${row.totalPulls}/160 抽`}>
+                              <div className="record-featured-progress-fill flex h-full overflow-hidden rounded" style={{ width: `${Math.min((row.totalPulls / 160) * 100, 100)}%` }}>
+                                {row.segments.map((segment, segmentIndex) => (
+                                  <span key={`${segment.id ?? segment.time}-${segmentIndex}`} data-off-rate={segment.is_off_rate ? 'true' : 'false'} style={{ flexGrow: segment.pity }} />
+                                ))}
+                              </div>
+                            </div>
+                            <span className="w-10 shrink-0 text-right text-xs font-semibold tabular-nums text-[#d8bd84]">{row.isLowerBound ? '≥' : ''}{row.totalPulls}</span>
+                            <span className="w-8 shrink-0 text-center text-[10px] text-wave">共计</span>
+                          </div>
+                        </div>
+                      );
+                    }) : pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       const barColor = getBarColor(pity);
                       const barWidth = Math.min((pity / 80) * 100, 100);
                       return (
-                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate) openAcquisition(record); }} className={`record-list-row flex min-h-[64px] items-center gap-3 py-2.5 ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
+                        <div key={getRecordKey(record, index)} data-record-id={record.id} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate) openAcquisition(record); }} className={`record-list-row flex min-h-[64px] items-center gap-3 py-2.5 ${record.is_off_rate ? 'record-row-off-rate' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
                           <RecordAvatar record={record} />
                           <div className="w-24 shrink-0 min-w-0">
                             <div className="truncate text-sm text-tide" title={record.name}>{record.name}</div>
@@ -722,7 +1113,7 @@ export default function RecordsPage() {
                           <div className="flex min-w-0 flex-1 items-center gap-2">
                             <div className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]">
                               <div
-                                className="h-full rounded"
+                                className="record-pity-progress-fill h-full rounded"
                                 style={{ width: `${barWidth}%`, backgroundColor: barColor }}
                               />
                             </div>
@@ -761,7 +1152,7 @@ export default function RecordsPage() {
                     )}
                     {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       return (
-                        <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
+                        <div key={getRecordKey(record, index)} data-record-id={record.id} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
                           <div className="relative aspect-square overflow-hidden rounded-md">
                             <RecordAvatar record={record} size="lg" />
                             {record.is_off_rate && <span className="absolute bottom-1.5 left-1.5 rounded bg-[#a64f4f] px-1.5 py-0.5 text-[10px] text-white">歪</span>}
@@ -794,7 +1185,7 @@ export default function RecordsPage() {
                         const isFive = record.quality_level === QUALITY.FIVE_STAR;
                         const color = QUALITY_COLORS[record.quality_level] ?? '#8a8a8a';
                         return (
-                          <tr key={getRecordKey(record, index)} onClick={() => openAcquisition(record)} className={`${isFive ? 'record-table-row-five' : ''} ${isFive && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
+                          <tr key={getRecordKey(record, index)} data-record-id={record.id} onClick={() => openAcquisition(record)} className={`${isFive ? 'record-table-row-five' : ''} ${record.is_off_rate ? 'record-row-off-rate' : ''} ${isFive && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
                             <td className="px-3 py-2 tabular-nums text-wave">{record.time}</td>
                             <td className="truncate px-3 py-2 text-wave" title={record.card_pool_name}>{record.card_pool_name}</td>
                             <td className="px-3 py-2">
@@ -822,12 +1213,13 @@ export default function RecordsPage() {
                     </tbody>
                   </table>
                 )}
+                <div className="records-scroll-tail" aria-hidden="true" />
               </motion.div>
             )}
             </AnimatePresence>
 
             <AnimatePresence initial={false}>
-            {!recordsLoading && !error && pagedList.total > 0 && (
+            {!activeRecordsLoading && !error && activePagedList.total > 0 && (
               <motion.footer
                 key="records-footer"
                 initial={{ opacity: 0, y: 4 }}
@@ -892,12 +1284,25 @@ export default function RecordsPage() {
                 )}
                 <div className="ml-auto flex items-center gap-3 text-xs text-wave">
                   <span>
-                    {(pagedList.safeCurrentPage - 1) * effectiveItemsPerPage + 1}-{Math.min(pagedList.safeCurrentPage * effectiveItemsPerPage, pagedList.total)}，共 {pagedList.total} 条
+                    {(activePagedList.safeCurrentPage - 1) * effectiveItemsPerPage + 1}-{Math.min(activePagedList.safeCurrentPage * effectiveItemsPerPage, activePagedList.total)}，共 {activePagedList.total} 条
                   </span>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={pagedList.safeCurrentPage <= 1} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="上一页"><ResonanceIcon kind="previous" size={14} /></button>
-                    <span className="min-w-14 text-center tabular-nums text-tide">{pagedList.safeCurrentPage}/{pagedList.totalPages}</span>
-                    <button onClick={() => setCurrentPage((page) => Math.min(pagedList.totalPages, page + 1))} disabled={pagedList.safeCurrentPage >= pagedList.totalPages} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="下一页"><ResonanceIcon kind="next" size={14} /></button>
+                    <button onClick={() => setCurrentPage(1)} disabled={activePagedList.safeCurrentPage <= 1} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="第一页" title="第一页"><ChevronsLeft size={14} /></button>
+                    <button onClick={() => setCurrentPage((page) => Math.max(1, page - 1))} disabled={activePagedList.safeCurrentPage <= 1} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="上一页"><ResonanceIcon kind="previous" size={14} /></button>
+                    <label className="flex items-center gap-1 tabular-nums" title="输入页码后按回车跳转">
+                      <input
+                        value={pageInput}
+                        onChange={(event) => setPageInput(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                        onBlur={commitPageInput}
+                        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
+                        inputMode="numeric"
+                        aria-label="跳转页码"
+                        className="glass-input h-7 w-10 px-1 text-center text-xs text-tide"
+                      />
+                      <span>/ {activePagedList.totalPages}</span>
+                    </label>
+                    <button onClick={() => setCurrentPage((page) => Math.min(activePagedList.totalPages, page + 1))} disabled={activePagedList.safeCurrentPage >= activePagedList.totalPages} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="下一页"><ResonanceIcon kind="next" size={14} /></button>
+                    <button onClick={() => setCurrentPage(activePagedList.totalPages)} disabled={activePagedList.safeCurrentPage >= activePagedList.totalPages} className="flex h-7 w-7 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:cursor-not-allowed disabled:opacity-30" aria-label="最后一页" title="最后一页"><ChevronsRight size={14} /></button>
                   </div>
                 </div>
               </motion.footer>
@@ -932,7 +1337,12 @@ export default function RecordsPage() {
                 <h2 id="acquisition-trace-title" className="mt-1 text-lg font-semibold text-tide">{selectedAcquisition.name}</h2>
                 <p className="mt-1 text-xs text-wave">{selectedAcquisition.pool_name} · {selectedAcquisition.target_count} 次获取</p>
               </div>
-              <ResonanceCloseButton onClick={() => setSelectedAcquisition(null)} className="ml-auto shrink-0" />
+              <div className="ml-auto flex shrink-0 items-center gap-1">
+                <button type="button" onClick={() => stepAcquisition(-1)} disabled={selectedAcquisitionIndex <= 0} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-25" title="上一条获取记录" aria-label="上一条获取记录"><ResonanceIcon kind="previous" size={14} /></button>
+                <span className="min-w-12 text-center text-[10px] tabular-nums text-wave">{selectedAcquisitionIndex >= 0 ? selectedAcquisitionIndex + 1 : 1}/{acquisitionRecords.length}</span>
+                <button type="button" onClick={() => stepAcquisition(1)} disabled={selectedAcquisitionIndex >= acquisitionRecords.length - 1} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-25" title="下一条获取记录" aria-label="下一条获取记录"><ResonanceIcon kind="next" size={14} /></button>
+                <ResonanceCloseButton onClick={() => setSelectedAcquisition(null)} className="ml-1 shrink-0" />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-px border-b border-white/[0.07] bg-white/[0.06] sm:grid-cols-4">
               {[
@@ -944,14 +1354,20 @@ export default function RecordsPage() {
             </div>
             <div className="max-h-[58vh] overflow-y-auto px-5 py-4">
               <div className="space-y-2">
-                {[...selectedAcquisition.records].reverse().map((item, index) => (
-                  <div key={`${item.id ?? item.time}-${index}`} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 ${item.is_off_rate ? 'border-[#d84848]/25 bg-[#d84848]/[0.04]' : 'border-white/[0.07] bg-white/[0.025]'}`}>
+                {acquisitionRecords.map((item, index) => (
+                  <button
+                    type="button"
+                    key={`${item.id ?? item.time}-${index}`}
+                    onClick={() => locateAcquisitionRecord(item.id)}
+                    className={`flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${item.id === selectedAcquisitionRecordId ? 'acquisition-record-focused' : item.is_off_rate ? 'border-[#d84848]/25 bg-[#d84848]/[0.04] hover:bg-[#d84848]/[0.08]' : 'border-white/[0.07] bg-white/[0.025] hover:bg-white/[0.05]'}`}
+                    title="在记录页中定位"
+                  >
                     <ResourceIcon resourceId={item.resource_id} alt="" className="h-9 w-9 shrink-0 rounded" fallback={<span className="flex h-9 w-9 items-center justify-center rounded bg-white/[0.06] text-xs text-wave">{item.name.charAt(0)}</span>} />
                     <div className="min-w-0 w-24 shrink-0"><div className="truncate text-xs text-tide">{item.name}</div><div className="mt-0.5 text-[10px] text-wave">{item.is_off_rate ? `第 ${String(item.acquisition_index).padStart(2, '0')} 次 · 前置歪` : `第 ${String(item.acquisition_index).padStart(2, '0')} 次获取`}</div></div>
-                    <div className="relative h-4 min-w-0 flex-1 overflow-hidden rounded bg-white/[0.06]"><div className="h-full rounded" style={{ width: `${Math.min(item.pity / (selectedAcquisition.pool_type === '5' ? 50 : 80) * 100, 100)}%`, background: item.is_off_rate ? '#d84848' : '#d8bd84' }} /></div>
+                    <div className="relative h-4 min-w-0 flex-1 overflow-hidden rounded bg-white/[0.06]"><div className="record-pity-progress-fill h-full rounded" style={{ width: `${Math.min(item.pity / (selectedAcquisition.pool_type === '5' ? 50 : 80) * 100, 100)}%`, backgroundColor: getBarColor(item.pity) }} /></div>
                     <PityBadge pity={item.pity} lowerBound={item.is_lower_bound} />
                     <span className="hidden w-20 shrink-0 text-right text-[10px] tabular-nums text-wave sm:block">{item.time.slice(0, 10)}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
