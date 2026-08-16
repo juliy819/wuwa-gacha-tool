@@ -8,6 +8,7 @@ import PageTransition from '../components/PageTransition';
 import PageSignalField from '../components/PageSignalField';
 import ResonanceEmptyState from '../components/ResonanceEmptyState';
 import ResonanceIcon from '../components/ResonanceModeIcon';
+import ThemedDateInput from '../components/ThemedDateInput';
 import { recordsPath } from '../lib/recordNavigation';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
@@ -384,10 +385,14 @@ export default function AnalyticsPage() {
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
   const initialized = useGachaStore((state) => state.initialized);
   const activeRecordCount = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId)?.record_count ?? 0);
+  const activeSummary = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId) ?? null);
   const [includeMock, setIncludeMock] = useState(false);
   const [insights, setInsights] = useState<GachaInsights | null>(null);
   const [activePoolType, setActivePoolType] = useState<string | null>(null);
   const [plannedPulls, setPlannedPulls] = useState(20);
+  const [dateMode, setDateMode] = useState<'all' | 'custom'>('all');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [distributionDetail, setDistributionDetail] = useState<{ kind: 'five-star' | 'featured'; bin: PityDistributionBin } | null>(null);
   const poolNavRef = useRef<HTMLElement>(null);
   const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
@@ -398,7 +403,16 @@ export default function AnalyticsPage() {
       return;
     }
     let current = true;
-    gachaApi.getGachaInsights(activePlayerId, includeMock)
+    if (dateMode === 'custom' && (!startDate || !endDate || startDate > endDate)) {
+      setInsights(null);
+      return;
+    }
+    gachaApi.getGachaInsights(
+      activePlayerId,
+      includeMock,
+      dateMode === 'custom' ? startDate : undefined,
+      dateMode === 'custom' ? endDate : undefined,
+    )
       .then((result) => {
         if (!current) return;
         setInsights(result);
@@ -408,7 +422,15 @@ export default function AnalyticsPage() {
       })
       .catch(() => { if (current) setInsights(null); });
     return () => { current = false; };
-  }, [activePlayerId, activeRecordCount, includeMock]);
+  }, [activePlayerId, activeRecordCount, dateMode, endDate, includeMock, startDate]);
+
+  const setAnalysisDateMode = (mode: 'all' | 'custom') => {
+    setDateMode(mode);
+    if (mode === 'custom') {
+      setStartDate((current) => current || activeSummary?.earliest_time.slice(0, 10) || '');
+      setEndDate((current) => current || activeSummary?.latest_time.slice(0, 10) || '');
+    }
+  };
 
   useLayoutEffect(() => {
     const nav = poolNavRef.current;
@@ -445,8 +467,8 @@ export default function AnalyticsPage() {
     [activePool],
   );
   const forecast = useMemo(
-    () => activePool && SOFT_PITY_POOL_TYPES.has(activePool.pool_type) ? buildGachaForecast(activePool) : null,
-    [activePool],
+    () => dateMode === 'all' && activePool && SOFT_PITY_POOL_TYPES.has(activePool.pool_type) ? buildGachaForecast(activePool) : null,
+    [activePool, dateMode],
   );
   const forecastOption = useMemo(() => forecast ? buildForecastOption(forecast) : null, [forecast]);
   const forecastNextTen = forecast
@@ -526,6 +548,16 @@ export default function AnalyticsPage() {
               <span>分析样本</span>
               <strong>{insights?.total_records?.toLocaleString() ?? 0}</strong>
               <small>{includeMock ? '官方 + 模拟记录' : '仅官方记录'}</small>
+              <div className="mt-3 flex rounded-md border border-white/[0.06] bg-white/[0.025] p-0.5">
+                {(['all', 'custom'] as const).map((mode) => <button type="button" key={mode} onClick={() => setAnalysisDateMode(mode)} className={`flex-1 rounded px-2 py-1.5 text-[10px] ${dateMode === mode ? 'bg-white/[0.08] text-tide' : 'text-wave hover:text-tide'}`}>{mode === 'all' ? '全部时间' : '自定义'}</button>)}
+              </div>
+              {dateMode === 'custom' ? (
+                <div className="mt-2 space-y-1.5">
+                  <ThemedDateInput value={startDate} min={activeSummary?.earliest_time.slice(0, 10)} max={endDate || activeSummary?.latest_time.slice(0, 10)} onChange={setStartDate} label="分析开始日期" />
+                  <ThemedDateInput value={endDate} min={startDate || activeSummary?.earliest_time.slice(0, 10)} max={activeSummary?.latest_time.slice(0, 10)} onChange={setEndDate} label="分析结束日期" />
+                  <small className={startDate && endDate && startDate <= endDate ? '' : 'text-[#d99a9a]'}>{startDate && endDate && startDate <= endDate ? '范围首段按不完整历史处理' : '请选择有效日期范围'}</small>
+                </div>
+              ) : null}
             </div>
             {insights && insights.pools.length > 0 ? (
               <nav ref={poolNavRef} className="analysis-pool-list" aria-label="分析卡池">
@@ -551,7 +583,7 @@ export default function AnalyticsPage() {
                       className="analysis-pool-button relative"
                     >
                       <span className="analysis-pool-name">{pool.pool_name}</span>
-                      <span className="analysis-pool-pity">当前 {pool.current_pity}/{hardPity}</span>
+                      <span className="analysis-pool-pity">{dateMode === 'all' ? `当前 ${pool.current_pity}/${hardPity}` : '范围样本'}</span>
                       <span className="analysis-pool-sample">五星 {pool.five_star_count} · 样本 {pool.complete_interval_count}</span>
                       <span className="analysis-pool-progress"><i style={{ width: `${Math.min(100, (pool.current_pity / hardPity) * 100)}%` }} /></span>
                     </button>
@@ -563,7 +595,9 @@ export default function AnalyticsPage() {
 
           <main className="analysis-main">
             <div className="analysis-content">
-              {!activePlayerId && initialized ? (
+              {dateMode === 'custom' && (!startDate || !endDate || startDate > endDate) ? (
+                <ResonanceEmptyState variant="filter" title="请选择有效日期范围" description="调整开始和结束日期，或切换回全部时间" />
+              ) : !activePlayerId && initialized ? (
                 <ResonanceEmptyState variant="records" title="暂无可分析记录" description="完成一次扫描或导入后，这里会显示历史出金表现" />
               ) : activePool ? (
                 <motion.div key={`${activePool.pool_type}-${includeMock}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -576,11 +610,11 @@ export default function AnalyticsPage() {
                       <button type="button" onClick={() => openPoolRecords()} className="ml-auto flex h-8 items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/[0.025] px-3 text-xs text-wave hover:bg-white/[0.05] hover:text-tide">
                         查看记录 <ArrowRight size={13} />
                       </button>
-                      <div className="analysis-current-pity">
+                      {dateMode === 'all' ? <div className="analysis-current-pity">
                         <span>当前已垫</span>
                         <strong>{activePool.current_pity}</strong>
                         <small>/ {activeHardPity} 抽</small>
-                      </div>
+                      </div> : <div className="analysis-current-pity"><span>分析范围</span><strong className="!text-base">自定义</strong><small>{startDate} 至 {endDate}</small></div>}
                     </div>
                     <div className="analysis-method-note">
                       <ResonanceIcon kind="traces" size={15} />
@@ -693,6 +727,10 @@ export default function AnalyticsPage() {
                         </div>
                       </div>
                     </section>
+                  ) : dateMode === 'custom' ? (
+                    <section className="analysis-forecast-unavailable">
+                      <div><span className="analysis-section-index">RANGE ANALYSIS</span><h2>范围分析不显示当前垫抽预测</h2><p>自定义日期会截断连续抽卡历史。为避免把范围末尾误当成真实当前保底，请切换到“全部时间”查看条件概率和抽数规划器。</p></div>
+                    </section>
                   ) : activePool.pool_type === '5' ? (
                     <section className="analysis-forecast-unavailable">
                       <div>
@@ -753,7 +791,13 @@ export default function AnalyticsPage() {
                     </section>
                   ) : null}
                 </motion.div>
-              ) : null}
+              ) : (
+                <ResonanceEmptyState
+                  variant="filter"
+                  title={dateMode === 'custom' && (!startDate || !endDate || startDate > endDate) ? '请选择有效日期范围' : '当前范围没有可分析记录'}
+                  description={dateMode === 'custom' ? '调整开始和结束日期，或切换回全部时间' : '完成一次扫描或导入后，这里会显示历史出金表现'}
+                />
+              )}
             </div>
           </main>
         </div>

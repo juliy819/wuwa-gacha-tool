@@ -68,8 +68,8 @@ export const gachaApi = {
   },
 
   // 导出指定玩家的抽卡数据为 JSON 文件
-  exportGachaJson: (playerId: string, filePath: string): Promise<void> => {
-    return invoke('export_gacha_json', { playerId, filePath });
+  exportGachaJson: (playerId: string, filePath: string, startDate?: string, endDate?: string): Promise<void> => {
+    return invoke('export_gacha_json', { playerId, filePath, startDate, endDate });
   },
 
   // 获取所有玩家 ID
@@ -87,8 +87,8 @@ export const gachaApi = {
     return invoke('get_stats', { playerId });
   },
 
-  getGachaInsights: (playerId: string, includeMock: boolean): Promise<GachaInsights> => {
-    return invoke('get_gacha_insights', { playerId, includeMock });
+  getGachaInsights: (playerId: string, includeMock: boolean, startDate?: string, endDate?: string): Promise<GachaInsights> => {
+    return invoke('get_gacha_insights', { playerId, includeMock, startDate, endDate });
   },
 
   getCharacterPullInsights: (playerId?: string, includeMock = false): Promise<CharacterPullInsight[]> => {

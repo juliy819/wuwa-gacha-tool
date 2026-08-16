@@ -3,7 +3,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
-use chrono::{Duration, NaiveDateTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -631,6 +631,8 @@ pub fn export_gacha_json(
     state: State<'_, AppState>,
     player_id: String,
     file_path: String,
+    start_date: Option<String>,
+    end_date: Option<String>,
 ) -> Result<(), String> {
     log::info!(
         target: "app::gacha",
@@ -638,7 +640,11 @@ pub fn export_gacha_json(
         masked_player_id(&player_id)
     );
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let records = db.get_all_records(Some(&player_id))?;
+    let records = filter_records_by_date(
+        db.get_all_records(Some(&player_id))?,
+        start_date.as_deref(),
+        end_date.as_deref(),
+    )?;
 
     if records.is_empty() {
         return Err("该玩家没有抽卡记录".to_string());
@@ -655,6 +661,33 @@ pub fn export_gacha_json(
     );
 
     Ok(())
+}
+
+fn filter_records_by_date(
+    records: Vec<GachaRecord>,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+) -> Result<Vec<GachaRecord>, String> {
+    let parse = |value: &str| {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| format!("日期格式无效: {value}"))
+    };
+    let start = start_date.map(parse).transpose()?;
+    let end = end_date.map(parse).transpose()?;
+    if start.zip(end).is_some_and(|(start, end)| start > end) {
+        return Err("开始日期不能晚于结束日期".to_string());
+    }
+
+    Ok(records
+        .into_iter()
+        .filter(|record| {
+            let Ok(date) =
+                NaiveDate::parse_from_str(record.time.get(..10).unwrap_or(""), "%Y-%m-%d")
+            else {
+                return false;
+            };
+            start.is_none_or(|value| date >= value) && end.is_none_or(|value| date <= value)
+        })
+        .collect())
 }
 
 // Serializes official-compatible JSON independently from SQLite insertion order.
@@ -790,12 +823,20 @@ pub fn get_gacha_insights(
     state: State<'_, AppState>,
     player_id: Option<String>,
     include_mock: bool,
+    start_date: Option<String>,
+    end_date: Option<String>,
 ) -> Result<GachaInsights, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let records = db.get_all_records(player_id.as_deref())?;
-    let confirmed = match player_id.as_deref() {
-        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
-        None => Default::default(),
+    let range_active = start_date.is_some() || end_date.is_some();
+    let records = filter_records_by_date(
+        db.get_all_records(player_id.as_deref())?,
+        start_date.as_deref(),
+        end_date.as_deref(),
+    )?;
+    let confirmed = match (range_active, player_id.as_deref()) {
+        (true, _) => Default::default(),
+        (false, Some(player_id)) => db.confirmed_pool_boundaries(player_id)?,
+        (false, None) => Default::default(),
     };
     Ok(GachaInsights::from_records_with_boundaries(
         &records,
@@ -968,6 +1009,42 @@ pub fn validate_game_dir(game_dir: String) -> GameDirValidation {
 mod tests {
     use super::*;
     use rand::SeedableRng;
+
+    fn dated_record(id: i64, time: &str) -> GachaRecord {
+        GachaRecord {
+            id: Some(id),
+            player_id: "10001".to_string(),
+            card_pool_type: "1".to_string(),
+            card_pool_name: "角色活动唤取".to_string(),
+            card_pool_group: "UP角色池".to_string(),
+            resource_id: id,
+            quality_level: 3,
+            resource_type: "weapon".to_string(),
+            name: format!("record-{id}"),
+            count: 1,
+            time: time.to_string(),
+            is_off_rate: false,
+            is_mock: false,
+            mock_batch_id: None,
+        }
+    }
+
+    #[test]
+    fn date_range_filter_is_inclusive_and_rejects_reverse_ranges() {
+        let records = vec![
+            dated_record(1, "2026-01-01 00:00:00"),
+            dated_record(2, "2026-01-15 12:30:00"),
+            dated_record(3, "2026-01-31 23:59:59"),
+        ];
+        let filtered =
+            filter_records_by_date(records.clone(), Some("2026-01-15"), Some("2026-01-31"))
+                .unwrap();
+        assert_eq!(
+            filtered.iter().map(|record| record.id).collect::<Vec<_>>(),
+            vec![Some(2), Some(3)]
+        );
+        assert!(filter_records_by_date(records, Some("2026-02-01"), Some("2026-01-01")).is_err());
+    }
 
     #[test]
     fn filler_generation_never_has_ten_consecutive_three_stars() {

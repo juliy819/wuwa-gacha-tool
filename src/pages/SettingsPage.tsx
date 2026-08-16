@@ -18,6 +18,7 @@ import ResonanceCloseButton from '../components/ResonanceCloseButton';
 import ResonanceActionIcon from '../components/ResonanceActionIcon';
 import ResonanceIcon from '../components/ResonanceModeIcon';
 import ResonanceEmptyState from '../components/ResonanceEmptyState';
+import ThemedDateInput from '../components/ThemedDateInput';
 import { useUiFeedback } from '../hooks/useUiFeedback';
 import { playUiFeedback } from '../lib/uiFeedback';
 import { gachaApi } from '../services/tauri-api';
@@ -32,6 +33,7 @@ import {
 import type { GameDirValidation, PoolBoundaryStatus, RecordSummary } from '../types';
 
 type DeleteTarget = { playerId: string | null };
+type ExportTarget = { playerId: string; earliestDate: string; latestDate: string };
 
 // 去除 release notes 末尾由模板自动生成的下载提示和自动生成标记
 // 这些内容在 GitHub Release 页面有意义，但出现在更新弹窗中不合适
@@ -60,6 +62,11 @@ export default function SettingsPage() {
   const [summaryLoading, setSummaryLoading] = useState(pools.length > 0 && storeSummaries.length === 0);
   const [summaryError, setSummaryError] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  const [exportTarget, setExportTarget] = useState<ExportTarget | null>(null);
+  const [exportMode, setExportMode] = useState<'all' | 'custom'>('all');
+  const [exportStartDate, setExportStartDate] = useState('');
+  const [exportEndDate, setExportEndDate] = useState('');
+  const [exporting, setExporting] = useState(false);
   const [confirmationText, setConfirmationText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [lastBackupPath, setLastBackupPath] = useState<string | null>(null);
@@ -327,18 +334,44 @@ export default function SettingsPage() {
     }
   };
 
-  const handleExport = async (playerId: string) => {
+  const openExportDialog = (playerId: string, summary?: RecordSummary) => {
+    const earliestDate = summary?.earliest_time.slice(0, 10) ?? '';
+    const latestDate = summary?.latest_time.slice(0, 10) ?? '';
+    setExportTarget({ playerId, earliestDate, latestDate });
+    setExportMode('all');
+    setExportStartDate(earliestDate);
+    setExportEndDate(latestDate);
+  };
+
+  const closeExportDialog = () => {
+    if (exporting) return;
+    setExportTarget(null);
+  };
+
+  const handleExport = async () => {
+    if (!exportTarget) return;
+    const customRange = exportMode === 'custom';
+    if (customRange && (!exportStartDate || !exportEndDate || exportStartDate > exportEndDate)) return;
     try {
-      const today = new Date().toISOString().slice(0, 10);
+      setExporting(true);
+      const suffix = customRange ? `${exportStartDate}_${exportEndDate}` : 'all';
       const path = await save({
-        defaultPath: `uid_${playerId}_${today}.json`,
+        defaultPath: `uid_${exportTarget.playerId}_${suffix}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
       if (!path) return;
-      await gachaApi.exportGachaJson(playerId, path);
-      addToast('success', '导出成功');
+      await gachaApi.exportGachaJson(
+        exportTarget.playerId,
+        path,
+        customRange ? exportStartDate : undefined,
+        customRange ? exportEndDate : undefined,
+      );
+      setExportTarget(null);
+      addToast('success', customRange ? '指定时间范围记录已导出' : '全部记录已导出');
     } catch (e) {
       addToast('error', `导出失败: ${String(e)}`);
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -717,7 +750,7 @@ export default function SettingsPage() {
                               {!boundaries ? <LoaderCircle size={11} className="animate-spin" /> : <ResonanceIcon kind="traces" size={12} />}
                               历史起点
                             </button>
-                            <button onClick={() => handleExport(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
+                            <button onClick={() => openExportDialog(playerId, summary)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
                             <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon></button>
                           </div>
                         </div>
@@ -740,6 +773,54 @@ export default function SettingsPage() {
             </motion.section>
           </div>
         </div>
+
+        <Modal
+          open={exportTarget !== null}
+          onClose={closeExportDialog}
+          closeDisabled={exporting}
+          className="max-w-md border-white/[0.1] bg-[#242424]"
+          labelledBy="export-dialog-title"
+        >
+          {exportTarget ? <>
+            <div className="flex items-start justify-between border-b border-white/[0.06] p-5">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 rounded-md bg-[#8fc8be]/10 p-2 text-[#8fc8be]"><ResonanceIcon kind="download" size={19} /></div>
+                <div>
+                  <h2 id="export-dialog-title" className="text-base font-medium text-tide">导出抽卡记录</h2>
+                  <p className="mt-1 text-xs text-wave">UID {exportTarget.playerId}</p>
+                </div>
+              </div>
+              <ResonanceCloseButton onClick={closeExportDialog} disabled={exporting} />
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="grid grid-cols-2 rounded-md border border-white/[0.07] bg-white/[0.025] p-0.5">
+                {(['all', 'custom'] as const).map((mode) => (
+                  <button type="button" key={mode} onClick={() => setExportMode(mode)} className={`rounded px-3 py-2 text-xs ${exportMode === mode ? 'bg-white/[0.09] text-tide' : 'text-wave hover:text-tide'}`}>
+                    {mode === 'all' ? '全部记录' : '指定时间'}
+                  </button>
+                ))}
+              </div>
+              {exportMode === 'custom' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div><span className="mb-1.5 block text-[10px] text-wave">开始日期</span><ThemedDateInput value={exportStartDate} min={exportTarget.earliestDate} max={exportEndDate || exportTarget.latestDate} onChange={setExportStartDate} label="导出开始日期" className="h-9 px-3 text-xs" /></div>
+                  <div><span className="mb-1.5 block text-[10px] text-wave">结束日期</span><ThemedDateInput value={exportEndDate} min={exportStartDate || exportTarget.earliestDate} max={exportTarget.latestDate} onChange={setExportEndDate} label="导出结束日期" className="h-9 px-3 text-xs" /></div>
+                  <p className={`col-span-2 text-[10px] ${exportStartDate && exportEndDate && exportStartDate <= exportEndDate ? 'text-wave' : 'text-[#d99a9a]'}`}>
+                    {exportStartDate && exportEndDate && exportStartDate <= exportEndDate ? `将导出 ${exportStartDate} 至 ${exportEndDate} 的记录（含首尾两天）` : '请选择有效日期范围'}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs leading-5 text-wave">导出该 UID 当前保存的全部抽卡记录，文件格式与 JSON 导入兼容。</p>
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={closeExportDialog} disabled={exporting} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">取消</button>
+                <button type="button" onClick={() => void handleExport()} disabled={exporting || (exportMode === 'custom' && (!exportStartDate || !exportEndDate || exportStartDate > exportEndDate))} className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40">
+                  {exporting ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="download" size={13} />}
+                  {exporting ? '导出中' : '选择位置并导出'}
+                </button>
+              </div>
+            </div>
+          </> : null}
+        </Modal>
 
         <Modal
           open={deleteTarget !== null}
