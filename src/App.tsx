@@ -5,6 +5,7 @@ import Navbar from './components/Navbar';
 import Toast from './components/Toast';
 import StatusBar from './components/StatusBar';
 import ResonancePulseLayer from './components/ResonancePulseLayer';
+import ImportSummaryPanel from './components/ImportSummaryPanel';
 import Home from './pages/Home';
 import { useGachaStore } from './store/useGachaStore';
 import { useUpdateStore } from './store/useUpdateStore';
@@ -55,6 +56,7 @@ export default function App() {
           <main className="relative flex-1 overflow-hidden">
             <AnimatedRoutes />
           </main>
+          <ImportSummaryPanel />
           <Toast messages={toastMessages} onRemove={removeToast} />
           <StatusBar />
         </div>

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { gachaApi } from '../services/tauri-api';
 import { playUiFeedback } from '../lib/uiFeedback';
-import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, RecordSummary, ToastMessage } from '../types';
+import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, ImportCompletionSummary, RecordSummary, ToastMessage } from '../types';
 
 interface GachaStore {
   records: GachaRecord[];
@@ -16,6 +16,7 @@ interface GachaStore {
   scanning: boolean;
   error: string | null;
   toastMessages: ToastMessage[];
+  lastImportSummary: ImportCompletionSummary | null;
   activePlayerId: string | null;
   initialized: boolean;
 
@@ -26,13 +27,14 @@ interface GachaStore {
   fetchSettings: () => Promise<void>;
   saveGameDir: (dir: string) => Promise<void>;
   scanGacha: (gameDir: string) => Promise<void>;
-  scanGachaByUrl: (url: string) => Promise<void>;
+  scanGachaByUrl: (url: string, source?: 'url' | 'cloud') => Promise<void>;
   importJson: (filePath: string, expectedFileHash?: string) => Promise<void>;
   clearRecords: (playerId?: string) => Promise<ClearRecordsResult | null>;
   setActivePlayer: (playerId: string | null) => void;
   refreshAll: () => Promise<void>;
   addToast: (type: ToastMessage['type'], message: string) => void;
   removeToast: (id: string) => void;
+  dismissImportSummary: () => void;
 }
 
 let recordsRequestId = 0;
@@ -51,6 +53,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   scanning: false,
   error: null,
   toastMessages: [],
+  lastImportSummary: null,
   activePlayerId: null,
   initialized: false,
 
@@ -141,6 +144,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         error: null,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
+        lastImportSummary: { ...result, source: 'game-dir', completed_at: Date.now() },
       });
 
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
@@ -148,21 +152,14 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         await get().fetchStats(playerId);
       }
 
-      get().addToast(
-        'success',
-        `扫描完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
-      );
       void playUiFeedback('scan-complete');
-      if (result.failed_pools.length > 0) {
-        get().addToast('info', `${result.failed_pools.length} 个卡池获取失败，已保留原有数据`);
-      }
     } catch (e) {
       set({ error: String(e), scanning: false });
       get().addToast('error', String(e));
     }
   },
 
-  scanGachaByUrl: async (url: string) => {
+  scanGachaByUrl: async (url: string, source = 'url') => {
     set({ scanning: true, error: null });
     try {
       const result = await gachaApi.fetchGachaDataByUrl(url);
@@ -177,6 +174,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         error: null,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
+        lastImportSummary: { ...result, source, completed_at: Date.now() },
       });
 
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
@@ -184,14 +182,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         await get().fetchStats(playerId);
       }
 
-      get().addToast(
-        'success',
-        `扫描完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
-      );
       void playUiFeedback('scan-complete');
-      if (result.failed_pools.length > 0) {
-        get().addToast('info', `${result.failed_pools.length} 个卡池获取失败，已保留原有数据`);
-      }
     } catch (e) {
       set({ error: String(e), scanning: false });
       get().addToast('error', String(e));
@@ -213,6 +204,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         error: null,
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
+        lastImportSummary: { ...result, source: 'json', completed_at: Date.now() },
       });
 
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
@@ -220,10 +212,6 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         await get().fetchStats(playerId);
       }
 
-      get().addToast(
-        'success',
-        `导入完成：新增 ${result.added_count} 条，重复 ${result.duplicate_count} 条，当前共 ${result.total_count} 条`,
-      );
       void playUiFeedback('data-rebuilt');
     } catch (e) {
       set({ error: String(e), scanning: false });
@@ -287,4 +275,6 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   removeToast: (id) => {
     set(s => ({ toastMessages: s.toastMessages.filter(m => m.id !== id) }));
   },
+
+  dismissImportSummary: () => set({ lastImportSummary: null }),
 }));

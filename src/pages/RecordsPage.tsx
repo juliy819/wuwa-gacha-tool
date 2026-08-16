@@ -577,15 +577,18 @@ export default function RecordsPage() {
     : lowerBoundCount;
 
   const queueRecordTarget = (target: RecordNavigationTarget) => {
+    const targetScope = target.scope ?? 'five';
     suppressNextPageResetRef.current = Boolean(
       (target.poolType && target.poolType !== activePoolType)
       || query
-      || scope !== 'five'
+      || targetScope !== scope
+      || (target.viewMode && target.viewMode !== viewMode)
       || listGrouping !== 'five-star',
     );
     if (target.poolType) setActivePoolType(target.poolType);
     setQuery('');
-    setScope('five');
+    setScope(targetScope);
+    if (target.viewMode) setViewMode(target.viewMode);
     setListGrouping('five-star');
     setPendingTarget(target);
   };

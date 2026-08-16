@@ -45,6 +45,7 @@ pub struct GachaImportResult {
     pub records: Vec<GachaRecord>,
     pub imported_count: usize,
     pub added_count: usize,
+    pub added_records: Vec<GachaRecord>,
     pub duplicate_count: usize,
     pub total_count: usize,
     pub failed_pools: Vec<String>,

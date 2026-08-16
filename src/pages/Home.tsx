@@ -257,7 +257,7 @@ export default function Home() {
 
   const handleImportCloudUrl = async () => {
     if (!cloudLink) return;
-    await scanGachaByUrl(cloudLink.url);
+    await scanGachaByUrl(cloudLink.url, 'cloud');
     if (!useGachaStore.getState().error) setShowScanModal(false);
   };
 

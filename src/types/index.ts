@@ -46,9 +46,15 @@ export interface GachaImportResult {
   records: GachaRecord[];
   imported_count: number;
   added_count: number;
+  added_records: GachaRecord[];
   duplicate_count: number;
   total_count: number;
   failed_pools: string[];
+}
+
+export interface ImportCompletionSummary extends GachaImportResult {
+  source: 'game-dir' | 'cloud' | 'url' | 'json';
+  completed_at: number;
 }
 
 export interface CloudGachaLink {

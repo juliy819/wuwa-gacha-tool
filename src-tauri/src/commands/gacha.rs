@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
@@ -358,6 +358,12 @@ fn merge_and_load_player(
     }
     let records = db.get_all_records(Some(player_id))?;
     let total_count = records.len();
+    let added_ids: HashSet<i64> = stats.added_ids.iter().copied().collect();
+    let added_records = records
+        .iter()
+        .filter(|record| record.id.is_some_and(|id| added_ids.contains(&id)))
+        .cloned()
+        .collect();
 
     log::info!(
         target: "app::gacha",
@@ -375,6 +381,7 @@ fn merge_and_load_player(
         records,
         imported_count: stats.imported_count,
         added_count: stats.added_count,
+        added_records,
         duplicate_count: stats.duplicate_count,
         total_count,
         failed_pools,

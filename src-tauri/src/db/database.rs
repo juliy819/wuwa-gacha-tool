@@ -80,11 +80,12 @@ pub struct Database {
     path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeStats {
     pub imported_count: usize,
     pub added_count: usize,
     pub duplicate_count: usize,
+    pub added_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -360,6 +361,7 @@ impl Database {
                 imported_count: 0,
                 added_count: 0,
                 duplicate_count: 0,
+                added_ids: Vec::new(),
             });
         }
 
@@ -378,6 +380,7 @@ impl Database {
         let mut occurrence_counts: HashMap<OccurrenceKey, i64> = HashMap::new();
         let mut timestamp_orders: HashMap<(String, String, String), i64> = HashMap::new();
         let mut added_count = 0;
+        let mut added_ids = Vec::new();
 
         for record in records {
             let occurrence_key = (
@@ -490,6 +493,7 @@ impl Database {
                 )
                 .map_err(|e| e.to_string())?;
                 added_count += 1;
+                added_ids.push(tx.last_insert_rowid());
             }
         }
         if commit {
@@ -502,6 +506,7 @@ impl Database {
             imported_count: records.len(),
             added_count,
             duplicate_count: records.len() - added_count,
+            added_ids,
         })
     }
 
@@ -1730,7 +1735,10 @@ mod tests {
         let second = db.merge_records(&snapshot).unwrap();
 
         assert_eq!(first.added_count, 2);
+        assert_eq!(first.added_ids.len(), 2);
+        assert_ne!(first.added_ids[0], first.added_ids[1]);
         assert_eq!(second.added_count, 0);
+        assert!(second.added_ids.is_empty());
         assert_eq!(second.duplicate_count, 2);
         assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 2);
     }
