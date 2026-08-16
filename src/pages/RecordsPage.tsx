@@ -165,6 +165,7 @@ export default function RecordsPage() {
   const [activePoolType, setActivePoolType] = useState('all');
   const [scope, setScope] = useState<RecordScope>(preferences.scope);
   const [query, setQuery] = useState('');
+  const [pityRange, setPityRange] = useState<{ min: number; max: number } | null>(null);
   const deferredQuery = useDeferredValue(query);
   const [viewMode, setViewMode] = useState<ViewMode>(preferences.viewMode);
   const [sortOrder, setSortOrder] = useState<SortOrder>(preferences.sortOrder);
@@ -209,6 +210,7 @@ export default function RecordsPage() {
 
   useEffect(() => {
     setActivePoolType('all');
+    setPityRange(null);
     setCurrentPage(1);
   }, [activePlayerId]);
 
@@ -464,14 +466,15 @@ export default function RecordsPage() {
 
   const filteredRecords = useMemo(() => {
     const normalizedQuery = deferredQuery.trim().toLocaleLowerCase();
-    return allRecordsWithPity.filter(({ record }) => {
+    return allRecordsWithPity.filter(({ record, pity }) => {
       if (activePoolType !== 'all' && record.card_pool_type !== activePoolType) return false;
       if (effectiveScope === 'five' && record.quality_level !== QUALITY.FIVE_STAR) return false;
+      if (pityRange && (record.quality_level !== QUALITY.FIVE_STAR || pity < pityRange.min || pity > pityRange.max)) return false;
       if (!normalizedQuery) return true;
       return [record.name, record.card_pool_name, record.time]
         .some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
     });
-  }, [allRecordsWithPity, activePoolType, deferredQuery, effectiveScope]);
+  }, [allRecordsWithPity, activePoolType, deferredQuery, effectiveScope, pityRange]);
 
   const allFeaturedAcquisitions = useMemo(() => {
     const recordsById = new Map(records.flatMap((record) => record.id == null ? [] : [[record.id, record] as const]));
@@ -583,6 +586,7 @@ export default function RecordsPage() {
       || query
       || targetScope !== scope
       || (target.viewMode && target.viewMode !== viewMode)
+      || (target.sortOrder && target.sortOrder !== sortOrder)
       || listGrouping !== 'five-star',
     );
     if (target.poolType) setActivePoolType(target.poolType);
@@ -590,6 +594,8 @@ export default function RecordsPage() {
     setScope(targetScope);
     if (target.viewMode) setViewMode(target.viewMode);
     setListGrouping('five-star');
+    if (target.sortOrder) setSortOrder(target.sortOrder);
+    setPityRange(target.pityRange ?? null);
     setPendingTarget(target);
   };
 
@@ -647,7 +653,7 @@ export default function RecordsPage() {
       return;
     }
     setCurrentPage(1);
-  }, [activePoolType, scope, query, viewMode, itemsPerPage, listGrouping, sortOrder]);
+  }, [activePoolType, scope, query, viewMode, itemsPerPage, listGrouping, sortOrder, pityRange]);
 
   useEffect(() => {
     setPageInput(String(activePagedList.safeCurrentPage));
@@ -683,6 +689,7 @@ export default function RecordsPage() {
     setListGrouping('five-star');
     setScope('five');
     setQuery('');
+    setPityRange(null);
   };
 
   const openAcquisition = (record: GachaRecord) => {
@@ -1346,6 +1353,12 @@ export default function RecordsPage() {
                 <button type="button" onClick={() => stepAcquisition(1)} disabled={selectedAcquisitionIndex >= acquisitionRecords.length - 1} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide disabled:opacity-25" title="下一条获取记录" aria-label="下一条获取记录"><ResonanceIcon kind="next" size={14} /></button>
                 <ResonanceCloseButton onClick={() => setSelectedAcquisition(null)} className="ml-1 shrink-0" />
               </div>
+
+              {pityRange ? (
+                <button type="button" onClick={() => setPityRange(null)} className="flex h-8 items-center gap-1.5 rounded-md border border-[#d8bd84]/20 bg-[#d8bd84]/[0.06] px-2.5 text-xs text-[#d8bd84]" title="清除抽数区间筛选">
+                  {pityRange.min}-{pityRange.max} 抽 <ResonanceIcon kind="close" size={12} />
+                </button>
+              ) : null}
             </div>
             <div className="grid grid-cols-2 gap-px border-b border-white/[0.07] bg-white/[0.06] sm:grid-cols-4">
               {[

@@ -238,6 +238,39 @@ pub struct ResourceAcquisitionInsight {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FiveStarIntervalInsight {
+    pub record_id: Option<i64>,
+    pub resource_id: i64,
+    pub name: String,
+    pub time: String,
+    pub pulls: i32,
+    pub is_off_rate: bool,
+    pub is_mock: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeaturedCycleSegmentInsight {
+    pub record_id: Option<i64>,
+    pub resource_id: i64,
+    pub name: String,
+    pub time: String,
+    pub pulls: i32,
+    pub is_off_rate: bool,
+    pub is_mock: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeaturedCycleInsight {
+    pub record_id: Option<i64>,
+    pub resource_id: i64,
+    pub name: String,
+    pub time: String,
+    pub total_pulls: i32,
+    pub is_mock: bool,
+    pub segments: Vec<FeaturedCycleSegmentInsight>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolInsight {
     pub pool_type: String,
     pub pool_name: String,
@@ -254,6 +287,7 @@ pub struct PoolInsight {
     pub early_rate: f64,
     pub reliability: String,
     pub distribution: Vec<PityDistributionBin>,
+    pub five_star_intervals: Vec<FiveStarIntervalInsight>,
     pub cumulative: Vec<CumulativePityPoint>,
     pub probability_curve: Vec<ProbabilityPoint>,
     pub featured_count: usize,
@@ -268,6 +302,7 @@ pub struct PoolInsight {
     pub featured_win_rate: Option<f64>,
     pub featured_guaranteed: bool,
     pub featured_distribution: Vec<PityDistributionBin>,
+    pub featured_cycles: Vec<FeaturedCycleInsight>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -521,8 +556,11 @@ impl GachaInsights {
                 pool_records.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
 
                 let mut bounded_intervals = Vec::new();
+                let mut five_star_intervals = Vec::new();
                 let tracks_featured = is_limited_char_pool(&pool_type);
                 let mut featured_cycles = Vec::new();
+                let mut featured_cycle_records = Vec::new();
+                let mut featured_segments = Vec::new();
                 let mut pity = 0i32;
                 let mut pulls_since_featured = 0i32;
                 let mut seen_five_star = false;
@@ -539,30 +577,69 @@ impl GachaInsights {
                     }
                     if record.is_five_star() {
                         five_star_count += 1;
+                        let five_star_pity = pity;
                         // The first observed five-star may have pulls before the
                         // retained history. Only later intervals have both bounds.
                         if seen_five_star || confirmed_boundaries.contains(&pool_type) {
-                            bounded_intervals.push(pity);
+                            bounded_intervals.push(five_star_pity);
+                            if (1..=hard_pity_for_pool(&pool_type)).contains(&five_star_pity) {
+                                five_star_intervals.push(FiveStarIntervalInsight {
+                                    record_id: record.id,
+                                    resource_id: record.resource_id,
+                                    name: record.name.clone(),
+                                    time: record.time.clone(),
+                                    pulls: five_star_pity,
+                                    is_off_rate: record.is_off_rate,
+                                    is_mock: record.is_mock,
+                                });
+                            }
                         }
                         seen_five_star = true;
                         pity = 0;
 
                         if tracks_featured {
+                            let cycle_has_start = seen_featured || confirmed_boundaries.contains(&pool_type);
+                            let segment = FeaturedCycleSegmentInsight {
+                                record_id: record.id,
+                                resource_id: record.resource_id,
+                                name: record.name.clone(),
+                                time: record.time.clone(),
+                                pulls: five_star_pity,
+                                is_off_rate: record.is_off_rate,
+                                is_mock: record.is_mock,
+                            };
                             if record.is_off_rate {
-                                if (seen_featured || confirmed_boundaries.contains(&pool_type))
-                                    && !lost_since_featured
-                                {
+                                if cycle_has_start {
+                                    featured_segments.push(segment);
+                                }
+                                if cycle_has_start && !lost_since_featured {
                                     featured_attempt_count += 1;
                                 }
                                 lost_since_featured = true;
                             } else {
                                 featured_count += 1;
-                                if seen_featured || confirmed_boundaries.contains(&pool_type) {
+                                if cycle_has_start {
                                     featured_cycles.push(pulls_since_featured);
+                                    featured_segments.push(segment);
+                                    if (1..=160).contains(&pulls_since_featured) {
+                                        featured_cycle_records.push(FeaturedCycleInsight {
+                                            record_id: record.id,
+                                            resource_id: record.resource_id,
+                                            name: record.name.clone(),
+                                            time: record.time.clone(),
+                                            total_pulls: pulls_since_featured,
+                                            is_mock: record.is_mock,
+                                            segments: std::mem::take(&mut featured_segments),
+                                        });
+                                    } else {
+                                        featured_segments.clear();
+                                    }
                                     if !lost_since_featured {
                                         featured_attempt_count += 1;
                                         featured_win_count += 1;
                                     }
+                                } else {
+                                    featured_segments.clear();
                                 }
                                 seen_featured = true;
                                 lost_since_featured = false;
@@ -631,6 +708,7 @@ impl GachaInsights {
                     early_rate: percentage(early_count),
                     reliability: reliability_label(sample_count).to_string(),
                     distribution: distribution_bins(&complete_intervals),
+                    five_star_intervals,
                     cumulative: cumulative_curve(&complete_intervals),
                     probability_curve: probability_curve(&complete_intervals),
                     featured_count,
@@ -645,6 +723,7 @@ impl GachaInsights {
                     featured_win_rate,
                     featured_guaranteed: tracks_featured && lost_since_featured,
                     featured_distribution: featured_distribution_bins(&complete_featured_cycles),
+                    featured_cycles: featured_cycle_records,
                 }
             })
             .collect();
@@ -1442,6 +1521,35 @@ mod tests {
         assert_eq!(pool.cumulative[2].percentage, 100.0);
         assert_eq!(pool.probability_curve[1].sample_size, 1);
         assert_eq!(pool.probability_curve[2].percentage, 100.0);
+        assert_eq!(pool.five_star_intervals.len(), 1);
+        assert_eq!(pool.five_star_intervals[0].record_id, Some(5));
+        assert_eq!(pool.five_star_intervals[0].pulls, 3);
+    }
+
+    #[test]
+    fn insights_keep_visible_five_star_counts_separate_from_complete_intervals_for_every_pool() {
+        let mut records = Vec::new();
+        let mut id = 1i64;
+        for pool_type in 1..=13 {
+            for quality in [5, 3, 5, 3, 5] {
+                records.push(record(
+                    id,
+                    &pool_type.to_string(),
+                    quality,
+                    &format!("2026-01-01 00:{pool_type:02}:{id:02}"),
+                ));
+                id += 1;
+            }
+        }
+
+        let insights = GachaInsights::from_records(&records, false);
+
+        assert_eq!(insights.pools.len(), 13);
+        for pool in &insights.pools {
+            assert_eq!(pool.five_star_count, 3, "pool {}", pool.pool_type);
+            assert_eq!(pool.complete_interval_count, 2, "pool {}", pool.pool_type);
+            assert_eq!(pool.five_star_intervals.len(), 2, "pool {}", pool.pool_type);
+        }
     }
 
     #[test]
@@ -1592,6 +1700,17 @@ mod tests {
         assert!(!pool.featured_guaranteed);
         assert_eq!(pool.featured_distribution[0].count, 1);
         assert_eq!(pool.featured_distribution[5].count, 1);
+        assert_eq!(pool.featured_cycles.len(), 2);
+        assert_eq!(pool.featured_cycles[0].record_id, Some(11));
+        assert_eq!(pool.featured_cycles[0].total_pulls, 10);
+        assert_eq!(pool.featured_cycles[0].segments.len(), 1);
+        assert_eq!(pool.featured_cycles[1].record_id, Some(71));
+        assert_eq!(pool.featured_cycles[1].total_pulls, 60);
+        assert_eq!(pool.featured_cycles[1].segments.len(), 2);
+        assert_eq!(pool.featured_cycles[1].segments[0].record_id, Some(31));
+        assert!(pool.featured_cycles[1].segments[0].is_off_rate);
+        assert_eq!(pool.featured_cycles[1].segments[0].pulls, 20);
+        assert_eq!(pool.featured_cycles[1].segments[1].pulls, 40);
     }
 
     #[test]

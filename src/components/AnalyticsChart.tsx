@@ -25,6 +25,7 @@ interface AnalyticsChartProps {
   height: number;
   eager?: boolean;
   prewarmDelay?: number;
+  onEvents?: Record<string, (params: unknown) => void>;
 }
 
 type IdleWindow = Window & typeof globalThis & {
@@ -32,7 +33,7 @@ type IdleWindow = Window & typeof globalThis & {
   cancelIdleCallback?: (handle: number) => void;
 };
 
-export default function AnalyticsChart({ option, height, eager = false, prewarmDelay = 0 }: AnalyticsChartProps) {
+export default function AnalyticsChart({ option, height, eager = false, prewarmDelay = 0, onEvents }: AnalyticsChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(eager);
 
@@ -81,6 +82,7 @@ export default function AnalyticsChart({ option, height, eager = false, prewarmD
           style={{ height }}
           notMerge
           lazyUpdate
+          onEvents={onEvents}
         />
       )}
     </div>

@@ -1,10 +1,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { ArrowRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import AnalyticsChart from '../components/AnalyticsChart';
+import DistributionDetailDialog from '../components/DistributionDetailDialog';
 import PageTransition from '../components/PageTransition';
 import PageSignalField from '../components/PageSignalField';
 import ResonanceEmptyState from '../components/ResonanceEmptyState';
 import ResonanceIcon from '../components/ResonanceModeIcon';
+import { recordsPath } from '../lib/recordNavigation';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 import type { GachaInsights, PityDistributionBin, PoolInsight } from '../types';
@@ -172,6 +176,7 @@ function buildHistogramOption(
     },
     series: [{
       type: 'bar',
+      cursor: 'pointer',
       barWidth: maxPull === 80 ? 30 : 22,
       data: bins.map((bin) => [((bin.start + bin.end) / 2), bin.count]),
       itemStyle: {
@@ -333,6 +338,7 @@ function buildFeaturedDistributionOption(bins: PityDistributionBin[]) {
         type: 'bar',
         data: counts,
         barWidth: 12,
+        cursor: 'pointer',
         itemStyle: {
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
@@ -347,10 +353,11 @@ function buildFeaturedDistributionOption(bins: PityDistributionBin[]) {
           shadowColor: 'rgba(143,200,190,0.14)',
         },
         emphasis: { itemStyle: { shadowBlur: 14, shadowColor: 'rgba(216,189,132,0.38)' } },
-        z: 1,
+        z: 3,
       },
       {
         type: 'line',
+        silent: true,
         data: counts,
         smooth: 0.28,
         showSymbol: true,
@@ -366,19 +373,22 @@ function buildFeaturedDistributionOption(bins: PityDistributionBin[]) {
           lineStyle: { color: 'rgba(216,189,132,0.72)', type: 'dashed', width: 1 },
           data: [{ xAxis: labels[expectedIndex] }],
         },
-        z: 3,
+        z: 2,
       },
     ],
   };
 }
 
 export default function AnalyticsPage() {
+  const navigate = useNavigate();
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
   const initialized = useGachaStore((state) => state.initialized);
   const activeRecordCount = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId)?.record_count ?? 0);
   const [includeMock, setIncludeMock] = useState(false);
   const [insights, setInsights] = useState<GachaInsights | null>(null);
   const [activePoolType, setActivePoolType] = useState<string | null>(null);
+  const [plannedPulls, setPlannedPulls] = useState(20);
+  const [distributionDetail, setDistributionDetail] = useState<{ kind: 'five-star' | 'featured'; bin: PityDistributionBin } | null>(null);
   const poolNavRef = useRef<HTMLElement>(null);
   const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
 
@@ -442,6 +452,45 @@ export default function AnalyticsPage() {
   const forecastNextTen = forecast
     ? forecast.points[Math.min(10, forecast.points.length - 1)]
     : null;
+  const maxPlannedPulls = forecast?.points.at(-1)?.pulls ?? 0;
+  const safePlannedPulls = Math.min(Math.max(plannedPulls, 0), maxPlannedPulls);
+  const plannedPoint = forecast?.points[safePlannedPulls] ?? null;
+  const worstFiveStarPulls = forecast?.points.find((point) => point.fiveStar >= 0.999999)?.pulls ?? maxPlannedPulls;
+  const openPoolRecords = () => {
+    if (!activePool) return;
+    const target = recordsPath({ poolType: activePool.pool_type, source: 'analytics' });
+    navigate(target.pathname, { state: target.state });
+  };
+  const histogramEvents = useMemo(() => ({
+    click: (params: unknown) => {
+      const index = (params as { dataIndex?: number }).dataIndex;
+      const bin = index === undefined ? null : activePool?.distribution[index];
+      if (bin) setDistributionDetail({ kind: 'five-star', bin });
+    },
+  }), [activePool]);
+  const featuredHistogramEvents = useMemo(() => ({
+    click: (params: unknown) => {
+      const index = (params as { dataIndex?: number }).dataIndex;
+      const bin = index === undefined ? null : activePool?.featured_distribution[index];
+      if (bin) setDistributionDetail({ kind: 'featured', bin });
+    },
+  }), [activePool]);
+  const detailFiveStarRecords = useMemo(() => {
+    if (!activePool || !distributionDetail || distributionDetail.kind !== 'five-star') return [];
+    const { start, end } = distributionDetail.bin;
+    return activePool.five_star_intervals.filter((record) => record.pulls >= start && record.pulls <= end).reverse();
+  }, [activePool, distributionDetail]);
+  const detailFeaturedCycles = useMemo(() => {
+    if (!activePool || !distributionDetail || distributionDetail.kind !== 'featured') return [];
+    const { start, end } = distributionDetail.bin;
+    return activePool.featured_cycles.filter((cycle) => cycle.total_pulls >= start && cycle.total_pulls <= end).reverse();
+  }, [activePool, distributionDetail]);
+  const locateDistributionRecord = (recordId: number | null) => {
+    if (recordId === null || !activePool) return;
+    const target = recordsPath({ recordId, poolType: activePool.pool_type, source: 'analytics' });
+    setDistributionDetail(null);
+    navigate(target.pathname, { state: target.state });
+  };
   const theoreticalMedianPulls = theoreticalThreshold(0.5);
   const observedDelta = activePool?.average_pity === null || activePool?.average_pity === undefined
     ? null
@@ -456,13 +505,14 @@ export default function AnalyticsPage() {
         : { label: '接近理论', tone: '#d8bd84' };
 
   return (
+    <>
     <PageTransition>
       <div className="analysis-page h-full overflow-hidden">
         <header className="page-header analysis-page-header flex items-end justify-between gap-4 px-6 py-3">
           <PageSignalField variant="analysis" />
           <div className="analysis-hero-copy">
             <h1 className="page-title text-xl font-semibold text-tide">唤取分析</h1>
-            <p className="page-subtitle mt-1 text-xs text-wave">{activePool ? `${activePool.pool_name} · ${activePool.complete_interval_count} 次历史出金` : '用历史记录对照官方概率'}</p>
+            <p className="page-subtitle mt-1 text-xs text-wave">{activePool ? `${activePool.pool_name} · ${activePool.five_star_count} 个五星 · ${activePool.complete_interval_count} 个完整区间` : '用历史记录对照官方概率'}</p>
           </div>
           <button type="button" role="switch" aria-checked={includeMock} onClick={() => setIncludeMock((value) => !value)} className="analysis-toggle-control">
             <span className="resonance-toggle" data-active={includeMock ? 'true' : 'false'} aria-hidden="true"><span className="resonance-toggle-track"><span className="resonance-toggle-node" /></span></span>
@@ -502,7 +552,7 @@ export default function AnalyticsPage() {
                     >
                       <span className="analysis-pool-name">{pool.pool_name}</span>
                       <span className="analysis-pool-pity">当前 {pool.current_pity}/{hardPity}</span>
-                      <span className="analysis-pool-sample">统计 {pool.complete_interval_count} 次出金</span>
+                      <span className="analysis-pool-sample">五星 {pool.five_star_count} · 样本 {pool.complete_interval_count}</span>
                       <span className="analysis-pool-progress"><i style={{ width: `${Math.min(100, (pool.current_pity / hardPity) * 100)}%` }} /></span>
                     </button>
                   );
@@ -523,6 +573,9 @@ export default function AnalyticsPage() {
                         <span className="analysis-section-index">FIVE-STAR TRACE</span>
                         <h2>{activePool.pool_name}</h2>
                       </div>
+                      <button type="button" onClick={() => openPoolRecords()} className="ml-auto flex h-8 items-center gap-1.5 rounded-md border border-white/[0.07] bg-white/[0.025] px-3 text-xs text-wave hover:bg-white/[0.05] hover:text-tide">
+                        查看记录 <ArrowRight size={13} />
+                      </button>
                       <div className="analysis-current-pity">
                         <span>当前已垫</span>
                         <strong>{activePool.current_pity}</strong>
@@ -535,7 +588,7 @@ export default function AnalyticsPage() {
                       <em style={{ color: reliability.tone }}>{reliability.label}</em>
                     </div>
                     <div className="analysis-metric-grid">
-                      <Metric label="统计出金次数" value={`${activePool.complete_interval_count} 次`} detail={`${activePool.five_star_count} 个五星 · 已纳入的有效区间`} />
+                      <Metric label="五星获取数量" value={`${activePool.five_star_count} 个`} detail={`${activePool.complete_interval_count} 个完整区间纳入统计`} />
                         <Metric label="平均多少抽出金" value={formatPull(activePool.average_pity)} detail="官方综合概率期望 54.1 抽" tone="#d8bd84" />
                       <Metric label="一半在多少抽内" value={formatPull(activePool.median_pity)} detail="历史记录的中位数" />
                       <Metric label="最快出金" value={formatPull(activePool.best_pity)} detail="上个五星后的最短等待" tone="#bfc4c0" />
@@ -611,6 +664,34 @@ export default function AnalyticsPage() {
                         <i>·</i>
                         <span>1–65: 0.8% · 66–70: +4%/抽 · 71–75: +8%/抽 · 76 起: +10%/抽</span>
                       </div>
+                      <div className="border-t border-white/[0.06] px-5 py-4">
+                        <div className="flex flex-wrap items-end justify-between gap-4">
+                          <div>
+                            <span className="analysis-section-index">PULL PLANNER</span>
+                            <h3 className="mt-1 text-sm font-medium text-tide">计划追加多少抽</h3>
+                            <p className="mt-1 text-[10px] text-wave">沿用上方同一条条件概率曲线，不改变当前记录或保底状态。</p>
+                          </div>
+                          <label className="flex items-center gap-2 text-xs text-wave">
+                            追加
+                            <input
+                              type="number"
+                              min={0}
+                              max={maxPlannedPulls}
+                              value={plannedPulls}
+                              onChange={(event) => setPlannedPulls(Math.min(Math.max(Number(event.target.value) || 0, 0), maxPlannedPulls))}
+                              className="glass-input h-8 w-16 px-2 text-center tabular-nums text-tide"
+                            />
+                            抽
+                          </label>
+                        </div>
+                        <input type="range" min={0} max={maxPlannedPulls} value={safePlannedPulls} onChange={(event) => setPlannedPulls(Number(event.target.value))} className="mt-4 w-full accent-[#d8bd84]" aria-label="计划追加抽数" />
+                        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06] md:grid-cols-4">
+                          <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">至少一个五星</span><strong className="mt-1 block text-lg tabular-nums text-[#d8bd84]">{((plannedPoint?.fiveStar ?? 0) * 100).toFixed(1)}%</strong></div>
+                          <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">获得当期 UP</span><strong className="mt-1 block text-lg tabular-nums text-[#8fc8be]">{plannedPoint?.featured === null || plannedPoint?.featured === undefined ? '不适用' : `${(plannedPoint.featured * 100).toFixed(1)}%`}</strong></div>
+                          <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">五星最坏还需</span><strong className="mt-1 block text-lg tabular-nums text-tide">{worstFiveStarPulls} 抽</strong></div>
+                          <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">UP 最坏还需</span><strong className="mt-1 block text-lg tabular-nums text-tide">{LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? `${maxPlannedPulls} 抽` : '不适用'}</strong></div>
+                        </div>
+                      </div>
                     </section>
                   ) : activePool.pool_type === '5' ? (
                     <section className="analysis-forecast-unavailable">
@@ -628,9 +709,9 @@ export default function AnalyticsPage() {
                       <section className="analysis-chart-panel">
                         <div className="analysis-chart-heading">
                           <div><span>HISTOGRAM / 1–80</span><h3>每次五星用了多少抽</h3></div>
-                          <p>柱越高，说明该抽数范围内出金越常见</p>
+                          <p>柱越高，说明该抽数范围内出金越常见；点击柱子可查看对应五星</p>
                         </div>
-                        <AnalyticsChart option={distributionOption} height={292} prewarmDelay={120} />
+                        <AnalyticsChart option={distributionOption} height={292} prewarmDelay={120} onEvents={histogramEvents} />
                       </section>
                       <section className="analysis-chart-panel">
                         <div className="analysis-chart-heading">
@@ -665,9 +746,9 @@ export default function AnalyticsPage() {
                       <div className="analysis-featured-chart">
                         <div className="analysis-chart-heading">
                           <div><span>HISTOGRAM / 1–160</span><h3>UP 角色获取成本分布</h3></div>
-                          <p>金色虚线：50/50 与大保底下的长期理论期望 81.15 抽</p>
+                          <p>金色虚线：长期理论期望 81.15 抽；点击柱子查看每次 UP、前置歪与分段抽数</p>
                         </div>
-                        <AnalyticsChart option={featuredOption} height={320} prewarmDelay={360} />
+                        <AnalyticsChart option={featuredOption} height={320} prewarmDelay={360} onEvents={featuredHistogramEvents} />
                       </div>
                     </section>
                   ) : null}
@@ -678,5 +759,19 @@ export default function AnalyticsPage() {
         </div>
       </div>
     </PageTransition>
+    {distributionDetail && activePool ? (
+      <DistributionDetailDialog
+        open
+        kind={distributionDetail.kind}
+        poolName={activePool.pool_name}
+        hardPity={activeHardPity}
+        rangeLabel={distributionDetail.bin.label}
+        fiveStarRecords={detailFiveStarRecords}
+        featuredCycles={detailFeaturedCycles}
+        onClose={() => setDistributionDetail(null)}
+        onLocate={locateDistributionRecord}
+      />
+    ) : null}
+    </>
   );
 }

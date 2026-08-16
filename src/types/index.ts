@@ -138,6 +138,36 @@ export interface CharacterPullInsight {
   is_lower_bound: boolean;
 }
 
+export interface FiveStarIntervalInsight {
+  record_id: number | null;
+  resource_id: number;
+  name: string;
+  time: string;
+  pulls: number;
+  is_off_rate: boolean;
+  is_mock: boolean;
+}
+
+export interface FeaturedCycleSegmentInsight {
+  record_id: number | null;
+  resource_id: number;
+  name: string;
+  time: string;
+  pulls: number;
+  is_off_rate: boolean;
+  is_mock: boolean;
+}
+
+export interface FeaturedCycleInsight {
+  record_id: number | null;
+  resource_id: number;
+  name: string;
+  time: string;
+  total_pulls: number;
+  is_mock: boolean;
+  segments: FeaturedCycleSegmentInsight[];
+}
+
 export interface AcquisitionRecordInsight {
   id: number | null;
   resource_id: number;
@@ -183,6 +213,7 @@ export interface PoolInsight {
   early_rate: number;
   reliability: 'insufficient' | 'low' | 'medium' | 'high';
   distribution: PityDistributionBin[];
+  five_star_intervals: FiveStarIntervalInsight[];
   cumulative: CumulativePityPoint[];
   probability_curve: ProbabilityPoint[];
   featured_count: number;
@@ -197,6 +228,7 @@ export interface PoolInsight {
   featured_win_rate: number | null;
   featured_guaranteed: boolean;
   featured_distribution: PityDistributionBin[];
+  featured_cycles: FeaturedCycleInsight[];
 }
 
 export interface GachaInsights {

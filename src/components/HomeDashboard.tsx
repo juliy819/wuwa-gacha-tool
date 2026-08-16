@@ -1,4 +1,6 @@
 import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { recordsPath } from '../lib/recordNavigation';
 import type { GachaRecord, GachaStats, PoolInfo } from '../types';
 import { QUALITY } from '../types';
 import AnimatedCounter from './AnimatedCounter';
@@ -14,6 +16,8 @@ interface HomeDashboardProps {
 
 interface FiveStarResult {
   id: string;
+  recordId?: number;
+  poolType: string;
   resourceId: number;
   name: string;
   poolName: string;
@@ -48,6 +52,8 @@ function buildRecentFiveStars(
       poolsWithFiveStar.add(record.card_pool_type);
       results.push({
         id: `${record.card_pool_type}-${record.time}-${record.resource_id}-${index}`,
+        recordId: record.id,
+        poolType: record.card_pool_type,
         resourceId: record.resource_id,
         name: record.name,
         poolName: record.card_pool_name,
@@ -131,14 +137,14 @@ function RatioDial({ rate, wins, total }: { rate: number; wins: number; total: n
   );
 }
 
-function PityRow({ pool }: { pool: PoolInfo }) {
+function PityRow({ pool, onOpen }: { pool: PoolInfo; onOpen: () => void }) {
   const limit = 80;
   const progress = Math.min((pool.current_pity / limit) * 100, 100);
   const remaining = Math.max(limit - pool.current_pity, 0);
   const isHigh = pool.current_pity >= 66;
 
   return (
-    <div className="pity-row border-b border-white/[0.05] py-3">
+    <button type="button" onClick={onOpen} className="pity-row group w-full border-b border-white/[0.05] py-3 text-left" title={`查看${pool.pool_name}记录`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm text-tide truncate">{pool.pool_name}</div>
@@ -177,11 +183,16 @@ function PityRow({ pool }: { pool: PoolInfo }) {
           剩 {remaining} 抽
         </span>
       </div>
-    </div>
+    </button>
   );
 }
 
 export default function HomeDashboard({ stats, records, confirmedBoundaryPools = new Set() }: HomeDashboardProps) {
+  const navigate = useNavigate();
+  const openRecords = (poolType: string, recordId?: number) => {
+    const target = recordsPath({ poolType, recordId, sortOrder: recordId === undefined ? 'desc' : undefined, source: recordId === undefined ? 'home-pity' : 'home-five-star' });
+    navigate(target.pathname, { state: target.state });
+  };
   const recentFiveStars = useMemo(
     () => buildRecentFiveStars(records, confirmedBoundaryPools),
     [confirmedBoundaryPools, records],
@@ -231,7 +242,7 @@ export default function HomeDashboard({ stats, records, confirmedBoundaryPools =
             <span className="tech-chip px-2 py-1 text-[10px] text-wave">五星保底 80</span>
           </div>
           <div className="home-pity-grid mt-2 grid grid-cols-2 gap-x-6">
-            {visiblePools.map((pool) => <PityRow key={pool.pool_type} pool={pool} />)}
+            {visiblePools.map((pool) => <PityRow key={pool.pool_type} pool={pool} onOpen={() => openRecords(pool.pool_type)} />)}
           </div>
         </GlowCard>
 
@@ -276,7 +287,7 @@ export default function HomeDashboard({ stats, records, confirmedBoundaryPools =
         {recentFiveStars.length > 0 ? (
           <div className="recent-five-grid mt-4 grid grid-cols-1 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06] md:grid-cols-2 xl:grid-cols-3">
             {recentFiveStars.map((item) => (
-              <div key={item.id} className="five-star-entry group flex min-w-0 items-center gap-3 px-4 py-3">
+              <button type="button" key={item.id} onClick={() => openRecords(item.poolType, item.recordId)} className="five-star-entry group flex min-w-0 items-center gap-3 px-4 py-3 text-left" title="在记录页中定位">
                 <div className="record-resource-frame record-resource-frame-five relative h-11 w-11 shrink-0 overflow-hidden rounded-md border border-[#d8bd84]/25 bg-[#d8bd84]/[0.07]">
                   <ResourceIcon
                     resourceId={item.resourceId}
@@ -301,7 +312,7 @@ export default function HomeDashboard({ stats, records, confirmedBoundaryPools =
                   <span>{item.isLowerBound ? '≥' : ''}{item.pity}</span>
                   <span className="text-[10px] font-normal">抽</span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         ) : (

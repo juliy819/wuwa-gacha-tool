@@ -1,6 +1,8 @@
 export interface RecordNavigationTarget {
   recordId?: number;
   poolType?: string;
+  pityRange?: { min: number; max: number };
+  sortOrder?: 'desc' | 'asc';
   scope?: 'five' | 'all';
   viewMode?: 'list' | 'grid' | 'table';
   source?: 'home-pity' | 'home-five-star' | 'analytics' | 'sync-summary' | 'acquisition-trace';
