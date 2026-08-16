@@ -108,6 +108,15 @@ try {
 $sw.Stop()
 Write-Host ("      完成，耗时 {0:N2} 秒" -f $sw.Elapsed.TotalSeconds) -ForegroundColor Green
 
+function Test-GachaRecordUrl([string]$Url) {
+    $uri = $null
+    return [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$uri) -and
+        $uri.Scheme -eq 'https' -and
+        $uri.Host -eq 'aki-gm-resources.aki-game.com' -and
+        $uri.AbsolutePath -eq '/aki/gacha/index.html' -and
+        ($uri.Fragment -eq '#/record' -or $uri.Fragment.StartsWith('#/record?'))
+}
+
 # 提取抽卡链接
 Write-Host "[3/3] 搜索抽卡链接..." -ForegroundColor Cyan
 $lineRe = [regex]::new('OpenWebView.*?sdkJson.*?"url":"([^"]+)"')
@@ -126,6 +135,9 @@ foreach ($line in $text -split "`n") {
     $m = $lineRe.Match($line)
     if ($m.Success) {
         $url = $m.Groups[1].Value
+        if (-not (Test-GachaRecordUrl $url)) {
+            continue
+        }
         if (($null -eq $latestTime) -or ($time -gt $latestTime)) {
             $latestTime = $time
             $latestUrl  = $url
@@ -136,8 +148,9 @@ foreach ($line in $text -split "`n") {
 # 回退：宽松正则
 if ($null -eq $latestUrl) {
     $fallbackRe = [regex]::new('https[^\s"'']*/aki/gacha/index.html#/record[^\s"'']*')
-    $m = $fallbackRe.Match($text)
-    if ($m.Success) { $latestUrl = $m.Value }
+    foreach ($m in $fallbackRe.Matches($text)) {
+        if (Test-GachaRecordUrl $m.Value) { $latestUrl = $m.Value }
+    }
 }
 
 if ($null -eq $latestUrl) {

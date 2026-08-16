@@ -1,6 +1,10 @@
 use regex::Regex;
 use std::fs;
 use std::path::Path;
+use url::Url;
+
+const GACHA_HOST: &str = "aki-gm-resources.aki-game.com";
+const GACHA_PATH: &str = "/aki/gacha/index.html";
 
 /// 解码 Client.log 文件
 ///
@@ -57,6 +61,9 @@ pub fn extract_gacha_url(decoded_log: &str) -> Option<String> {
         // 提取 URL
         if let Some(cap) = line_re.captures(line) {
             let url = cap[1].to_string();
+            if !is_gacha_record_url(&url) {
+                continue;
+            }
             if latest_time.is_none() || time.as_deref() > latest_time.as_deref() {
                 latest_time = time;
                 latest_url = Some(url);
@@ -68,11 +75,27 @@ pub fn extract_gacha_url(decoded_log: &str) -> Option<String> {
     if latest_url.is_none() {
         let re = Regex::new(r#"https[^\s"']*/aki/gacha/index.html#/record[^\s"']*"#).unwrap();
         for cap in re.captures_iter(decoded_log) {
-            latest_url = Some(cap.get(0).unwrap().as_str().to_string());
+            let url = cap.get(0).unwrap().as_str();
+            if is_gacha_record_url(url) {
+                latest_url = Some(url.to_string());
+            }
         }
     }
 
     latest_url
+}
+
+fn is_gacha_record_url(raw_url: &str) -> bool {
+    let Ok(url) = Url::parse(raw_url) else {
+        return false;
+    };
+
+    url.scheme() == "https"
+        && url.host_str() == Some(GACHA_HOST)
+        && url.path() == GACHA_PATH
+        && url
+            .fragment()
+            .is_some_and(|fragment| fragment == "/record" || fragment.starts_with("/record?"))
 }
 
 /// 从游戏目录构建日志文件路径
@@ -93,7 +116,11 @@ mod tests {
             .skip(3)
             .map(|&b| {
                 let b = b & 0xFF;
-                if b % 2 == 1 { b ^ 0xA5 } else { b ^ 0xEF }
+                if b % 2 == 1 {
+                    b ^ 0xA5
+                } else {
+                    b ^ 0xEF
+                }
             })
             .collect();
         assert_eq!(decoded.len(), 4);
@@ -107,5 +134,31 @@ more data"#;
         let url = extract_gacha_url(log);
         assert!(url.is_some());
         assert!(url.unwrap().contains("aki/gacha/index.html"));
+    }
+
+    #[test]
+    fn ignores_newer_announcement_url_from_same_host() {
+        let log = r#"[2026.08.16-11.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=test&player_id=123&record_id=token"}
+[2026.08.16-12.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com/aki/announcement/index.html?server_id=test&role_id=123&login_info=encoded"}"#;
+
+        assert_eq!(
+            extract_gacha_url(log).as_deref(),
+            Some("https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=test&player_id=123&record_id=token")
+        );
+    }
+
+    #[test]
+    fn rejects_announcement_url_when_no_gacha_record_was_opened() {
+        let log = r#"[2026.08.16-12.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com/aki/announcement/index.html?server_id=test&role_id=123&login_info=encoded"}"#;
+
+        assert_eq!(extract_gacha_url(log), None);
+    }
+
+    #[test]
+    fn rejects_lookalike_host_and_non_record_gacha_page() {
+        let log = r#"[2026.08.16-12.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com.example.com/aki/gacha/index.html#/record?player_id=123&record_id=token"}
+[2026.08.16-12.01.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com/aki/gacha/index.html?player_id=123&record_id=token"}"#;
+
+        assert_eq!(extract_gacha_url(log), None);
     }
 }
