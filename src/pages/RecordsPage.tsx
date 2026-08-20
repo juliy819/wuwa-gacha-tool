@@ -69,6 +69,22 @@ function RecordAvatar({ record, size = 'md' }: { record: GachaRecord; size?: 'sm
   );
 }
 
+function PityPullAvatar({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
+  const color = QUALITY_COLORS[QUALITY.FIVE_STAR];
+  const dimensions = size === 'sm' ? 'h-8 w-8' : size === 'lg' ? 'h-full w-full' : 'h-12 w-12';
+
+  return (
+    <div
+      className={`record-resource-frame record-resource-frame-five relative shrink-0 overflow-hidden rounded-md border ${dimensions}`}
+      style={{ borderColor: `${color}55`, background: `linear-gradient(135deg, ${color}18, ${color}08)` }}
+    >
+      <div className="absolute inset-0 flex items-center justify-center text-2xl font-bold" style={{ color }}>
+        ?
+      </div>
+    </div>
+  );
+}
+
 function PityBadge({ pity, lowerBound = false }: { pity: number; lowerBound?: boolean }) {
   const isHigh = pity >= 66;
   return (
@@ -313,6 +329,15 @@ export default function RecordsPage() {
   const effectiveScope: RecordScope = viewMode === 'table' ? scope : 'five';
   const gridItemsPerPage = gridColumns * GRID_ROWS_PER_PAGE;
   const effectiveItemsPerPage = viewMode === 'grid' ? gridItemsPerPage : itemsPerPage;
+
+  const activePoolCurrentPity = useMemo(() => {
+    if (activePoolType === 'all') return null;
+    const stats = poolStats.get(activePoolType);
+    if (!stats || stats.count === 0) return null;
+    // 如果最新一条就是五星，说明当前垫抽为0，不需要显示
+    if (stats.currentPity === 0) return null;
+    return stats.currentPity;
+  }, [activePoolType, poolStats]);
 
   useEffect(() => {
     const previousPageSize = previousGridPageSizeRef.current;
@@ -634,6 +659,29 @@ export default function RecordsPage() {
                 />
                 {viewMode === 'list' && (
                   <div className="record-list-track px-4">
+                    {activePoolCurrentPity !== null && (
+                      <div data-seq="00" className="record-list-row record-pity-pull-row flex min-h-[64px] items-center gap-3 py-2.5" style={{ opacity: 0.85 }}>
+                        <PityPullAvatar />
+                        <div className="w-24 shrink-0 min-w-0">
+                          <div className="truncate text-sm text-tide" style={{ color: QUALITY_COLORS[QUALITY.FIVE_STAR] }}>垫抽中</div>
+                          <div className="mt-0.5 text-[10px] tabular-nums text-wave">当前卡池</div>
+                        </div>
+                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <div className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]">
+                            <div
+                              className="h-full rounded"
+                              style={{ width: `${Math.min((activePoolCurrentPity / 80) * 100, 100)}%`, backgroundColor: getBarColor(activePoolCurrentPity) }}
+                            />
+                          </div>
+                          <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums" style={{ color: getBarColor(activePoolCurrentPity) }}>
+                            {activePoolCurrentPity}
+                          </span>
+                          <span className="w-5 shrink-0 text-center text-[10px] font-bold text-transparent">
+                            歪
+                          </span>
+                        </div>
+                      </div>
+                    )}
                     {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       const barColor = getBarColor(pity);
                       const barWidth = Math.min((pity / 80) * 100, 100);
@@ -666,6 +714,24 @@ export default function RecordsPage() {
 
                 {viewMode === 'grid' && (
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3 p-4">
+                    {activePoolCurrentPity !== null && (
+                      <div data-seq="00" className="record-grid-card resonance-panel record-grid-card-five record-pity-pull-card min-w-0 p-2.5" style={{ opacity: 0.85 }}>
+                        <div className="relative aspect-square overflow-hidden rounded-md">
+                          <PityPullAvatar size="lg" />
+                        </div>
+                        <div className="mt-2 truncate text-center text-xs text-tide">垫抽中</div>
+                        <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave">
+                          <span className="inline-flex items-baseline gap-0.5 rounded border px-2 py-1 text-xs font-semibold tabular-nums"
+                            style={{
+                              borderColor: activePoolCurrentPity >= 66 ? 'rgba(216,189,132,0.2)' : 'rgba(111,170,160,0.2)',
+                              backgroundColor: activePoolCurrentPity >= 66 ? 'rgba(216,189,132,0.07)' : 'rgba(111,170,160,0.07)',
+                              color: activePoolCurrentPity >= 66 ? '#d8bd84' : '#8fc8be',
+                            }}>
+                            已垫{activePoolCurrentPity}抽
+                          </span>
+                        </div>
+                      </div>
+                    )}
                     {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       return (
                         <div key={getRecordKey(record, index)} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''}`}>
