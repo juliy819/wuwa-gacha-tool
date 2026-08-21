@@ -2106,6 +2106,60 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .record-list-row:hover { background: linear-gradient(90deg, rgba(143, 200, 190, 0.035), transparent 70%); transform: translateX(3px); }
 .record-list-row.record-row-off-rate { background: linear-gradient(90deg, rgba(216, 72, 72, 0.12), rgba(216, 72, 72, 0.025) 72%, transparent); }
 .record-list-row.record-row-off-rate:hover { background: linear-gradient(90deg, rgba(216, 72, 72, 0.18), rgba(216, 72, 72, 0.045) 72%, transparent); }
+.record-off-rate-stamp {
+  position: relative;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  transform: rotate(-7deg);
+}
+.record-off-rate-stamp-active {
+  color: #f2b0a5;
+  border: 1.5px solid rgba(216, 72, 72, 0.82);
+  border-radius: 47% 53% 51% 49%;
+  background: rgba(216, 72, 72, 0.11);
+  box-shadow: inset 0 0 0 2px rgba(216, 72, 72, 0.12), 0 1px 0 rgba(255, 255, 255, 0.05);
+  text-shadow: 0 1px 0 rgba(85, 20, 20, 0.42);
+}
+.record-off-rate-stamp-compact {
+  width: 25px;
+  height: 25px;
+  flex-basis: 25px;
+  font-size: 10px;
+}
+.record-off-rate-stamp-compact.record-off-rate-stamp-active {
+  color: #fff1ed;
+  border-color: #ef8f82;
+  background: #a94f4a;
+  box-shadow: inset 0 0 0 2px rgba(255, 205, 196, 0.16), 0 2px 6px rgba(36, 8, 8, 0.42);
+  text-shadow: 0 1px 1px rgba(70, 13, 13, 0.65);
+}
+.record-off-rate-stamp-active::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(236, 143, 132, 0.72);
+  border-radius: 51% 49% 46% 54%;
+  pointer-events: none;
+}
+.record-off-rate-stamp-active::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: repeating-conic-gradient(from 14deg, rgba(255, 190, 180, 0.28) 0deg 2deg, transparent 2deg 18deg);
+  opacity: 0.34;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
 .record-featured-row { background: linear-gradient(90deg, rgba(216, 189, 132, 0.045), transparent 68%); }
 .record-featured-row:hover { background: linear-gradient(90deg, rgba(216, 189, 132, 0.09), rgba(143, 200, 190, 0.025) 72%, transparent); }
 .record-list-row:hover::before { color: rgba(216, 189, 132, 0.82); }

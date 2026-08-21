@@ -135,6 +135,18 @@ function PityPullAvatar({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   );
 }
 
+function OffRateStamp({ active, compact = false }: { active: boolean; compact?: boolean }) {
+  return (
+    <span
+      className={`record-off-rate-stamp ${compact ? 'record-off-rate-stamp-compact' : ''} ${active ? 'record-off-rate-stamp-active' : ''}`}
+      aria-label={active ? '歪' : undefined}
+      aria-hidden={!active}
+    >
+      {active ? '歪' : ''}
+    </span>
+  );
+}
+
 function PityBadge({ pity, lowerBound = false }: { pity: number; lowerBound?: boolean }) {
   const isHigh = pity >= 66;
   return (
@@ -456,6 +468,16 @@ export default function RecordsPage() {
     return stats.currentPity;
   }, [activePoolType, poolStats]);
 
+  const activePoolTrailingOffRate = useMemo<RecordWithPity | null>(() => {
+    if (activePoolType === 'all' || !LIMITED_ROLE_POOL_TYPES.has(activePoolType)) return null;
+    for (let index = chronologicalRecordsWithPity.length - 1; index >= 0; index -= 1) {
+      const item = chronologicalRecordsWithPity[index];
+      if (item.record.card_pool_type !== activePoolType || item.record.quality_level !== QUALITY.FIVE_STAR) continue;
+      return item.record.is_off_rate ? item : null;
+    }
+    return null;
+  }, [activePoolType, chronologicalRecordsWithPity]);
+
   useEffect(() => {
     const previousPageSize = previousGridPageSizeRef.current;
     if (viewMode === 'grid' && previousPageSize !== gridItemsPerPage) {
@@ -532,6 +554,8 @@ export default function RecordsPage() {
     if (activePoolType === 'all') {
       filteredRecords.forEach((item) => {
         const { record } = item;
+        // 全部卡池的 UP 合并只展示 UP 获取和其它未归并记录，孤立歪五星不单独列出。
+        if (record.quality_level === QUALITY.FIVE_STAR && record.is_off_rate) return;
         const belongsToCompletedGroup = record.id != null && groupedRecordIds.has(record.id);
         if (!LIMITED_ROLE_POOL_TYPES.has(record.card_pool_type) || !belongsToCompletedGroup) {
           rows.push({ kind: 'record', item });
@@ -574,6 +598,16 @@ export default function RecordsPage() {
   const canShowFeaturedGrouping = viewMode === 'list'
     && (activePoolType === 'all' || LIMITED_ROLE_POOL_TYPES.has(activePoolType));
   const showingFeaturedAcquisitions = canShowFeaturedGrouping && listGrouping === 'featured';
+  const activePoolCurrentFeaturedCycle = useMemo(() => {
+    if (!showingFeaturedAcquisitions || activePoolCurrentPity === null) return null;
+    const offRatePity = activePoolTrailingOffRate?.pity ?? 0;
+    return {
+      offRatePity,
+      currentPity: activePoolCurrentPity,
+      totalPity: offRatePity + activePoolCurrentPity,
+      isLowerBound: activePoolTrailingOffRate?.isLowerBound ?? false,
+    };
+  }, [activePoolCurrentPity, activePoolTrailingOffRate, showingFeaturedAcquisitions]);
   const activePagedList = showingFeaturedAcquisitions ? featuredPagedList : pagedList;
   const activeLowerBoundCount = showingFeaturedAcquisitions
     ? featuredListRows.filter((item) => item.kind === 'featured' ? item.row.isLowerBound : item.item.isLowerBound).length
@@ -1034,21 +1068,43 @@ export default function RecordsPage() {
                         <PityPullAvatar />
                         <div className="w-24 shrink-0 min-w-0">
                           <div className="truncate text-sm text-tide" style={{ color: QUALITY_COLORS[QUALITY.FIVE_STAR] }}>垫抽中</div>
-                          <div className="mt-0.5 text-[10px] tabular-nums text-wave">当前卡池</div>
+                          <div className="mt-0.5 truncate text-[10px] tabular-nums text-wave">
+                            {activePoolCurrentFeaturedCycle?.offRatePity
+                              ? `歪 ${activePoolCurrentFeaturedCycle.offRatePity} + 垫 ${activePoolCurrentFeaturedCycle.currentPity}`
+                              : activePoolCurrentFeaturedCycle ? '当前 UP 周期' : '当前卡池'}
+                          </div>
                         </div>
                         <div className="flex min-w-0 flex-1 items-center gap-2">
-                          <div className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]">
-                            <div
-                              className="record-pity-progress-fill h-full rounded"
-                              style={{ width: `${Math.min((activePoolCurrentPity / 80) * 100, 100)}%`, backgroundColor: getBarColor(activePoolCurrentPity) }}
-                            />
+                          <div
+                            className="relative h-5 min-w-[72px] flex-1 overflow-hidden rounded bg-white/[0.06]"
+                            aria-label={activePoolCurrentFeaturedCycle ? `${activePoolCurrentFeaturedCycle.totalPity}/160 抽` : `${activePoolCurrentPity}/80 抽`}
+                          >
+                            {activePoolCurrentFeaturedCycle ? (
+                              <div
+                                className="record-featured-progress-fill flex h-full overflow-hidden rounded"
+                                style={{ width: `${Math.min((activePoolCurrentFeaturedCycle.totalPity / 160) * 100, 100)}%` }}
+                              >
+                                {activePoolCurrentFeaturedCycle.offRatePity > 0 && (
+                                  <span data-off-rate="true" style={{ flexGrow: activePoolCurrentFeaturedCycle.offRatePity }} />
+                                )}
+                                <span data-off-rate="false" style={{ flexGrow: activePoolCurrentFeaturedCycle.currentPity }} />
+                              </div>
+                            ) : (
+                              <div
+                                className="record-pity-progress-fill h-full rounded"
+                                style={{ width: `${Math.min((activePoolCurrentPity / 80) * 100, 100)}%`, backgroundColor: getBarColor(activePoolCurrentPity) }}
+                              />
+                            )}
                           </div>
-                          <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums" style={{ color: getBarColor(activePoolCurrentPity) }}>
-                            {activePoolCurrentPity}
+                          <span
+                            className={`${activePoolCurrentFeaturedCycle ? 'w-10 text-[#d8bd84]' : 'w-8'} shrink-0 text-right text-xs font-semibold tabular-nums`}
+                            style={activePoolCurrentFeaturedCycle ? undefined : { color: getBarColor(activePoolCurrentPity) }}
+                          >
+                            {activePoolCurrentFeaturedCycle?.isLowerBound ? '≥' : ''}{activePoolCurrentFeaturedCycle?.totalPity ?? activePoolCurrentPity}
                           </span>
-                          <span className="w-5 shrink-0 text-center text-[10px] font-bold text-transparent">
-                            歪
-                          </span>
+                          {activePoolCurrentFeaturedCycle
+                            ? <span className="w-8 shrink-0 text-center text-[10px] text-wave">共计</span>
+                            : <span className="w-7 shrink-0" aria-hidden="true" />}
                         </div>
                       </div>
                     )}
@@ -1071,7 +1127,7 @@ export default function RecordsPage() {
                               <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums" style={{ color: barColor }}>
                                 {isLowerBound ? '≥' : ''}{pity}
                               </span>
-                              <span className={`w-5 shrink-0 text-center text-[10px] font-bold ${record.is_off_rate ? 'text-[#d84848]' : 'text-transparent'}`}>歪</span>
+                              <OffRateStamp active={record.is_off_rate} />
                             </div>
                           </div>
                         );
@@ -1130,9 +1186,7 @@ export default function RecordsPage() {
                             <span className="w-8 shrink-0 text-right text-xs font-semibold tabular-nums" style={{ color: barColor }}>
                               {isLowerBound ? '≥' : ''}{pity}
                             </span>
-                            <span className={`w-5 shrink-0 text-center text-[10px] font-bold ${record.is_off_rate ? 'text-[#d84848]' : 'text-transparent'}`}>
-                              歪
-                            </span>
+                            <OffRateStamp active={record.is_off_rate} />
                           </div>
                         </div>
                       );
@@ -1165,7 +1219,11 @@ export default function RecordsPage() {
                         <div key={getRecordKey(record, index)} data-record-id={record.id} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
                           <div className="relative aspect-square overflow-hidden rounded-md">
                             <RecordAvatar record={record} size="lg" />
-                            {record.is_off_rate && <span className="absolute bottom-1.5 left-1.5 rounded bg-[#a64f4f] px-1.5 py-0.5 text-[10px] text-white">歪</span>}
+                            {record.is_off_rate && (
+                              <span className="absolute bottom-1.5 right-1.5">
+                                <OffRateStamp active compact />
+                              </span>
+                            )}
                           </div>
                           <div className="mt-2 truncate text-center text-xs text-tide">{record.name}</div>
                           <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave">
