@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { LoaderCircle } from 'lucide-react';
 import type { GachaRecord, GachaResource } from '../types';
 import { POOL_TYPES } from '../types';
@@ -51,6 +52,22 @@ type TimeParts = {
 };
 
 const pad2 = (value: number) => String(value).padStart(2, '0');
+const FIRST_GACHA_YEAR = 2024;
+
+function parseDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year
+    || parsed.getMonth() !== month - 1
+    || parsed.getDate() !== day
+  ) return null;
+  return parsed;
+}
 
 function toTimeParts(value?: string): TimeParts {
   const match = value?.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
@@ -104,6 +121,9 @@ export default function MockGachaDialog({
   const [resourceOpen, setResourceOpen] = useState(false);
   const [timeOpen, setTimeOpen] = useState(false);
   const [resourceQuery, setResourceQuery] = useState('');
+  const timeButtonRef = useRef<HTMLButtonElement>(null);
+  const timePanelRef = useRef<HTMLDivElement>(null);
+  const [timePanelStyle, setTimePanelStyle] = useState<React.CSSProperties>({});
 
   useEffect(() => {
     if (!open) return;
@@ -121,6 +141,42 @@ export default function MockGachaDialog({
     setTimeOpen(false);
     setResourceQuery('');
   }, [open, record, initialPoolType]);
+
+  useLayoutEffect(() => {
+    if (!timeOpen) return;
+    const updatePosition = () => {
+      const trigger = timeButtonRef.current;
+      if (!trigger) return;
+      const rect = trigger.getBoundingClientRect();
+      const viewportPadding = 12;
+      const width = Math.min(360, window.innerWidth - 24);
+      const maxHeight = Math.max(160, window.innerHeight - viewportPadding * 2);
+      const measuredHeight = timePanelRef.current?.getBoundingClientRect().height ?? 360;
+      const panelHeight = Math.min(measuredHeight, maxHeight);
+      const viewportLeft = Math.max(viewportPadding, Math.min(rect.right - width, window.innerWidth - width - viewportPadding));
+      const aboveTop = rect.top - panelHeight - 8;
+      const belowTop = rect.bottom + 8;
+      const maxTop = Math.max(viewportPadding, window.innerHeight - panelHeight - viewportPadding);
+      const viewportTop = belowTop + panelHeight <= window.innerHeight - viewportPadding
+        ? belowTop
+        : aboveTop >= viewportPadding
+          ? aboveTop
+          : maxTop;
+      setTimePanelStyle({
+        left: viewportLeft,
+        top: viewportTop,
+        width,
+        maxHeight: `calc(100vh - ${viewportPadding * 2}px)`,
+      });
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [timeOpen]);
 
   const availableResources = useMemo(() => {
     const quality = record?.quality_level ?? 5;
@@ -173,16 +229,26 @@ export default function MockGachaDialog({
     const month = calendarMonth.getMonth();
     const leadingBlanks = (new Date(year, month, 1).getDay() + 6) % 7;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    return [
-      ...Array.from({ length: leadingBlanks }, () => null),
-      ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
-    ];
+    return Array.from({ length: 42 }, (_, index) => {
+      const day = index - leadingBlanks + 1;
+      return day >= 1 && day <= daysInMonth ? day : null;
+    });
   }, [calendarMonth]);
 
-  const timeValid = /^\d{4}-\d{2}-\d{2}$/.test(date)
+  const dateValid = parseDate(date) !== null;
+  const timeValid = dateValid
     && validTimePart(hour, 23)
     && validTimePart(minute, 59)
     && validTimePart(second, 59);
+  const currentYear = new Date().getFullYear();
+  const yearOptions = Array.from(
+    { length: Math.max(1, currentYear - FIRST_GACHA_YEAR + 1) },
+    (_, index) => currentYear - index,
+  );
+  if (!yearOptions.includes(calendarMonth.getFullYear())) {
+    yearOptions.push(calendarMonth.getFullYear());
+    yearOptions.sort((left, right) => right - left);
+  }
   const displayTime = `${date.replace(/-/g, '/')} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`;
 
   const submit = async (event: React.FormEvent) => {
@@ -317,6 +383,7 @@ export default function MockGachaDialog({
           <div className={`relative grid min-w-0 gap-1.5 text-xs text-wave ${editing ? 'sm:col-span-2' : ''} ${timeOpen ? 'z-30' : ''}`}>
             记录时间
             <button
+              ref={timeButtonRef}
               type="button"
               onClick={() => { setTimeOpen((value) => !value); setPoolOpen(false); setResourceOpen(false); }}
               className="glass-input relative flex h-10 min-w-0 w-full items-center px-3 pr-10 text-left text-sm tabular-nums text-tide"
@@ -326,45 +393,102 @@ export default function MockGachaDialog({
               <span className="truncate">{displayTime}</span>
               <ResonanceIcon kind="calendar" size={16} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-wave" />
             </button>
-            {timeOpen && (
-              <div className="absolute bottom-full right-0 z-30 mb-1 w-[360px] max-w-[calc(100vw-3rem)] rounded-md border border-white/[0.1] bg-[#202020] p-3 shadow-2xl" role="dialog" aria-label="选择记录时间">
-                <div className="flex items-center justify-between">
-                  <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="flex h-8 w-8 items-center justify-center rounded text-wave hover:bg-white/[0.06] hover:text-tide" title="上个月">
+            {timeOpen && createPortal(
+              <div ref={timePanelRef} className="fixed z-[60] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-md border border-white/[0.1] bg-[#202020] p-2.5 shadow-2xl" style={timePanelStyle} role="dialog" aria-label="选择记录时间">
+                <div className="grid grid-cols-[28px_1fr_28px] items-center gap-2">
+                  <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="flex h-7 w-7 items-center justify-center rounded text-wave hover:bg-white/[0.06] hover:text-tide" title="上个月" aria-label="上个月">
                     <ResonanceIcon kind="previous" size={15} />
                   </button>
-                  <span className="text-sm font-medium text-tide">{calendarMonth.getFullYear()} 年 {calendarMonth.getMonth() + 1} 月</span>
-                  <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="flex h-8 w-8 items-center justify-center rounded text-wave hover:bg-white/[0.06] hover:text-tide" title="下个月">
+                  <div className="flex min-w-0 items-center justify-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <select
+                        value={calendarMonth.getFullYear()}
+                        onChange={(event) => setCalendarMonth(new Date(Number(event.target.value), calendarMonth.getMonth(), 1))}
+                        className="glass-input h-7 w-full appearance-none px-7 text-center text-xs tabular-nums text-tide"
+                        aria-label="选择年份"
+                      >
+                        {yearOptions.map((year) => <option key={year} value={year}>{year} 年</option>)}
+                      </select>
+                      <ResonanceIcon kind="chevron" size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-wave" />
+                    </div>
+                    <div className="relative min-w-0 flex-1">
+                      <select
+                        value={calendarMonth.getMonth()}
+                        onChange={(event) => setCalendarMonth(new Date(calendarMonth.getFullYear(), Number(event.target.value), 1))}
+                        className="glass-input h-7 w-full appearance-none px-7 text-center text-xs tabular-nums text-tide"
+                        aria-label="选择月份"
+                      >
+                        {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{month + 1} 月</option>)}
+                      </select>
+                      <ResonanceIcon kind="chevron" size={12} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-wave" />
+                    </div>
+                  </div>
+                  <button type="button" onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="flex h-7 w-7 items-center justify-center rounded text-wave hover:bg-white/[0.06] hover:text-tide" title="下个月" aria-label="下个月">
                     <ResonanceIcon kind="next" size={15} />
                   </button>
                 </div>
-                <div className="mt-2 grid grid-cols-7 text-center text-[10px] text-wave">
-                  {['一', '二', '三', '四', '五', '六', '日'].map((weekday) => <span key={weekday} className="py-1">{weekday}</span>)}
+                <div className="mt-1.5 grid grid-cols-7 text-center text-[10px] text-wave">
+                  {['一', '二', '三', '四', '五', '六', '日'].map((weekday) => <span key={weekday} className="py-0.5">{weekday}</span>)}
                 </div>
-                <div className="grid grid-cols-7 gap-1">
+                <div className="grid grid-cols-7 gap-0.5">
                   {calendarDays.map((day, index) => {
-                    if (day === null) return <span key={`blank-${index}`} className="h-8" />;
+                    if (day === null) return <span key={`blank-${index}`} className="h-7" />;
                     const dayValue = `${calendarMonth.getFullYear()}-${pad2(calendarMonth.getMonth() + 1)}-${pad2(day)}`;
                     return (
                       <button
                         key={dayValue}
                         type="button"
                         onClick={() => setDate(dayValue)}
-                        className={`h-8 rounded text-xs ${dayValue === date ? 'bg-ember text-[#171717]' : 'text-tide hover:bg-white/[0.07]'}`}
+                        className={`h-7 rounded text-xs ${dayValue === date ? 'bg-ember text-[#171717]' : 'text-tide hover:bg-white/[0.07]'}`}
                       >
                         {day}
                       </button>
                     );
                   })}
                 </div>
-                <div className="mt-3 flex items-end gap-2 border-t border-white/[0.07] pt-3">
-                  <ResonanceIcon kind="clock" size={16} className="mb-2.5 shrink-0 text-wave" />
+                <div className="mt-2 flex items-end gap-2 border-t border-white/[0.07] pt-2">
+                  <label className="grid min-w-0 flex-1 gap-1 text-[10px] text-wave">
+                    日期
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={date}
+                      maxLength={10}
+                      onFocus={(event) => event.currentTarget.select()}
+                      onChange={(event) => {
+                        const nextDate = event.target.value;
+                        if (!/^[\d-]{0,10}$/.test(nextDate)) return;
+                        setDate(nextDate);
+                        const parsed = parseDate(nextDate);
+                        if (parsed) setCalendarMonth(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+                      }}
+                      className="glass-input h-8 min-w-0 w-full px-2 text-center text-xs tabular-nums text-tide"
+                      placeholder="YYYY-MM-DD"
+                      aria-label="日期"
+                      aria-invalid={!dateValid}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const today = new Date();
+                      setDate(`${today.getFullYear()}-${pad2(today.getMonth() + 1)}-${pad2(today.getDate())}`);
+                      setCalendarMonth(new Date(today.getFullYear(), today.getMonth(), 1));
+                    }}
+                    className="h-8 shrink-0 rounded px-3 text-xs text-wave hover:bg-white/[0.06] hover:text-tide"
+                  >
+                    今天
+                  </button>
+                </div>
+                <div className="mt-1.5 flex items-end gap-2">
+                  <ResonanceIcon kind="clock" size={16} className="mb-2 shrink-0 text-wave" />
                   {[
                     { label: '时', value: hour, setValue: setHour, max: 23 },
                     { label: '分', value: minute, setValue: setMinute, max: 59 },
                     { label: '秒', value: second, setValue: setSecond, max: 59 },
                   ].map((part, index) => (
                     <div key={part.label} className="flex min-w-0 flex-1 items-end gap-2">
-                      {index > 0 && <span className="mb-2.5 text-wave">:</span>}
+                      {index > 0 && <span className="mb-2 text-wave">:</span>}
                       <label className="grid min-w-0 flex-1 gap-1 text-[10px] text-wave">
                         {part.label}
                         <input
@@ -375,15 +499,16 @@ export default function MockGachaDialog({
                           onFocus={(event) => event.currentTarget.select()}
                           onChange={(event) => { if (/^\d{0,2}$/.test(event.target.value)) part.setValue(event.target.value); }}
                           onBlur={() => part.setValue(normalizeTimePart(part.value, part.max))}
-                          className="glass-input h-9 min-w-0 w-full px-2 text-center text-sm tabular-nums text-tide"
+                          className="glass-input h-8 min-w-0 w-full px-2 text-center text-sm tabular-nums text-tide"
                           aria-label={part.label}
                         />
                       </label>
                     </div>
                   ))}
-                  <button type="button" onClick={() => setTimeOpen(false)} disabled={!timeValid} className="tide-btn h-9 shrink-0 px-3 text-xs disabled:opacity-40">确定</button>
+                  <button type="button" onClick={() => setTimeOpen(false)} disabled={!timeValid} className="tide-btn h-8 shrink-0 px-3 text-xs disabled:opacity-40">确定</button>
                 </div>
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         </div>
