@@ -791,7 +791,11 @@ pub fn get_stats(
     let query_started = Instant::now();
     let records = db.get_all_records(player_id.as_deref())?;
     let confirmed_boundaries = match player_id.as_deref() {
-        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        Some(player_id) => {
+            let mut boundaries = db.confirmed_pool_boundaries(player_id)?;
+            boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
+            boundaries
+        },
         None => Default::default(),
     };
     let query_ms = query_started.elapsed().as_millis();
@@ -835,7 +839,13 @@ pub fn get_gacha_insights(
     )?;
     let confirmed = match (range_active, player_id.as_deref()) {
         (true, _) => Default::default(),
-        (false, Some(player_id)) => db.confirmed_pool_boundaries(player_id)?,
+        (false, Some(player_id)) => {
+            let mut boundaries = db.confirmed_pool_boundaries(player_id)?;
+            if include_mock {
+                boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
+            }
+            boundaries
+        },
         (false, None) => Default::default(),
     };
     Ok(GachaInsights::from_records_with_boundaries(
@@ -855,7 +865,13 @@ pub fn get_character_pull_insights(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
     let confirmed = match player_id.as_deref() {
-        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        Some(player_id) => {
+            let mut boundaries = db.confirmed_pool_boundaries(player_id)?;
+            if include_mock {
+                boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
+            }
+            boundaries
+        },
         None => Default::default(),
     };
     Ok(character_pull_insights_with_boundaries(
@@ -874,7 +890,13 @@ pub fn get_resource_acquisition_insights(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(player_id.as_deref())?;
     let confirmed = match player_id.as_deref() {
-        Some(player_id) => db.confirmed_pool_boundaries(player_id)?,
+        Some(player_id) => {
+            let mut boundaries = db.confirmed_pool_boundaries(player_id)?;
+            if include_mock {
+                boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
+            }
+            boundaries
+        },
         None => Default::default(),
     };
     Ok(resource_acquisition_insights_with_boundaries(
@@ -891,12 +913,13 @@ pub fn get_pool_boundary_statuses(
 ) -> Result<Vec<PoolBoundaryStatus>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let records = db.get_all_records(Some(&player_id))?;
-    let confirmed = db.confirmed_pool_boundaries(&player_id)?;
+    let mut confirmed = db.confirmed_pool_boundaries(&player_id)?;
+    confirmed.extend(db.inferred_mock_pool_boundaries(&player_id)?);
     let mut boundaries = Vec::new();
     for (_, pool_type) in POOL_TYPES.iter() {
         let mut pool_records: Vec<_> = records
             .iter()
-            .filter(|record| !record.is_mock && record.card_pool_type == *pool_type)
+            .filter(|record| record.card_pool_type == *pool_type)
             .collect();
         pool_records.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
         let Some(first_five_index) = pool_records

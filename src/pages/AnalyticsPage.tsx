@@ -386,7 +386,7 @@ export default function AnalyticsPage() {
   const initialized = useGachaStore((state) => state.initialized);
   const activeRecordCount = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId)?.record_count ?? 0);
   const activeSummary = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId) ?? null);
-  const [includeMock, setIncludeMock] = useState(false);
+  const [includeMock, setIncludeMock] = useState(true);
   const [insights, setInsights] = useState<GachaInsights | null>(null);
   const [activePoolType, setActivePoolType] = useState<string | null>(null);
   const [plannedPulls, setPlannedPulls] = useState(20);

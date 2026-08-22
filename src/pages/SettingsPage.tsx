@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { open as openDialog, save } from '@tauri-apps/plugin-dialog';
 import { open as openUrl } from '@tauri-apps/plugin-shell';
 import { type Update } from '@tauri-apps/plugin-updater';
@@ -34,6 +35,7 @@ import type { GameDirValidation, PoolBoundaryStatus, RecordSummary } from '../ty
 
 type DeleteTarget = { playerId: string | null };
 type ExportTarget = { playerId: string; earliestDate: string; latestDate: string };
+type BoundaryNavigationState = { boundaryPlayerId?: string; boundaryPoolType?: string };
 
 // 去除 release notes 末尾由模板自动生成的下载提示和自动生成标记
 // 这些内容在 GitHub Release 页面有意义，但出现在更新弹窗中不合适
@@ -47,6 +49,8 @@ function stripUpdateNotesFooter(body: string): string {
 }
 
 export default function SettingsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const settings = useGachaStore((state) => state.settings);
   const fetchSettings = useGachaStore((state) => state.fetchSettings);
   const saveGameDir = useGachaStore((state) => state.saveGameDir);
@@ -73,6 +77,10 @@ export default function SettingsPage() {
   const [boundaryStatuses, setBoundaryStatuses] = useState<Record<string, PoolBoundaryStatus[]>>({});
   const [boundaryPlayerId, setBoundaryPlayerId] = useState<string | null>(null);
   const [boundaryConfirmation, setBoundaryConfirmation] = useState<PoolBoundaryStatus | null>(null);
+  const [highlightedBoundaryPoolType, setHighlightedBoundaryPoolType] = useState<string | null>(null);
+  const [fadingBoundaryHighlight, setFadingBoundaryHighlight] = useState(false);
+  const boundaryHighlightTimerRef = useRef<number | null>(null);
+  const boundaryHighlightFadeTimerRef = useRef<number | null>(null);
   const [boundarySaving, setBoundarySaving] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
   const availableUpdate = useUpdateStore((state) => state.availableUpdate);
@@ -106,6 +114,42 @@ export default function SettingsPage() {
       .catch(() => { if (!cancelled) setBoundaryStatuses({}); });
     return () => { cancelled = true; };
   }, [pools, storeSummaries]);
+
+  useEffect(() => {
+    const requested = (location.state ?? {}) as BoundaryNavigationState;
+    const playerId = requested.boundaryPlayerId;
+    const poolType = requested.boundaryPoolType;
+    if (!playerId || !boundaryStatuses[playerId]) return;
+
+    setBoundaryPlayerId(playerId);
+    setHighlightedBoundaryPoolType(poolType ?? null);
+    setFadingBoundaryHighlight(false);
+    if (boundaryHighlightTimerRef.current !== null) {
+      window.clearTimeout(boundaryHighlightTimerRef.current);
+    }
+    if (boundaryHighlightFadeTimerRef.current !== null) {
+      window.clearTimeout(boundaryHighlightFadeTimerRef.current);
+    }
+    boundaryHighlightTimerRef.current = window.setTimeout(() => {
+      setFadingBoundaryHighlight(true);
+      boundaryHighlightTimerRef.current = null;
+      boundaryHighlightFadeTimerRef.current = window.setTimeout(() => {
+        setHighlightedBoundaryPoolType(null);
+        setFadingBoundaryHighlight(false);
+        boundaryHighlightFadeTimerRef.current = null;
+      }, 700);
+    }, 2500);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [boundaryStatuses, location.pathname, location.state, navigate]);
+
+  useEffect(() => () => {
+    if (boundaryHighlightTimerRef.current !== null) {
+      window.clearTimeout(boundaryHighlightTimerRef.current);
+    }
+    if (boundaryHighlightFadeTimerRef.current !== null) {
+      window.clearTimeout(boundaryHighlightFadeTimerRef.current);
+    }
+  }, []);
 
   const refreshBoundaryStatuses = async (playerId: string) => {
     const statuses = await gachaApi.getPoolBoundaryStatuses(playerId);
@@ -915,7 +959,9 @@ export default function SettingsPage() {
                 <p className="text-xs leading-5 text-wave">若确认首条记录前不存在更早垫抽，可将该卡池现存记录认定为完整起点。</p>
                 <section>
                   <div className="divide-y divide-white/[0.05] overflow-hidden rounded-md border border-white/[0.06]">
-                    {boundaryStatuses[boundaryPlayerId].map((boundary) => (
+                    {boundaryStatuses[boundaryPlayerId].map((boundary) => {
+                      const isBoundaryHighlightTarget = highlightedBoundaryPoolType === boundary.pool_type;
+                      return (
                       <div key={boundary.pool_type} className="flex items-center justify-between gap-4 px-3 py-3">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2 text-xs text-tide">
@@ -929,14 +975,32 @@ export default function SettingsPage() {
                             {!boundary.confirmed && '，当前不参与完整区间统计'}
                           </p>
                         </div>
-                        <button
+                        <motion.button
+                          key={`${boundary.pool_type}-${isBoundaryHighlightTarget ? 'highlight' : 'normal'}`}
                           onClick={() => setBoundaryConfirmation(boundary)}
-                          className="shrink-0 rounded-md border border-white/[0.08] px-2.5 py-1.5 text-[10px] text-wave hover:border-white/[0.14] hover:text-tide"
+                          animate={isBoundaryHighlightTarget ? (fadingBoundaryHighlight ? {
+                            borderColor: 'rgba(255,255,255,0)',
+                            backgroundColor: 'rgba(0,0,0,0)',
+                            color: '#9b9d9b',
+                            boxShadow: '0 0 0 rgba(0,0,0,0)',
+                          } : {
+                            borderColor: ['rgba(216,189,132,0.35)', 'rgba(216,189,132,0.9)', 'rgba(216,189,132,0.35)'],
+                            backgroundColor: ['rgba(216,189,132,0.06)', 'rgba(216,189,132,0.18)', 'rgba(216,189,132,0.06)'],
+                            color: ['#d8bd84', '#f0d9a7', '#d8bd84'],
+                            boxShadow: ['0 0 0 1px rgba(216,189,132,0.08)', '0 0 0 4px rgba(216,189,132,0.18)', '0 0 0 1px rgba(216,189,132,0.08)'],
+                          }) : undefined}
+                          transition={isBoundaryHighlightTarget
+                            ? fadingBoundaryHighlight
+                              ? { duration: 0.7, ease: 'easeOut' }
+                              : { duration: 1.8, repeat: Infinity, ease: 'linear' }
+                            : undefined}
+                          className="shrink-0 rounded-md border border-transparent px-2.5 py-1.5 text-[10px] text-wave transition-colors hover:border-white/[0.14] hover:text-tide"
                         >
                           {boundary.confirmed ? '撤销确认' : '确认起点'}
-                        </button>
+                        </motion.button>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
                 <p className="text-[10px] leading-5 text-wave">确认只影响边界标记与统计口径，不会修改、补造或删除记录；以后导入更早记录时会自动失效。</p>

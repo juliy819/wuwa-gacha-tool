@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowDown,
+  ArrowRight,
   ArrowUp,
   ChevronsLeft,
   ChevronsRight,
@@ -991,7 +992,21 @@ export default function RecordsPage() {
                 >
                   <div className="records-confidence-note">
                     <ResonanceIcon kind="info" size={13} />
-                    <span>本次筛选包含 {activeLowerBoundCount} 条历史起点不完整的{showingFeaturedAcquisitions ? activePoolType === 'all' ? '五星获取' : ' UP 获取' : '首个可见五星'}，抽数以 <b>≥</b> 标记。</span>
+                    <span className="min-w-0 flex-1">本次筛选包含 {activeLowerBoundCount} 条历史起点不完整的{showingFeaturedAcquisitions ? activePoolType === 'all' ? '五星获取' : ' UP 获取' : '首个可见五星'}，抽数以 <b>≥</b> 标记。</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/settings', {
+                        state: {
+                          boundaryPlayerId: activePlayerId ?? undefined,
+                          boundaryPoolType: activePoolType === 'all' ? undefined : activePoolType,
+                        },
+                      })}
+                      className="inline-flex shrink-0 items-center gap-1 text-[10px] text-[#d8bd84] hover:text-[#f0d9a7]"
+                      title="前往设置确认卡池历史起点"
+                    >
+                      去设置确认起点
+                      <ArrowRight size={12} />
+                    </button>
                   </div>
                 </motion.div>
               )}

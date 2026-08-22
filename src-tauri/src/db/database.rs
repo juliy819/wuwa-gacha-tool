@@ -1120,12 +1120,29 @@ impl Database {
                      AND r.time = b.earliest_time AND r.is_mock = 0
                )"
         ).map_err(|e| e.to_string())?;
-        let confirmed = stmt
+        let confirmed: HashSet<String> = stmt
             .query_map(params![player_id], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .collect();
+
         Ok(confirmed)
+    }
+
+    /// Pools whose earliest five-star is an automatically completed mock batch.
+    pub fn inferred_mock_pool_boundaries(&self, player_id: &str) -> Result<HashSet<String>, String> {
+        let mut stmt = self.conn.prepare(
+            "SELECT card_pool_type
+             FROM gacha_records
+             WHERE player_id = ?1 AND quality_level = 5
+             GROUP BY card_pool_type
+             HAVING MIN(time) = MIN(CASE WHEN is_mock = 1 THEN time END)"
+        ).map_err(|e| e.to_string())?;
+        let inferred = stmt
+            .query_map(params![player_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok);
+        Ok(inferred.collect())
     }
 
     pub fn set_pool_boundary_confirmed(
