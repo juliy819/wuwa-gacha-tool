@@ -609,6 +609,10 @@ export default function RecordsPage() {
     };
   }, [activePoolCurrentPity, activePoolTrailingOffRate, showingFeaturedAcquisitions]);
   const activePagedList = showingFeaturedAcquisitions ? featuredPagedList : pagedList;
+  const showCurrentPity = activePoolCurrentPity !== null
+    && (sortOrder === 'desc'
+      ? activePagedList.safeCurrentPage === 1
+      : activePagedList.safeCurrentPage === activePagedList.totalPages);
   const activeLowerBoundCount = showingFeaturedAcquisitions
     ? featuredListRows.filter((item) => item.kind === 'featured' ? item.row.isLowerBound : item.item.isLowerBound).length
     : lowerBoundCount;
@@ -1062,9 +1066,9 @@ export default function RecordsPage() {
                   aria-hidden="true"
                 />
                 {viewMode === 'list' && (
-                  <div className="record-list-track px-4">
-                    {activePoolCurrentPity !== null && (
-                      <div data-seq="00" className="record-list-row record-pity-pull-row flex min-h-[64px] items-center gap-3 py-2.5" style={{ opacity: 0.85 }}>
+                  <div className={`record-list-track px-4 ${sortOrder === 'asc' ? 'flex flex-col' : ''}`}>
+                    {showCurrentPity && (
+                      <div data-seq="00" className={`record-list-row record-pity-pull-row flex min-h-[64px] items-center gap-3 py-2.5 ${sortOrder === 'asc' ? 'order-last' : ''}`} style={{ opacity: 0.85 }}>
                         <PityPullAvatar />
                         <div className="w-24 shrink-0 min-w-0">
                           <div className="truncate text-sm text-tide" style={{ color: QUALITY_COLORS[QUALITY.FIVE_STAR] }}>垫抽中</div>
@@ -1196,8 +1200,8 @@ export default function RecordsPage() {
 
                 {viewMode === 'grid' && (
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3 p-4">
-                    {activePoolCurrentPity !== null && (
-                      <div data-seq="00" className="record-grid-card resonance-panel record-grid-card-five record-pity-pull-card min-w-0 p-2.5" style={{ opacity: 0.85 }}>
+                    {showCurrentPity && (
+                      <div data-seq="00" className={`record-grid-card resonance-panel record-grid-card-five record-pity-pull-card min-w-0 p-2.5 ${sortOrder === 'asc' ? 'order-last' : ''}`} style={{ opacity: 0.85 }}>
                         <div className="relative aspect-square overflow-hidden rounded-md">
                           <PityPullAvatar size="lg" />
                         </div>
