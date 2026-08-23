@@ -37,6 +37,9 @@ type DeleteTarget = { playerId: string | null };
 type ExportTarget = { playerId: string; earliestDate: string; latestDate: string };
 type BoundaryNavigationState = { boundaryPlayerId?: string; boundaryPoolType?: string };
 
+// Directory checks are stable for the lifetime of the app. Keep them across route remounts.
+const gameDirValidationCache = new Map<string, GameDirValidation>();
+
 // 去除 release notes 末尾由模板自动生成的下载提示和自动生成标记
 // 这些内容在 GitHub Release 页面有意义，但出现在更新弹窗中不合适
 function stripUpdateNotesFooter(body: string): string {
@@ -92,8 +95,8 @@ export default function SettingsPage() {
   const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useUiFeedback();
 
   useEffect(() => {
-    fetchSettings();
-  }, []);
+    if (!settings) fetchSettings();
+  }, [fetchSettings, settings]);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -184,15 +187,25 @@ export default function SettingsPage() {
       return;
     }
 
+    const cached = gameDirValidationCache.get(path);
+    if (cached) {
+      setValidation(cached);
+      setValidating(false);
+      return;
+    }
+
     let cancelled = false;
     setValidating(true);
     const timer = window.setTimeout(async () => {
       try {
         const result = await gachaApi.validateGameDir(path);
+        gameDirValidationCache.set(path, result);
         if (!cancelled) setValidation(result);
       } catch {
         if (!cancelled) {
-          setValidation({ valid: false, log_path: '', message: '目录校验失败，请重新选择' });
+          const result = { valid: false, log_path: '', message: '目录校验失败，请重新选择' };
+          gameDirValidationCache.set(path, result);
+          setValidation(result);
         }
       } finally {
         if (!cancelled) setValidating(false);

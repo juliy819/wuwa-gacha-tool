@@ -20,6 +20,7 @@ interface GachaStore {
   activePlayerId: string | null;
   confirmedBoundaryPoolTypes: string[];
   confirmedBoundaryPlayerId: string | null;
+  analyticsRevision: number;
   initialized: boolean;
 
   fetchRecords: () => Promise<void>;
@@ -61,6 +62,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   activePlayerId: null,
   confirmedBoundaryPoolTypes: [],
   confirmedBoundaryPlayerId: null,
+  analyticsRevision: 0,
   initialized: false,
 
   fetchRecords: async () => {
@@ -118,7 +120,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   fetchSummaries: async () => {
     try {
       const summaries = await gachaApi.getRecordSummaries();
-      set({ summaries });
+      set((state) => ({ summaries, analyticsRevision: state.analyticsRevision + 1 }));
     } catch (e) {
       throw e;
     }

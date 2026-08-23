@@ -14,6 +14,8 @@ import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 import type { GachaInsights, PityDistributionBin, PoolInsight } from '../types';
 
+const analyticsCache = new Map<string, GachaInsights>();
+
 const OFFICIAL_FIVE_STAR_RATE = 0.0185;
 const FIVE_STAR_EXPECTED_PULLS = Number((1 / OFFICIAL_FIVE_STAR_RATE).toFixed(1));
 const FEATURED_EXPECTED_PULLS = FIVE_STAR_EXPECTED_PULLS * 1.5;
@@ -384,10 +386,11 @@ export default function AnalyticsPage() {
   const navigate = useNavigate();
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
   const initialized = useGachaStore((state) => state.initialized);
+  const analyticsRevision = useGachaStore((state) => state.analyticsRevision);
   const activeRecordCount = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId)?.record_count ?? 0);
   const activeSummary = useGachaStore((state) => state.summaries.find((summary) => summary.player_id === state.activePlayerId) ?? null);
   const [includeMock, setIncludeMock] = useState(true);
-  const [insights, setInsights] = useState<GachaInsights | null>(null);
+  const [insights, setInsights] = useState<{ key: string; data: GachaInsights } | null>(null);
   const [activePoolType, setActivePoolType] = useState<string | null>(null);
   const [plannedPulls, setPlannedPulls] = useState(20);
   const [dateMode, setDateMode] = useState<'all' | 'custom'>('all');
@@ -396,6 +399,12 @@ export default function AnalyticsPage() {
   const [distributionDetail, setDistributionDetail] = useState<{ kind: 'five-star' | 'featured'; bin: PityDistributionBin } | null>(null);
   const poolNavRef = useRef<HTMLElement>(null);
   const [poolIndicator, setPoolIndicator] = useState({ top: 0, height: 0, visible: false });
+
+  const insightsKey = activePlayerId && (dateMode === 'all' || (startDate && endDate && startDate <= endDate))
+    ? `${activePlayerId}|${includeMock ? 'mock' : 'official'}|${dateMode}|${startDate}|${endDate}|${analyticsRevision}`
+    : null;
+  const cachedInsights = insightsKey ? analyticsCache.get(insightsKey) ?? null : null;
+  const visibleInsights = cachedInsights ?? (insights?.key === insightsKey ? insights.data : null);
 
   useEffect(() => {
     if (!activePlayerId) {
@@ -407,6 +416,15 @@ export default function AnalyticsPage() {
       setInsights(null);
       return;
     }
+    const key = `${activePlayerId}|${includeMock ? 'mock' : 'official'}|${dateMode}|${startDate}|${endDate}|${analyticsRevision}`;
+    const cached = analyticsCache.get(key);
+    if (cached) {
+      setInsights({ key, data: cached });
+      setActivePoolType((previous) => cached.pools.some((pool) => pool.pool_type === previous)
+        ? previous
+        : cached.pools.find((pool) => pool.complete_interval_count > 0)?.pool_type ?? cached.pools[0]?.pool_type ?? null);
+      return;
+    }
     gachaApi.getGachaInsights(
       activePlayerId,
       includeMock,
@@ -415,14 +433,15 @@ export default function AnalyticsPage() {
     )
       .then((result) => {
         if (!current) return;
-        setInsights(result);
+        analyticsCache.set(key, result);
+        setInsights({ key, data: result });
         setActivePoolType((previous) => result.pools.some((pool) => pool.pool_type === previous)
           ? previous
           : result.pools.find((pool) => pool.complete_interval_count > 0)?.pool_type ?? result.pools[0]?.pool_type ?? null);
       })
       .catch(() => { if (current) setInsights(null); });
     return () => { current = false; };
-  }, [activePlayerId, activeRecordCount, dateMode, endDate, includeMock, startDate]);
+  }, [activePlayerId, activeRecordCount, analyticsRevision, dateMode, endDate, includeMock, startDate]);
 
   const setAnalysisDateMode = (mode: 'all' | 'custom') => {
     setDateMode(mode);
@@ -447,11 +466,14 @@ export default function AnalyticsPage() {
     const observer = new ResizeObserver(updateIndicator);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, [activePoolType, insights?.pools]);
+  }, [activePoolType, visibleInsights?.pools]);
 
   const activePool = useMemo(
-    () => insights?.pools.find((pool) => pool.pool_type === activePoolType) ?? null,
-    [activePoolType, insights],
+    () => visibleInsights?.pools.find((pool) => pool.pool_type === activePoolType)
+      ?? visibleInsights?.pools.find((pool) => pool.complete_interval_count > 0)
+      ?? visibleInsights?.pools[0]
+      ?? null,
+    [activePoolType, visibleInsights],
   );
   const reliability = activePool ? RELIABILITY[activePool.reliability] : RELIABILITY.insufficient;
   const activeHardPity = activePool?.pool_type === '5' ? 50 : 80;
@@ -546,7 +568,7 @@ export default function AnalyticsPage() {
           <aside className="analysis-sidebar">
             <div className="analysis-sidebar-summary">
               <span>分析样本</span>
-              <strong>{insights?.total_records?.toLocaleString() ?? 0}</strong>
+              <strong>{visibleInsights?.total_records?.toLocaleString() ?? 0}</strong>
               <small>{includeMock ? '官方 + 模拟记录' : '仅官方记录'}</small>
               <div className="mt-3 flex rounded-md border border-white/[0.06] bg-white/[0.025] p-0.5">
                 {(['all', 'custom'] as const).map((mode) => <button type="button" key={mode} onClick={() => setAnalysisDateMode(mode)} className={`flex-1 rounded px-2 py-1.5 text-[10px] ${dateMode === mode ? 'bg-white/[0.08] text-tide' : 'text-wave hover:text-tide'}`}>{mode === 'all' ? '全部时间' : '自定义'}</button>)}
@@ -559,7 +581,7 @@ export default function AnalyticsPage() {
                 </div>
               ) : null}
             </div>
-            {insights && insights.pools.length > 0 ? (
+            {visibleInsights && visibleInsights.pools.length > 0 ? (
               <nav ref={poolNavRef} className="analysis-pool-list" aria-label="分析卡池">
                 <motion.div
                   initial={false}
@@ -570,7 +592,7 @@ export default function AnalyticsPage() {
                 >
                   <span className="pool-active-surface" />
                 </motion.div>
-                {insights.pools.map((pool) => {
+                {visibleInsights.pools.map((pool) => {
                   const active = pool.pool_type === activePoolType;
                   const hardPity = pool.pool_type === '5' ? 50 : 80;
                   return (

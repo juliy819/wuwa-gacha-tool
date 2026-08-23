@@ -172,6 +172,7 @@ export default function RecordsPage() {
   const initialized = useGachaStore((state) => state.initialized);
   const fetchRecords = useGachaStore((state) => state.fetchRecords);
   const fetchStats = useGachaStore((state) => state.fetchStats);
+  const fetchSummaries = useGachaStore((state) => state.fetchSummaries);
   const loading = useGachaStore((state) => state.loading);
   const error = useGachaStore((state) => state.error);
   const addToast = useGachaStore((state) => state.addToast);
@@ -310,6 +311,7 @@ export default function RecordsPage() {
     await Promise.all([
       fetchRecords(),
       activePlayerId ? fetchStats(activePlayerId) : Promise.resolve(),
+      fetchSummaries(),
     ]);
   };
 
