@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useGachaStore } from '../store/useGachaStore';
 import { useUpdateStore } from '../store/useUpdateStore';
+import { displayUid } from '../lib/shareMode';
 import appIcon from '../../src-tauri/icons/32x32.png';
 import ResonanceCloseButton from './ResonanceCloseButton';
 import ResonanceActionIcon from './ResonanceActionIcon';
@@ -167,7 +168,7 @@ export default function Navbar() {
               onClick={() => setMenuOpen(!menuOpen)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm glass-input"
             >
-              <span className="text-tide">{activePlayerId || '选择玩家'}</span>
+              <span className="text-tide">{activePlayerId ? displayUid(activePlayerId) : '选择玩家'}</span>
               <ResonanceIcon kind="chevron" size={14} className={`transition-transform ${menuOpen ? 'rotate-180' : ''}`} />
             </button>
             {menuOpen && <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />}
@@ -187,7 +188,7 @@ export default function Navbar() {
                       className="w-full text-left px-4 py-2.5 text-sm flex items-center justify-between hover:bg-[rgba(212,212,212,0.06)] transition-colors"
                       style={{ color: activePlayerId === id ? '#d4d4d4' : '#b4b4b4' }}
                     >
-                      {id}
+                      {displayUid(id)}
                       {activePlayerId === id && <ResonanceIcon kind="check" size={14} className="text-tide" />}
                     </button>
                   ))}

@@ -8,6 +8,7 @@ import {
   type SyncFreshness as SyncFreshnessType,
 } from '../lib/utils';
 import { useGachaStore } from '../store/useGachaStore';
+import { displayUid } from '../lib/shareMode';
 import ResonanceIcon from './ResonanceModeIcon';
 
 export default function StatusBar() {
@@ -80,7 +81,7 @@ export default function StatusBar() {
             <span className="h-3 w-px bg-white/10" />
             <span className="flex items-center gap-1.5">
               <ResonanceIcon kind="user" size={12} className="text-[#8fc8be]" />
-              <span className="tabular-nums text-tide-dim">UID {activePlayerId}</span>
+              <span className="tabular-nums text-tide-dim">UID {displayUid(activePlayerId)}</span>
             </span>
             {activeRecordCount > 0 && (
               <>

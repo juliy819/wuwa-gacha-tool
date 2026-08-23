@@ -1,5 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import type { ToastMessage } from '../types';
+import { displaySensitiveText } from '../lib/shareMode';
 import ResonanceCloseButton from './ResonanceCloseButton';
 import ResonanceIcon from './ResonanceModeIcon';
 
@@ -36,7 +37,7 @@ export default function Toast({ messages, onRemove }: ToastProps) {
             {msg.type === 'info' && (
               <ResonanceIcon kind="info" size={19} className="text-[#7a8ab8]" />
             )}
-            <span className="text-sm text-tide flex-1">{msg.message}</span>
+            <span className="text-sm text-tide flex-1">{displaySensitiveText(msg.message)}</span>
             <ResonanceCloseButton
               onClick={() => onRemove(msg.id)}
               size="sm"

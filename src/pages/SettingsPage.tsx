@@ -18,12 +18,14 @@ import Modal from '../components/Modal';
 import ResonanceCloseButton from '../components/ResonanceCloseButton';
 import ResonanceActionIcon from '../components/ResonanceActionIcon';
 import ResonanceIcon from '../components/ResonanceModeIcon';
+import { ShareMaskedInput } from '../components/ShareMaskedField';
 import ResonanceEmptyState from '../components/ResonanceEmptyState';
 import ThemedDateInput from '../components/ThemedDateInput';
 import { useUiFeedback } from '../hooks/useUiFeedback';
 import { playUiFeedback } from '../lib/uiFeedback';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
+import { displayPath, displaySensitiveText, displayUid, shareSafeFileToken } from '../lib/shareMode';
 import {
   getSyncFreshness,
   daysSince,
@@ -274,7 +276,7 @@ export default function SettingsPage() {
         : { label: '需要检查', tone: 'error' };
 
   const selectedSummary = deleteTarget?.playerId ? summaryByPlayer.get(deleteTarget.playerId) : null;
-  const expectedConfirmation = deleteTarget?.playerId ?? '清空全部数据';
+  const expectedConfirmation = deleteTarget?.playerId ? displayUid(deleteTarget.playerId) : '清空全部数据';
   const targetRecordCount = deleteTarget?.playerId ? selectedSummary?.record_count ?? 0 : totalRecords;
 
   // 展示用的辅助函数：每个玩家 → 记录范围（完整日期段） + 最近同步时间（单点）
@@ -385,7 +387,7 @@ export default function SettingsPage() {
   const copyBackupPath = async () => {
     if (!lastBackupPath) return;
     try {
-      await navigator.clipboard.writeText(lastBackupPath);
+      await navigator.clipboard.writeText(displayPath(lastBackupPath));
       addToast('success', '备份路径已复制');
     } catch {
       addToast('error', '复制失败');
@@ -422,7 +424,7 @@ export default function SettingsPage() {
       setExporting(true);
       const suffix = customRange ? `${exportStartDate}_${exportEndDate}` : 'all';
       const path = await save({
-        defaultPath: `uid_${exportTarget.playerId}_${suffix}.json`,
+        defaultPath: `uid_${shareSafeFileToken(exportTarget.playerId)}_${suffix}.json`,
         filters: [{ name: 'JSON', extensions: ['json'] }],
       });
       if (!path) return;
@@ -555,12 +557,14 @@ export default function SettingsPage() {
                 <label className="mt-5 block">
                   <span className="mb-2 block text-xs text-wave">游戏根目录</span>
                   <div className="flex gap-2">
-                    <input
+                    <ShareMaskedInput
                       type="text"
                       value={gameDirInput}
+                      displayValue={displayPath(gameDirInput)}
                       onChange={(event) => setGameDirInput(event.target.value)}
                       placeholder="例如: E:\Wuthering Waves\Wuthering Waves Game"
-                      className="glass-input min-w-0 flex-1 px-3 py-2.5 text-sm"
+                      containerClassName="min-w-0 flex-1"
+                      className="glass-input w-full px-3 py-2.5 text-sm"
                     />
                     <button onClick={handleSelectFolder} className="glass-input flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm text-wave hover:text-tide">
                       <ResonanceActionIcon size="sm"><ResonanceIcon kind="directory" size={14} /></ResonanceActionIcon>选择
@@ -574,9 +578,9 @@ export default function SettingsPage() {
                   ) : validating ? (
                     <div className="flex items-center gap-2 text-[11px] text-wave"><LoaderCircle size={12} className="animate-spin" />正在检查 Client.log</div>
                   ) : validation?.valid ? (
-                    <div className="flex items-center gap-2 text-[11px] text-[#8fc8be]"><ResonanceIcon kind="success" size={13} />{validation.message}</div>
+                    <div className="flex items-center gap-2 text-[11px] text-[#8fc8be]"><ResonanceIcon kind="success" size={13} />{displaySensitiveText(validation.message)}</div>
                   ) : (
-                    <div className="flex items-center gap-2 text-[11px] text-[#d99a9a]"><ResonanceIcon kind="error" size={13} />{validation?.message}</div>
+                    <div className="flex items-center gap-2 text-[11px] text-[#d99a9a]"><ResonanceIcon kind="error" size={13} />{displaySensitiveText(validation?.message)}</div>
                   )}
                 </div>
 
@@ -714,7 +718,7 @@ export default function SettingsPage() {
                   <ResonanceIcon kind="success" size={15} className="shrink-0 text-[#8fc8be]" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[11px] text-[#8fc8be]">删除前备份已创建</div>
-                    <div className="mt-0.5 truncate text-[10px] text-wave" title={lastBackupPath}>{lastBackupPath}</div>
+                    <div className="mt-0.5 truncate text-[10px] text-wave" title={displayPath(lastBackupPath)}>{displayPath(lastBackupPath)}</div>
                   </div>
                   <button onClick={() => void openBackupDirectory()} className="flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[10px] text-wave hover:bg-white/[0.05] hover:text-tide" title="打开备份目录"><ResonanceIcon kind="directory" size={12} />目录</button>
                   <button onClick={copyBackupPath} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title="复制备份路径"><ResonanceActionIcon size="sm"><ResonanceIcon kind="copy" size={12} /></ResonanceActionIcon></button>
@@ -770,7 +774,7 @@ export default function SettingsPage() {
                           )}
                           <div className="relative min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <div className="text-sm text-tide">UID {playerId}</div>
+                              <div className="text-sm text-tide">UID {displayUid(playerId)}</div>
                               {palette && (
                                 <span
                                   className={`inline-flex items-center gap-1 rounded border px-1.5 py-px text-[10px] ${palette.badge}`}
@@ -816,8 +820,8 @@ export default function SettingsPage() {
                               {!boundaries ? <LoaderCircle size={11} className="animate-spin" /> : <ResonanceIcon kind="traces" size={12} />}
                               历史起点
                             </button>
-                            <button onClick={() => openExportDialog(playerId, summary)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${playerId} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
-                            <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${playerId} 的记录`}><ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon></button>
+                            <button onClick={() => openExportDialog(playerId, summary)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${displayUid(playerId)} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
+                            <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${displayUid(playerId)} 的记录`}><ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon></button>
                           </div>
                         </div>
                       );
@@ -853,7 +857,7 @@ export default function SettingsPage() {
                 <div className="mt-0.5 rounded-md bg-[#8fc8be]/10 p-2 text-[#8fc8be]"><ResonanceIcon kind="download" size={19} /></div>
                 <div>
                   <h2 id="export-dialog-title" className="text-base font-medium text-tide">导出抽卡记录</h2>
-                  <p className="mt-1 text-xs text-wave">UID {exportTarget.playerId}</p>
+                  <p className="mt-1 text-xs text-wave">UID {displayUid(exportTarget.playerId)}</p>
                 </div>
               </div>
               <ResonanceCloseButton onClick={closeExportDialog} disabled={exporting} />
@@ -901,7 +905,7 @@ export default function SettingsPage() {
                   <div className="mt-0.5 rounded-md bg-[#d84848]/10 p-2 text-[#d99a9a]"><ResonanceIcon kind="warning" size={19} /></div>
                   <div>
                     <h2 id="delete-dialog-title" className="text-base font-medium text-tide">
-                      {deleteTarget.playerId ? `删除 UID ${deleteTarget.playerId} 的记录` : '清空所有抽卡记录'}
+                      {deleteTarget.playerId ? `删除 UID ${displayUid(deleteTarget.playerId)} 的记录` : '清空所有抽卡记录'}
                     </h2>
                     <p className="mt-1 text-xs text-wave">操作前会自动创建完整数据库备份</p>
                   </div>
@@ -971,7 +975,7 @@ export default function SettingsPage() {
                   <div className="mt-0.5 rounded-md bg-[#c9ab78]/10 p-2 text-[#c9ab78]"><ResonanceIcon kind="database" size={19} /></div>
                   <div>
                     <h2 id="boundary-management-dialog-title" className="text-base font-medium text-tide">卡池历史起点</h2>
-                    <p className="mt-1 text-xs text-wave">UID {boundaryPlayerId}</p>
+                    <p className="mt-1 text-xs text-wave">UID {displayUid(boundaryPlayerId)}</p>
                   </div>
                 </div>
                 <ResonanceCloseButton onClick={() => setBoundaryPlayerId(null)} disabled={boundarySaving} />

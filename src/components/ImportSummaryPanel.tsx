@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { AlertTriangle, ArrowRight, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { recordsPath } from '../lib/recordNavigation';
+import { displayUid } from '../lib/shareMode';
 import { useGachaStore } from '../store/useGachaStore';
 import { QUALITY } from '../types';
 import ResourceIcon from './ResourceIcon';
@@ -58,7 +59,7 @@ export default function ImportSummaryPanel() {
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-tide">{SOURCE_LABELS[summary.source]}完成</div>
-              <div className="mt-0.5 truncate text-[10px] text-wave">UID {summary.player_id} · 当前共 {summary.total_count.toLocaleString()} 条</div>
+              <div className="mt-0.5 truncate text-[10px] text-wave">UID {displayUid(summary.player_id)} · 当前共 {summary.total_count.toLocaleString()} 条</div>
             </div>
             <button type="button" onClick={dismiss} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title="关闭摘要" aria-label="关闭同步摘要"><X size={15} /></button>
           </div>

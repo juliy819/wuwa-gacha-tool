@@ -11,9 +11,11 @@ import ResonanceEmptyState from '../components/ResonanceEmptyState';
 import ResonanceCloseButton from '../components/ResonanceCloseButton';
 import ResonanceActionIcon from '../components/ResonanceActionIcon';
 import ResonanceIcon from '../components/ResonanceModeIcon';
+import { ShareMaskedInput, ShareMaskedTextarea } from '../components/ShareMaskedField';
 import { useClickRipple } from '../hooks/useClickRipple';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
+import { displayGachaUrl, displayPath, displaySensitiveText, displayUid } from '../lib/shareMode';
 import type { CloudGachaLink, GachaImportPreview } from '../types';
 
 type ScanMode = 'dir' | 'cloud' | 'url' | 'json';
@@ -84,7 +86,7 @@ export default function Home() {
         setCloudLink(event.payload);
         setCloudError('');
         setCloudOpening(false);
-        addToast('success', `已从云鸣潮提取 UID ${event.payload.player_id} 的抽卡链接`);
+        addToast('success', `已从云鸣潮提取 UID ${displayUid(event.payload.player_id)} 的抽卡链接`);
         void gachaApi.closeCloudGachaWindow();
       }),
       listen<string>('cloud-gacha-error', (event) => {
@@ -196,7 +198,7 @@ export default function Home() {
   const handleCopyUrl = async () => {
     if (!extractedUrl) return;
     try {
-      await navigator.clipboard.writeText(extractedUrl);
+      await navigator.clipboard.writeText(displayGachaUrl(extractedUrl));
       addToast('success', '抽卡链接已复制');
     } catch {
       addToast('error', '复制失败');
@@ -218,7 +220,7 @@ export default function Home() {
   const handleCopyCloudUrl = async () => {
     if (!cloudLink) return;
     try {
-      await navigator.clipboard.writeText(cloudLink.url);
+      await navigator.clipboard.writeText(displayGachaUrl(cloudLink.url));
       addToast('success', '云鸣潮抽卡链接已复制');
     } catch {
       addToast('error', '复制失败');
@@ -334,13 +336,15 @@ export default function Home() {
                   <div className="mt-3">
                     <label htmlFor="scan-game-dir" className="text-sm text-wave">游戏目录</label>
                     <div className="mt-1 flex gap-2">
-                      <input
+                      <ShareMaskedInput
                         id="scan-game-dir"
                         type="text"
                         value={gameDirInput}
+                        displayValue={displayPath(gameDirInput)}
                         onChange={(event) => setGameDirInput(event.target.value)}
                         placeholder="例如: E:\Wuthering Waves\Wuthering Waves"
-                        className="glass-input min-w-0 flex-1 px-3 py-2 text-sm"
+                        containerClassName="min-w-0 flex-1"
+                        className="glass-input w-full px-3 py-2 text-sm"
                       />
                       <button
                         type="button"
@@ -365,7 +369,7 @@ export default function Home() {
                     </button>
 
                     {urlExtractError && (
-                      <p className="mt-2 text-xs text-[#d99a9a]">{urlExtractError}</p>
+                      <p className="mt-2 text-xs text-[#d99a9a]">{displaySensitiveText(urlExtractError)}</p>
                     )}
 
                     {extractedUrl && (
@@ -373,7 +377,7 @@ export default function Home() {
                         <div className="mb-1.5 text-sm text-wave">提取的抽卡链接</div>
                         <div className="flex items-start gap-2 rounded-md border border-white/[0.06] bg-[#1d1d1d] px-3 py-2.5">
                           <p className="max-h-28 min-w-0 flex-1 select-text overflow-y-auto break-all font-mono text-xs leading-5 text-tide">
-                            {extractedUrl}
+                            {displayGachaUrl(extractedUrl)}
                           </p>
                           <button onClick={handleCopyUrl} className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-wave transition-colors hover:bg-white/[0.05] hover:text-tide" title="复制链接">
                             <ResonanceIcon kind="copy" size={14} />
@@ -390,12 +394,14 @@ export default function Home() {
                   <p className="text-sm text-wave">直接粘贴抽卡历史记录页面的完整链接。</p>
                   <label className="mt-3 block">
                     <span className="text-sm text-wave">抽卡链接</span>
-                    <textarea
+                    <ShareMaskedTextarea
                       value={urlInput}
+                      displayValue={displayGachaUrl(urlInput)}
                       onChange={(event) => setUrlInput(event.target.value)}
                       placeholder="粘贴完整的抽卡记录链接"
                       rows={4}
-                      className="glass-input mt-1 w-full resize-none px-3 py-2 font-mono text-sm"
+                      containerClassName="mt-1 w-full"
+                      className="glass-input w-full resize-none px-3 py-2 font-mono text-sm"
                     />
                     <p className="mt-1 text-xs text-wave">链接需从游戏内抽卡历史记录页面获取</p>
                   </label>
@@ -415,7 +421,7 @@ export default function Home() {
                         </p>
                         {cloudLink ? (
                           <p className="mt-1 text-xs leading-5 text-wave">
-                            已识别玩家 UID {cloudLink.player_id}，链接仅保留在当前窗口。
+                            已识别玩家 UID {displayUid(cloudLink.player_id)}，链接仅保留在当前窗口。
                           </p>
                         ) : (
                           <ol className="mt-2 space-y-1 text-xs leading-5 text-wave">
@@ -437,7 +443,7 @@ export default function Home() {
 
                   {cloudError && (
                     <p className="rounded-md border border-[#d99a9a]/20 bg-[#d99a9a]/[0.06] px-3 py-2 text-xs leading-5 text-[#d99a9a]">
-                      {cloudError}
+                      {displaySensitiveText(cloudError)}
                     </p>
                   )}
 
@@ -455,8 +461,8 @@ export default function Home() {
                         </button>
                       </div>
                       <div className="flex items-start gap-2 rounded-md border border-white/[0.06] bg-[#1d1d1d] px-3 py-2.5">
-                        <p className="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-tide" title={cloudLink.url}>
-                          {cloudLink.url}
+                        <p className="min-w-0 flex-1 break-all font-mono text-xs leading-5 text-tide" title={displayGachaUrl(cloudLink.url)}>
+                          {displayGachaUrl(cloudLink.url)}
                         </p>
                         <button
                           onClick={handleCopyCloudUrl}
@@ -477,15 +483,17 @@ export default function Home() {
                   <div className="mt-3 space-y-2">
                     <span className="text-sm text-wave">JSON 文件</span>
                     <div className="flex gap-2">
-                      <input
+                      <ShareMaskedInput
                         type="text"
                         value={jsonPath}
+                        displayValue={displayPath(jsonPath)}
                         onChange={(event) => {
                           setJsonPath(event.target.value);
                           setImportPreview(null);
                         }}
                         placeholder="选择或输入 JSON 文件路径"
-                        className="glass-input flex-1 px-3 py-2 text-sm"
+                        containerClassName="min-w-0 flex-1"
+                        className="glass-input w-full px-3 py-2 text-sm"
                       />
                       <button
                         onClick={handleSelectJson}
@@ -571,7 +579,7 @@ export default function Home() {
                 <div className="mt-0.5 rounded-md bg-[#c9ab78]/10 p-2 text-[#c9ab78]"><ResonanceIcon kind="ingress" size={19} /></div>
                 <div>
                   <h2 id="import-preview-dialog-title" className="text-base font-medium text-tide">确认导入 JSON</h2>
-                  <p className="mt-1 text-xs text-wave">目标 UID {importPreview.player_id} · 当前已有 {importPreview.existing_count.toLocaleString()} 条</p>
+                  <p className="mt-1 text-xs text-wave">目标 UID {displayUid(importPreview.player_id)} · 当前已有 {importPreview.existing_count.toLocaleString()} 条</p>
                 </div>
               </div>
               <ResonanceCloseButton onClick={closeImportPreview} disabled={scanning} />
@@ -605,7 +613,7 @@ export default function Home() {
                   : 'border-white/[0.06] bg-white/[0.02] text-wave'
               }`}>
                 {importPreview.added_count > 0
-                  ? `确认后将向 UID ${importPreview.player_id} 新增 ${importPreview.added_count.toLocaleString()} 条记录；重复记录不会再次写入。`
+                  ? `确认后将向 UID ${displayUid(importPreview.player_id)} 新增 ${importPreview.added_count.toLocaleString()} 条记录；重复记录不会再次写入。`
                   : '文件中的记录已全部存在，确认导入不会新增数据。'}
               </div>
 
