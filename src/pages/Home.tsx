@@ -21,8 +21,7 @@ type ScanMode = 'dir' | 'cloud' | 'url' | 'json';
 export default function Home() {
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
   const addToast = useGachaStore((state) => state.addToast);
-  const fetchStats = useGachaStore((state) => state.fetchStats);
-  const fetchRecords = useGachaStore((state) => state.fetchRecords);
+  const fetchHomeOverview = useGachaStore((state) => state.fetchHomeOverview);
   const importJson = useGachaStore((state) => state.importJson);
   const initialized = useGachaStore((state) => state.initialized);
   const records = useGachaStore((state) => state.records);
@@ -48,7 +47,8 @@ export default function Home() {
   const [cloudLink, setCloudLink] = useState<CloudGachaLink | null>(null);
   const [cloudOpening, setCloudOpening] = useState(false);
   const [cloudError, setCloudError] = useState('');
-  const [confirmedBoundaryPoolTypes, setConfirmedBoundaryPoolTypes] = useState<string[]>([]);
+  const confirmedBoundaryPoolTypes = useGachaStore((state) => state.confirmedBoundaryPoolTypes);
+  const confirmedBoundaryPlayerId = useGachaStore((state) => state.confirmedBoundaryPlayerId);
   const scanContentRef = useRef<HTMLDivElement>(null);
   const [scanContentHeight, setScanContentHeight] = useState<number | null>(null);
 
@@ -64,39 +64,9 @@ export default function Home() {
 
   useEffect(() => {
     if (!activePlayerId) return;
-    if (statsPlayerId === activePlayerId) return;
-    fetchStats(activePlayerId);
-  }, [activePlayerId, fetchStats, statsPlayerId]);
-
-  useEffect(() => {
-    if (!activePlayerId) return;
-    if (!recordsLoaded || recordsPlayerId !== activePlayerId) {
-      const timer = window.setTimeout(() => {
-        fetchRecords();
-      }, 280);
-      return () => window.clearTimeout(timer);
-    }
-  }, [activePlayerId, fetchRecords, recordsLoaded, recordsPlayerId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!activePlayerId) {
-      setConfirmedBoundaryPoolTypes([]);
-      return;
-    }
-    gachaApi.getPoolBoundaryStatuses(activePlayerId)
-      .then((boundaries) => {
-        if (!cancelled) {
-          setConfirmedBoundaryPoolTypes(
-            boundaries.filter((boundary) => boundary.confirmed).map((boundary) => boundary.pool_type),
-          );
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setConfirmedBoundaryPoolTypes([]);
-      });
-    return () => { cancelled = true; };
-  }, [activePlayerId]);
+    if (statsPlayerId === activePlayerId && recordsLoaded && recordsPlayerId === activePlayerId && confirmedBoundaryPlayerId === activePlayerId) return;
+    fetchHomeOverview(activePlayerId);
+  }, [activePlayerId, confirmedBoundaryPlayerId, fetchHomeOverview, recordsLoaded, recordsPlayerId, statsPlayerId]);
 
   const confirmedBoundaryPools = useMemo(
     () => new Set(confirmedBoundaryPoolTypes),

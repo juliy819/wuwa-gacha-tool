@@ -812,6 +812,42 @@ pub fn get_stats(
 }
 
 #[derive(Debug, Serialize)]
+pub struct HomeOverview {
+    pub stats: GachaStats,
+    pub records: Vec<GachaRecord>,
+    pub confirmed_boundary_pool_types: Vec<String>,
+}
+
+/// 首页所需的记录、统计与历史起点一次读取，避免前端重复扫描完整记录表。
+#[tauri::command]
+pub fn get_home_overview(
+    state: State<'_, AppState>,
+    player_id: Option<String>,
+) -> Result<HomeOverview, String> {
+    let started = Instant::now();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let records = db.get_all_records(player_id.as_deref())?;
+    let confirmed_boundaries = match player_id.as_deref() {
+        Some(player_id) => {
+            let mut boundaries = db.confirmed_pool_boundaries(player_id)?;
+            boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
+            boundaries
+        }
+        None => HashSet::new(),
+    };
+    let stats = GachaStats::from_records_with_boundaries(&records, &confirmed_boundaries);
+    let mut confirmed_boundary_pool_types: Vec<String> = confirmed_boundaries.into_iter().collect();
+    confirmed_boundary_pool_types.sort();
+    log::info!(
+        target: "app::performance",
+        "event=command_completed command=get_home_overview duration_ms={} records={}",
+        started.elapsed().as_millis(),
+        records.len()
+    );
+    Ok(HomeOverview { stats, records, confirmed_boundary_pool_types })
+}
+
+#[derive(Debug, Serialize)]
 pub struct PoolBoundaryStatus {
     pool_type: String,
     pool_name: String,

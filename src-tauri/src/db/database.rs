@@ -153,6 +153,7 @@ impl Database {
                     confirmed_at TEXT NOT NULL,
                     PRIMARY KEY (player_id, card_pool_type)
                 );
+
                 ",
             )
             .map_err(|e| e.to_string())?;
@@ -335,6 +336,18 @@ impl Database {
                   WHERE gr.player_id = player_import_info.player_id AND gr.is_mock = 0
               );
             "#,
+            )
+            .map_err(|e| e.to_string())?;
+
+        // Create query indexes after migrations have added the ordering columns.
+        self.conn
+            .execute_batch(
+                "
+                CREATE INDEX IF NOT EXISTS idx_gacha_records_player_time
+                    ON gacha_records(player_id, time DESC, order_in_timestamp ASC, id ASC);
+                CREATE INDEX IF NOT EXISTS idx_gacha_records_time
+                    ON gacha_records(time DESC, order_in_timestamp ASC, id ASC);
+                ",
             )
             .map_err(|e| e.to_string())?;
 
@@ -1621,6 +1634,41 @@ mod tests {
         db.init_tables().unwrap();
         db.migrate().unwrap();
         db
+    }
+
+    #[test]
+    fn record_queries_use_time_order_indexes() {
+        let db = test_database();
+        let player_plan: Vec<String> = db
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT id, player_id, time FROM gacha_records
+                 WHERE player_id = ?1
+                 ORDER BY time DESC, order_in_timestamp ASC, id ASC",
+            )
+            .unwrap()
+            .query_map(["10001"], |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(player_plan
+            .iter()
+            .any(|detail| detail.contains("idx_gacha_records_player_time")));
+
+        let all_plan: Vec<String> = db
+            .conn
+            .prepare(
+                "EXPLAIN QUERY PLAN SELECT id, player_id, time FROM gacha_records
+                 ORDER BY time DESC, order_in_timestamp ASC, id ASC",
+            )
+            .unwrap()
+            .query_map([], |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(all_plan
+            .iter()
+            .any(|detail| detail.contains("idx_gacha_records_time")));
     }
 
     fn record(pool_type: &str, resource_id: i64, time: &str) -> GachaRecord {

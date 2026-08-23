@@ -87,6 +87,7 @@ pub fn run() {
             commands::gacha::get_pools,
             commands::gacha::get_record_summaries,
             commands::gacha::get_stats,
+            commands::gacha::get_home_overview,
             commands::gacha::get_gacha_insights,
             commands::gacha::get_character_pull_insights,
             commands::gacha::get_resource_acquisition_insights,

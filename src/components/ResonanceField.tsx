@@ -1,6 +1,11 @@
+import { useReducedMotion } from 'framer-motion';
+
 const secondarySignal = 'M0 68 C114 68 143 69 205 68 C250 67 266 77 304 77 C341 77 360 58 391 58 C424 58 438 72 465 72 C501 72 516 46 548 46 C585 46 603 73 639 73 C684 73 714 67 759 67 C817 67 850 68 900 68';
+const resonanceFieldBootTime = performance.now();
+const resonanceFieldStartupBuffer = 1200;
 type WaveMode = {
   spatialFrequency: number;
+  temporalFrequency: number;
   amplitude: number;
   phase: number;
 };
@@ -21,7 +26,7 @@ const buildDynamicStringPath = (config: StringDynamics, cycleProgress: number) =
     const displacement = config.modes.reduce((sum, mode) => (
       sum + Math.sin(
         progress * Math.PI * 2 * mode.spatialFrequency
-        + time * mode.spatialFrequency * config.direction
+        + time * mode.temporalFrequency * config.direction
         + mode.phase,
       ) * mode.amplitude
     ), 0);
@@ -34,44 +39,61 @@ const primaryDynamics: StringDynamics = {
   baseline: 64,
   direction: 1,
   modes: [
-    { spatialFrequency: 1, amplitude: 14, phase: 0.25 },
-    { spatialFrequency: 2, amplitude: 6, phase: 1.2 },
-    { spatialFrequency: 4, amplitude: 2.6, phase: -0.6 },
+    { spatialFrequency: 1, temporalFrequency: 1, amplitude: 9, phase: 0.25 },
+    { spatialFrequency: 2, temporalFrequency: 2, amplitude: 3.2, phase: 1.2 },
+    { spatialFrequency: 3, temporalFrequency: 1, amplitude: 1.2, phase: -0.6 },
   ],
 };
 const goldDynamics: StringDynamics = {
   baseline: 73,
   direction: -1,
   modes: [
-    { spatialFrequency: 2, amplitude: 7.2, phase: 1.1 },
-    { spatialFrequency: 3, amplitude: 3.1, phase: -0.45 },
+    { spatialFrequency: 1.5, temporalFrequency: 1, amplitude: 4.6, phase: 1.1 },
+    { spatialFrequency: 2.5, temporalFrequency: 2, amplitude: 1.6, phase: -0.45 },
   ],
 };
 const softGoldDynamics: StringDynamics = {
   baseline: 78,
   direction: 1,
   modes: [
-    { spatialFrequency: 3, amplitude: 4.8, phase: 2.05 },
-    { spatialFrequency: 5, amplitude: 2, phase: 0.4 },
+    { spatialFrequency: 2, temporalFrequency: 1, amplitude: 3.2, phase: 2.05 },
+    { spatialFrequency: 3.5, temporalFrequency: 2, amplitude: 1.1, phase: 0.4 },
   ],
 };
 const silverDynamics: StringDynamics = {
   baseline: 83,
   direction: -1,
   modes: [
-    { spatialFrequency: 4, amplitude: 2.8, phase: 2.8 },
-    { spatialFrequency: 6, amplitude: 1.2, phase: -0.8 },
+    { spatialFrequency: 2.5, temporalFrequency: 1, amplitude: 2, phase: 2.8 },
+    { spatialFrequency: 4, temporalFrequency: 2, amplitude: 0.7, phase: -0.8 },
   ],
 };
 
-const WAVE_SEGMENTS = 30;
+const WAVE_SEGMENTS = 48;
+const WAVE_FRAMES = 16;
 
 const primarySignal = buildDynamicStringPath(primaryDynamics, 0);
 const goldHarmonic = buildDynamicStringPath(goldDynamics, 0);
 const softGoldHarmonic = buildDynamicStringPath(softGoldDynamics, 0);
 const silverHarmonic = buildDynamicStringPath(silverDynamics, 0);
+const waveValues = (dynamics: StringDynamics) => Array.from(
+  { length: WAVE_FRAMES + 1 },
+  (_, index) => buildDynamicStringPath(dynamics, index / WAVE_FRAMES),
+).join(';');
+const primaryWaveValues = waveValues(primaryDynamics);
+const goldWaveValues = waveValues(goldDynamics);
+const softGoldWaveValues = waveValues(softGoldDynamics);
+const silverWaveValues = waveValues(silverDynamics);
 
 export default function ResonanceField() {
+  const reduceMotion = useReducedMotion();
+  const waveDelay = Math.max(0, resonanceFieldStartupBuffer - (performance.now() - resonanceFieldBootTime));
+  const waveBegin = `${waveDelay}ms`;
+  const waveBeginGold = `${waveDelay + 180}ms`;
+  const waveBeginSoftGold = `${waveDelay + 320}ms`;
+  const waveBeginSilver = `${waveDelay + 450}ms`;
+  const waveBeginOverlay = `${waveDelay}ms`;
+
   return (
     <div className="pointer-events-none absolute inset-y-[-22px] left-[176px] right-[138px] overflow-hidden" aria-hidden="true">
       <svg viewBox="0 0 900 128" preserveAspectRatio="none" className="h-full w-full">
@@ -88,11 +110,6 @@ export default function ResonanceField() {
             <stop offset="0.34" stopColor="#9d9d9d" stopOpacity="0.14" />
             <stop offset="0.62" stopColor="#b8b8b8" stopOpacity="0.22" />
             <stop offset="1" stopColor="#8a8a8a" stopOpacity="0" />
-          </linearGradient>
-          <linearGradient id="resonance-scan" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="#c8ad78" stopOpacity="0" />
-            <stop offset="0.72" stopColor="#d8bd84" stopOpacity="0.05" />
-            <stop offset="1" stopColor="#e1c98f" stopOpacity="0.18" />
           </linearGradient>
           <linearGradient id="resonance-gold-string" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0" stopColor="#c8ad78" stopOpacity="0" />
@@ -143,40 +160,43 @@ export default function ResonanceField() {
             strokeDasharray="2 7"
           />
           <path
+            className="resonance-field-string resonance-field-string-silver"
             d={silverHarmonic}
             fill="none"
             stroke="url(#resonance-phase)"
             strokeWidth="0.72"
-          />
+          >{!reduceMotion && <animate attributeName="d" values={silverWaveValues} dur="24s" begin={waveBeginSilver} repeatCount="indefinite" />}</path>
           <path
+            className="resonance-field-string resonance-field-string-soft-gold"
             d={softGoldHarmonic}
             fill="none"
             stroke="url(#resonance-gold-string-soft)"
             strokeWidth="0.85"
-          />
+          >{!reduceMotion && <animate attributeName="d" values={softGoldWaveValues} dur="19.5s" begin={waveBeginSoftGold} repeatCount="indefinite" />}</path>
           <path
+            className="resonance-field-string resonance-field-string-gold"
             d={goldHarmonic}
             fill="none"
             stroke="url(#resonance-gold-string)"
             strokeWidth="1.05"
             filter="url(#resonance-gold-glow)"
-          />
+          >{!reduceMotion && <animate attributeName="d" values={goldWaveValues} dur="22s" begin={waveBeginGold} repeatCount="indefinite" />}</path>
           <path
-            className="resonance-field-primary"
+            className="resonance-field-primary resonance-field-string resonance-field-string-primary"
             d={primarySignal}
             fill="none"
             stroke="url(#resonance-signal)"
             strokeWidth="1.2"
             filter="url(#resonance-glow)"
-          />
+          >{!reduceMotion && <animate attributeName="d" values={primaryWaveValues} dur="18s" begin={waveBegin} repeatCount="indefinite" />}</path>
           <path
-            className="resonance-field-primary-gold"
+            className="resonance-field-primary-gold resonance-field-string resonance-field-string-gold-overlay"
             d={primarySignal}
             fill="none"
             stroke="url(#resonance-gold-string-soft)"
             strokeWidth="1"
             strokeDasharray="18 72"
-          />
+          >{!reduceMotion && <animate attributeName="d" values={primaryWaveValues} dur="18s" begin={waveBeginOverlay} repeatCount="indefinite" />}</path>
 
           <g transform="translate(480 64)">
             <path d="M-68 0H-45M45 0H68" stroke="#d4d4d4" strokeOpacity="0.13" strokeWidth="0.7" />
@@ -194,17 +214,6 @@ export default function ResonanceField() {
             <circle cx="46" cy="0" r="1.7" fill="#d4d4d4" fillOpacity="0.24" />
           </g>
 
-          <g className="resonance-field-scan">
-            <rect x="-84" y="27" width="84" height="69" fill="url(#resonance-scan)" />
-            <path d="M0 26V97" stroke="#d8bd84" strokeOpacity="0.64" strokeWidth="0.85" />
-            <path d="M-18 31H0M-11 95H0" stroke="#d8bd84" strokeOpacity="0.28" strokeWidth="0.7" />
-            {[64, 73, 78, 83].map((y, index) => (
-              <g key={y} transform={`translate(0 ${y})`}>
-                <rect x="-2.4" y="-2.4" width="4.8" height="4.8" transform="rotate(45)" fill={index === 0 ? '#e1c98f' : '#202020'} fillOpacity={index === 0 ? 0.88 : 0.72} stroke="#e1c98f" strokeOpacity={0.82 - index * 0.12} strokeWidth="0.75" />
-                <path d="M-7 0H-3M3 0H7" stroke="#e1c98f" strokeOpacity={0.52 - index * 0.08} strokeWidth="0.7" />
-              </g>
-            ))}
-          </g>
         </g>
       </svg>
     </div>

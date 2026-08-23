@@ -20,7 +20,6 @@ export default function GlowCard({
       style={style}
       {...motionProps}
     >
-      <span className="instrument-surface-response" aria-hidden="true" />
       <div className="relative z-[1]">{children}</div>
     </motion.div>
   );

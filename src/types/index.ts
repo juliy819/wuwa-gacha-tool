@@ -107,6 +107,12 @@ export interface GachaStats {
   pools: PoolInfo[];
 }
 
+export interface HomeOverview {
+  stats: GachaStats;
+  records: GachaRecord[];
+  confirmed_boundary_pool_types: string[];
+}
+
 export interface PityDistributionBin {
   start: number;
   end: number;

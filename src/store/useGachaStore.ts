@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { gachaApi } from '../services/tauri-api';
 import { playUiFeedback } from '../lib/uiFeedback';
-import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, ImportCompletionSummary, RecordSummary, ToastMessage } from '../types';
+import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, HomeOverview, ImportCompletionSummary, RecordSummary, ToastMessage } from '../types';
 
 interface GachaStore {
   records: GachaRecord[];
@@ -18,10 +18,13 @@ interface GachaStore {
   toastMessages: ToastMessage[];
   lastImportSummary: ImportCompletionSummary | null;
   activePlayerId: string | null;
+  confirmedBoundaryPoolTypes: string[];
+  confirmedBoundaryPlayerId: string | null;
   initialized: boolean;
 
   fetchRecords: () => Promise<void>;
   fetchStats: (playerId?: string) => Promise<void>;
+  fetchHomeOverview: (playerId?: string) => Promise<void>;
   fetchPools: () => Promise<void>;
   fetchSummaries: () => Promise<void>;
   fetchSettings: () => Promise<void>;
@@ -39,6 +42,7 @@ interface GachaStore {
 
 let recordsRequestId = 0;
 let statsRequestId = 0;
+let homeOverviewRequestId = 0;
 
 export const useGachaStore = create<GachaStore>((set, get) => ({
   records: [],
@@ -55,6 +59,8 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   toastMessages: [],
   lastImportSummary: null,
   activePlayerId: null,
+  confirmedBoundaryPoolTypes: [],
+  confirmedBoundaryPlayerId: null,
   initialized: false,
 
   fetchRecords: async () => {
@@ -83,6 +89,29 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       if (requestId !== statsRequestId) return;
       set({ stats: null, statsPlayerId: requestedPlayerId });
       // 静默失败，空数据时不需要提示
+    }
+  },
+
+  fetchHomeOverview: async (playerId?: string) => {
+    const requestId = ++homeOverviewRequestId;
+    const requestedPlayerId = playerId ?? get().activePlayerId;
+    set({ loading: true, error: null });
+    try {
+      const overview: HomeOverview = await gachaApi.getHomeOverview(requestedPlayerId ?? undefined);
+      if (requestId !== homeOverviewRequestId) return;
+      set({
+        records: overview.records,
+        recordsLoaded: true,
+        recordsPlayerId: requestedPlayerId,
+        stats: overview.stats,
+        statsPlayerId: requestedPlayerId,
+        confirmedBoundaryPlayerId: requestedPlayerId,
+        loading: false,
+      });
+      set({ confirmedBoundaryPoolTypes: overview.confirmed_boundary_pool_types });
+    } catch (e) {
+      if (requestId !== homeOverviewRequestId) return;
+      set({ error: String(e), loading: false });
     }
   },
 
@@ -145,6 +174,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
         lastImportSummary: { ...result, source: 'game-dir', completed_at: Date.now() },
+        confirmedBoundaryPlayerId: null,
       });
 
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
@@ -175,6 +205,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
         lastImportSummary: { ...result, source, completed_at: Date.now() },
+        confirmedBoundaryPlayerId: null,
       });
 
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
@@ -205,6 +236,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         scanning: false,
         activePlayerId: playerId || get().activePlayerId,
         lastImportSummary: { ...result, source: 'json', completed_at: Date.now() },
+        confirmedBoundaryPlayerId: null,
       });
 
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);

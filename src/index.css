@@ -260,6 +260,26 @@ a[href]:focus-visible,
   animation: dashboardEnter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.route-loading-state {
+  display: grid;
+  min-height: 100%;
+  align-content: start;
+  gap: 14px;
+  padding: 28px 24px;
+  background: rgba(30, 30, 30, 0.42);
+}
+.route-loading-line,
+.route-loading-grid span {
+  display: block;
+  border: 1px solid rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.025);
+}
+.route-loading-line { height: 14px; }
+.route-loading-line-wide { width: min(46%, 420px); }
+.route-loading-line-medium { width: min(28%, 260px); height: 9px; }
+.route-loading-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 8px; }
+.route-loading-grid span { min-height: 180px; }
+
 @keyframes dashboardEnter {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -268,23 +288,21 @@ a[href]:focus-visible,
 .resonance-field-secondary { animation: resonanceFieldDash 9s linear infinite; }
 .resonance-field-primary { animation: resonanceFieldFade 1.35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .resonance-field-primary-gold { animation: resonanceFieldGoldDash 13s linear infinite; }
+.resonance-field-string:not(.resonance-field-primary):not(.resonance-field-string-gold-overlay) {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.resonance-field-string-gold-overlay { animation: resonanceFieldGoldDash 13s linear infinite; }
 .resonance-field-orbit {
   transform-box: fill-box;
   transform-origin: center;
   animation: resonanceFieldOrbit 24s linear infinite;
 }
-.resonance-field-scan { animation: resonanceFieldScan 10s cubic-bezier(0.37, 0, 0.63, 1) infinite; }
 
 @keyframes resonanceFieldDash { to { stroke-dashoffset: -54; } }
 @keyframes resonanceFieldGoldDash { to { stroke-dashoffset: -180; } }
 @keyframes resonanceFieldFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes resonanceFieldOrbit { to { transform: rotate(360deg); } }
-@keyframes resonanceFieldScan {
-  0% { opacity: 0; transform: translateX(80px); }
-  8% { opacity: 0.86; }
-  70% { opacity: 0.86; }
-  78%, 100% { opacity: 0; transform: translateX(735px); }
-}
 
 .ratio-dial-progress { animation: ratioDialProgress 720ms 180ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
 @keyframes ratioDialProgress { from { stroke-dasharray: 0 100; } }
@@ -648,20 +666,6 @@ a[href]:focus-visible,
   box-shadow: 0 0 0 22px rgba(212, 212, 212, 0.018), 0 0 0 48px rgba(212, 212, 212, 0.01);
 }
 
-.instrument-surface-response {
-  position: absolute;
-  left: -36%;
-  top: 0;
-  z-index: 1;
-  width: 34%;
-  height: 1px;
-  pointer-events: none;
-  opacity: 0;
-  background: linear-gradient(90deg, transparent, rgba(216, 189, 132, 0.74), transparent);
-  transition: left 1100ms cubic-bezier(0.16, 1, 0.3, 1), opacity 260ms ease;
-}
-.instrument-surface:hover .instrument-surface-response { left: 102%; opacity: 0.72; }
-
 .app-navbar {
   background: linear-gradient(180deg, #202020 0%, #1a1a1a 100%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.065);
@@ -680,13 +684,6 @@ a[href]:focus-visible,
   pointer-events: none;
   background: linear-gradient(90deg, transparent, rgba(225, 201, 143, 0.78), rgba(255, 255, 255, 0.34), transparent);
   box-shadow: 0 0 8px rgba(216, 189, 132, 0.16);
-  animation: navbarSignalCruise 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-@keyframes navbarSignalCruise {
-  0%, 18% { left: -16%; opacity: 0; }
-  25% { opacity: 0.9; }
-  72% { opacity: 0.58; }
-  82%, 100% { left: 102%; opacity: 0; }
 }
 
 .app-navbar::after {
@@ -735,28 +732,6 @@ a[href]:focus-visible,
   border-radius: 2px;
   clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 6px, 100% 100%, 6px 100%, 0 calc(100% - 6px));
 }
-.nav-active-surface::after,
-.pool-active-surface::after,
-.resonance-tab-surface::after {
-  content: '';
-  position: absolute;
-  left: -38%;
-  bottom: 1px;
-  width: 34%;
-  height: 1px;
-  opacity: 0;
-  background: linear-gradient(90deg, transparent, rgba(225, 201, 143, 0.92), transparent);
-  animation: activeSurfaceSignal 3.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-.pool-active-surface::after { animation-delay: 0.5s; }
-.resonance-tab-surface::after { animation-delay: 0.9s; }
-@keyframes activeSurfaceSignal {
-  0%, 30% { left: -38%; opacity: 0; }
-  40% { opacity: 0.92; }
-  72% { opacity: 0.52; }
-  82%, 100% { left: 106%; opacity: 0; }
-}
-
 .app-nav-link { border-radius: 3px; }
 .app-nav-link[data-active='true'] svg { color: #c8ad78; filter: drop-shadow(0 0 5px rgba(200, 173, 120, 0.18)); }
 .nav-status-diamond {
@@ -1385,7 +1360,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  transition: background-color 220ms ease, transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: none;
 }
 .summary-metric::before {
   content: '';
@@ -1414,9 +1389,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   transform: skewX(-17deg);
   transition: left 640ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms ease;
 }
-.summary-metric:hover { z-index: 2; background: #2d2d2d; transform: translateY(-2px); }
-.summary-metric:hover::before { opacity: 0.9; transform: scaleX(1); }
-.summary-metric:hover::after { left: 112%; opacity: 1; }
+.summary-metric:hover { z-index: 2; }
 .summary-metric-node {
   position: absolute;
   right: 9px;
@@ -1428,11 +1401,6 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   transform: rotate(45deg);
   box-shadow: 0 0 0 3px rgba(216, 189, 132, 0.035);
   transition: background-color 180ms ease, box-shadow 180ms ease, transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-.summary-metric:hover .summary-metric-node {
-  background: #d8bd84;
-  box-shadow: 0 0 0 4px rgba(216, 189, 132, 0.055), 0 0 12px rgba(216, 189, 132, 0.38);
-  transform: rotate(135deg) scale(1.12);
 }
 
 .ratio-dial-layout {
@@ -1507,19 +1475,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .submetric-cell,
 .five-star-entry { background: #242424; }
 .five-star-entry { position: relative; overflow: hidden; transition: background-color 180ms ease, transform 220ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease; }
-.five-star-entry::after {
-  content: '';
-  position: absolute;
-  left: -26%;
-  bottom: 0;
-  width: 22%;
-  height: 1px;
-  opacity: 0;
-  background: linear-gradient(90deg, transparent, #d8bd84, transparent);
-  transition: left 1050ms cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms ease;
-}
 .five-star-entry:hover { background: #2a2a2a; border-color: rgba(216, 189, 132, 0.16); transform: translateY(-2px); }
-.five-star-entry:hover::after { left: 106%; opacity: 0.9; }
 
 .record-resource-frame::before {
   content: '';
@@ -2051,17 +2007,6 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.16) 0 4px, transparent 4px 9px);
 }
 .analysis-detail-progress-fill > i[data-off-rate='true'] { background-color: #d38377; }
-.records-view-scan {
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  z-index: 30;
-  width: 18%;
-  pointer-events: none;
-  border-right: 1px solid rgba(216, 189, 132, 0.7);
-  background: linear-gradient(90deg, transparent, rgba(216, 189, 132, 0.07));
-  filter: drop-shadow(3px 0 8px rgba(216, 189, 132, 0.14));
-}
 .record-list-track { position: relative; counter-reset: record-sequence; }
 .record-list-track::before {
   content: '';
@@ -2531,16 +2476,13 @@ tr.record-target-highlight > td {
 @media (prefers-reduced-motion: reduce) {
   .resonance-field-secondary,
   .resonance-field-primary-gold,
+  .resonance-field-string,
   .resonance-field-orbit,
-  .resonance-field-scan,
   .status-ready-dot,
   .number-shimmer,
   .pity-measure-point,
   .app-shell::before,
   .app-navbar::before,
-  .nav-active-surface::after,
-  .pool-active-surface::after,
-  .resonance-tab-surface::after,
   .nav-active-node,
   .pool-active-node,
   .instrument-empty-core,
@@ -2555,6 +2497,13 @@ tr.record-target-highlight > td {
   .core-action-icon svg > * {
     animation: none !important;
     transition: none !important;
+  }
+
+  .animate-spin,
+  .status-ready-dot,
+  .pity-measure-point,
+  .settings-state-readout::before {
+    animation: none !important;
   }
 
   .record-target-highlight,

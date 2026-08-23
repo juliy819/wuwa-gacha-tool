@@ -51,6 +51,30 @@ export default function Navbar() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [menuOpen]);
 
+  useEffect(() => {
+    const preload = () => {
+      navItems.forEach((item) => {
+        if (item.preload && item.path !== '/analytics') void item.preload();
+      });
+    };
+    const runtimeWindow = window as unknown as {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const requestIdle = runtimeWindow.requestIdleCallback;
+    const idle = requestIdle
+      ? requestIdle(preload, { timeout: 3200 })
+      : window.setTimeout(preload, 1800);
+    return () => {
+      const cancelIdle = runtimeWindow.cancelIdleCallback;
+      if (requestIdle) {
+        cancelIdle?.(idle);
+      } else {
+        window.clearTimeout(idle as number);
+      }
+    };
+  }, []);
+
   const handleRefresh = async () => {
     if (refreshing) return;
     setRefreshing(true);
@@ -109,6 +133,7 @@ export default function Navbar() {
                 to={item.path}
                 onMouseEnter={item.preload}
                 onFocus={item.preload}
+                onPointerDown={item.preload}
                 aria-label={item.label}
                 title={item.label}
                 data-active={isActive ? 'true' : 'false'}

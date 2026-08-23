@@ -1073,13 +1073,6 @@ export default function RecordsPage() {
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="records-view-stage relative min-h-0 flex-1 overflow-auto"
               >
-                <motion.span
-                  className="records-view-scan"
-                  initial={{ x: '-110%', opacity: 0 }}
-                  animate={{ x: '118%', opacity: [0, 0.9, 0] }}
-                  transition={{ duration: 0.72, times: [0, 0.22, 1], ease: [0.16, 1, 0.3, 1] }}
-                  aria-hidden="true"
-                />
                 {viewMode === 'list' && (
                   <div className={`record-list-track px-4 ${sortOrder === 'asc' ? 'flex flex-col' : ''}`}>
                     {showCurrentPity && (

@@ -15,7 +15,17 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 
 function DeferredRoute({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={null}>{children}</Suspense>;
+  return <Suspense fallback={<RouteLoadingFallback />}>{children}</Suspense>;
+}
+
+function RouteLoadingFallback() {
+  return (
+    <div className="route-loading-state" aria-busy="true" aria-label="正在加载页面">
+      <div className="route-loading-line route-loading-line-wide" />
+      <div className="route-loading-line route-loading-line-medium" />
+      <div className="route-loading-grid"><span /><span /><span /></div>
+    </div>
+  );
 }
 
 function AnimatedRoutes() {
