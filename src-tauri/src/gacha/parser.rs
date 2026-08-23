@@ -1078,6 +1078,7 @@ pub struct GameSettings {
 pub struct GameDirValidation {
     pub valid: bool,
     pub log_path: String,
+    pub normalized_game_dir: String,
     pub message: String,
 }
 

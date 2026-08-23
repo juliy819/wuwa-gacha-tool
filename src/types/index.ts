@@ -274,6 +274,7 @@ export interface GameSettings {
 export interface GameDirValidation {
   valid: boolean;
   log_path: string;
+  normalized_game_dir: string;
   message: string;
 }
 

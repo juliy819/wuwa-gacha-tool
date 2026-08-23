@@ -1038,12 +1038,14 @@ pub fn get_game_dir(state: State<'_, AppState>) -> Result<GameSettings, String> 
 #[tauri::command]
 pub fn validate_game_dir(game_dir: String) -> GameDirValidation {
     let trimmed = game_dir.trim();
-    let log_path = decoder::get_log_path(trimmed);
+    let (normalized_game_dir, log_path_buf) = decoder::resolve_log_path(trimmed);
+    let log_path = log_path_buf.to_string_lossy().into_owned();
 
     if trimmed.is_empty() {
         return GameDirValidation {
             valid: false,
             log_path,
+            normalized_game_dir,
             message: "尚未设置游戏目录".to_string(),
         };
     }
@@ -1053,13 +1055,19 @@ pub fn validate_game_dir(game_dir: String) -> GameDirValidation {
         GameDirValidation {
             valid: true,
             log_path,
-            message: "已找到 Client.log".to_string(),
+            normalized_game_dir: normalized_game_dir.clone(),
+            message: if normalized_game_dir != trimmed {
+                "已找到 Client.log，已自动修正为游戏根目录".to_string()
+            } else {
+                "已找到 Client.log".to_string()
+            },
         }
     } else {
         GameDirValidation {
             valid: false,
             log_path,
-            message: "未找到 Client\\Saved\\Logs\\Client.log".to_string(),
+            normalized_game_dir,
+            message: "未找到日志。请选择包含 Client 文件夹的游戏根目录".to_string(),
         }
     }
 }

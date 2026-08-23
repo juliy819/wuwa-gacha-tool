@@ -191,6 +191,9 @@ export default function SettingsPage() {
     if (cached) {
       setValidation(cached);
       setValidating(false);
+      if (cached.valid && cached.normalized_game_dir !== path) {
+        setGameDirInput(cached.normalized_game_dir);
+      }
       return;
     }
 
@@ -200,10 +203,16 @@ export default function SettingsPage() {
       try {
         const result = await gachaApi.validateGameDir(path);
         gameDirValidationCache.set(path, result);
-        if (!cancelled) setValidation(result);
+        if (!cancelled) {
+          gameDirValidationCache.set(result.normalized_game_dir, result);
+          setValidation(result);
+          if (result.valid && result.normalized_game_dir !== path) {
+            setGameDirInput(result.normalized_game_dir);
+          }
+        }
       } catch {
         if (!cancelled) {
-          const result = { valid: false, log_path: '', message: '目录校验失败，请重新选择' };
+          const result = { valid: false, log_path: '', normalized_game_dir: path, message: '目录校验失败，请重新选择' };
           gameDirValidationCache.set(path, result);
           setValidation(result);
         }
@@ -541,16 +550,16 @@ export default function SettingsPage() {
                     <span>{directoryState.label}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-wave">扫描抽卡记录时读取此目录中的 Client.log</p>
+                <p className="mt-1 text-xs text-wave">请选择包含 <span className="text-tide">Client</span> 文件夹的游戏根目录，软件会自动查找 <span className="font-mono text-[11px]">Client\Saved\Logs\Client.log</span></p>
 
                 <label className="mt-5 block">
-                  <span className="mb-2 block text-xs text-wave">安装目录</span>
+                  <span className="mb-2 block text-xs text-wave">游戏根目录</span>
                   <div className="flex gap-2">
                     <input
                       type="text"
                       value={gameDirInput}
                       onChange={(event) => setGameDirInput(event.target.value)}
-                      placeholder="例如: E:\Wuthering Waves\Wuthering Waves"
+                      placeholder="例如: E:\Wuthering Waves\Wuthering Waves Game"
                       className="glass-input min-w-0 flex-1 px-3 py-2.5 text-sm"
                     />
                     <button onClick={handleSelectFolder} className="glass-input flex shrink-0 items-center gap-2 px-3 py-2.5 text-sm text-wave hover:text-tide">
