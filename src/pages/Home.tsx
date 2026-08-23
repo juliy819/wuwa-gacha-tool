@@ -242,8 +242,8 @@ export default function Home() {
               <p className="page-subtitle mt-1 text-xs text-wave">重点数据按卡池独立统计</p>
             </div>
             <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn core-action-btn core-action-btn-scan click-ripple relative z-10 flex items-center gap-2 px-4 py-2">
-              <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
-              扫描抽卡
+              <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind={stats && stats.total_draws > 0 ? 'refresh' : 'ingress'} size={14} /></ResonanceActionIcon>
+              {stats && stats.total_draws > 0 ? '更新记录' : '导入记录'}
             </button>
           </header>
 
@@ -259,12 +259,12 @@ export default function Home() {
             <ResonanceEmptyState
               variant="scan"
               title="暂无抽卡数据"
-              description="扫描游戏记录或导入已有 JSON 文件"
+              description="从游戏、抽卡链接或文件导入抽卡记录"
               className="resonance-panel min-h-[360px]"
             >
               <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn core-action-btn core-action-btn-scan click-ripple mt-1 flex items-center gap-2 px-4 py-2">
-                <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
-                开始扫描
+                <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind="ingress" size={14} /></ResonanceActionIcon>
+                导入记录
               </button>
             </ResonanceEmptyState>
           )}
@@ -279,16 +279,16 @@ export default function Home() {
           placement="top"
         >
               <div className="mb-4 flex items-center justify-between gap-4">
-                <h2 id="scan-dialog-title" className="modal-title text-lg font-semibold text-tide">扫描抽卡数据</h2>
+                <h2 id="scan-dialog-title" className="modal-title text-lg font-semibold text-tide">获取抽卡记录</h2>
                 <ResonanceCloseButton onClick={() => setShowScanModal(false)} disabled={scanning || cloudOpening} />
               </div>
 
               <div className="resonance-segmented mb-4 flex items-center gap-1 p-0.5">
                 {([
-                  ['dir', '游戏目录', 'directory'],
+                  ['dir', '游戏同步', 'directory'],
                   ['cloud', '云鸣潮', 'cloud'],
-                  ['url', '抽卡链接', 'coupling'],
-                  ['json', '导入 JSON', 'ingress'],
+                  ['url', '链接导入', 'coupling'],
+                  ['json', '文件导入', 'ingress'],
                 ] as const).map(([mode, label, iconKind]) => (
                   <button
                     key={mode}
@@ -527,7 +527,7 @@ export default function Home() {
                       <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
                         <ResonanceActionIcon size="sm" tone="gold"><ResonanceIcon kind="scan" size={14} /></ResonanceActionIcon>
                       </motion.div>
-                      {cloudOpening ? '正在打开...' : previewingImport ? '正在预检...' : scanMode === 'dir' ? '扫描中...' : '导入中...'}
+                      {cloudOpening ? '正在打开...' : previewingImport ? '正在预检...' : scanMode === 'dir' ? '正在同步...' : '导入中...'}
                     </>
                   ) : (
                     <>
@@ -546,7 +546,7 @@ export default function Home() {
                           ? '预检导入'
                           : scanMode === 'url'
                             ? '导入链接'
-                            : '开始扫描'}
+                            : '同步记录'}
                     </>
                   )}
                 </button>
