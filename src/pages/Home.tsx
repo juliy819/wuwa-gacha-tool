@@ -369,11 +369,16 @@ export default function Home() {
                     )}
 
                     {extractedUrl && (
-                      <div className="mt-2 flex items-center gap-2 rounded-md border border-white/[0.06] bg-white/[0.03] px-3 py-2">
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs text-tide" title={extractedUrl}>{extractedUrl}</span>
-                        <button onClick={handleCopyUrl} className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-wave hover:bg-white/[0.05] hover:text-tide" title="复制链接">
-                          <ResonanceIcon kind="copy" size={13} />
-                        </button>
+                      <div className="mt-3">
+                        <div className="mb-1.5 text-sm text-wave">提取的抽卡链接</div>
+                        <div className="flex items-start gap-2 rounded-md border border-white/[0.06] bg-[#1d1d1d] px-3 py-2.5">
+                          <p className="max-h-28 min-w-0 flex-1 select-text overflow-y-auto break-all font-mono text-xs leading-5 text-tide">
+                            {extractedUrl}
+                          </p>
+                          <button onClick={handleCopyUrl} className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-wave transition-colors hover:bg-white/[0.05] hover:text-tide" title="复制链接">
+                            <ResonanceIcon kind="copy" size={14} />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

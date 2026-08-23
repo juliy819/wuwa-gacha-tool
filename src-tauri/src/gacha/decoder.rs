@@ -60,7 +60,7 @@ pub fn extract_gacha_url(decoded_log: &str) -> Option<String> {
 
         // 提取 URL
         if let Some(cap) = line_re.captures(line) {
-            let url = cap[1].to_string();
+            let url = normalize_logged_url(&cap[1]);
             if !is_gacha_record_url(&url) {
                 continue;
             }
@@ -75,9 +75,9 @@ pub fn extract_gacha_url(decoded_log: &str) -> Option<String> {
     if latest_url.is_none() {
         let re = Regex::new(r#"https[^\s"']*/aki/gacha/index.html#/record[^\s"']*"#).unwrap();
         for cap in re.captures_iter(decoded_log) {
-            let url = cap.get(0).unwrap().as_str();
-            if is_gacha_record_url(url) {
-                latest_url = Some(url.to_string());
+            let url = normalize_logged_url(cap.get(0).unwrap().as_str());
+            if is_gacha_record_url(&url) {
+                latest_url = Some(url);
             }
         }
     }
@@ -101,6 +101,10 @@ fn is_gacha_record_url(raw_url: &str) -> bool {
 /// 根据用户输入定位 Client.log。支持游戏根目录以及误填的 Client、Saved、Logs 子目录。
 pub fn get_log_path(game_dir: &str) -> String {
     resolve_log_path(game_dir).1.to_string_lossy().into_owned()
+}
+
+fn normalize_logged_url(raw_url: &str) -> String {
+    raw_url.replace("\\u0026", "&")
 }
 
 /// 返回自动修正后的游戏根目录和日志路径。
@@ -175,6 +179,16 @@ more data"#;
         let url = extract_gacha_url(log);
         assert!(url.is_some());
         assert!(url.unwrap().contains("aki/gacha/index.html"));
+    }
+
+    #[test]
+    fn restores_ampersands_escaped_in_sdk_json() {
+        let log = r#"[2026.07.30-12.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=test\u0026player_id=123\u0026record_id=token"}"#;
+
+        assert_eq!(
+            extract_gacha_url(log).as_deref(),
+            Some("https://aki-gm-resources.aki-game.com/aki/gacha/index.html#/record?svr_id=test&player_id=123&record_id=token")
+        );
     }
 
     #[test]
