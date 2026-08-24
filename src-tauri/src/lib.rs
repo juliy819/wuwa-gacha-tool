@@ -3,6 +3,7 @@ mod commands;
 mod db;
 mod gacha;
 mod logging;
+mod resource_pack;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub asset_cache_dir: PathBuf,
     pub asset_catalog_refresh: tokio::sync::Mutex<()>,
+    pub resource_pack_refresh: tokio::sync::Mutex<()>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,6 +59,20 @@ pub fn run() {
                 http,
                 asset_cache_dir: app_data_dir.join("assets"),
                 asset_catalog_refresh: tokio::sync::Mutex::new(()),
+                resource_pack_refresh: tokio::sync::Mutex::new(()),
+            });
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                // Resource refresh is delayed because it is not a startup dependency.
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                let state = app_handle.state::<AppState>();
+                if let Err(error) = resource_pack::refresh(&state).await {
+                    log::warn!(
+                        target: "app::resource_pack",
+                        "event=background_refresh_failed fallback=local_or_nanoka error={}",
+                        logging::sanitize_message(&error)
+                    );
+                }
             });
             log::info!(
                 target: "app::lifecycle",

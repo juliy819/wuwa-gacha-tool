@@ -42,11 +42,11 @@ pub struct GachaResource {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct AssetCatalog {
-    version: String,
-    icons: HashMap<i64, String>,
+pub(crate) struct AssetCatalog {
+    pub(crate) version: String,
+    pub(crate) icons: HashMap<i64, String>,
     #[serde(default)]
-    resources: Vec<GachaResource>,
+    pub(crate) resources: Vec<GachaResource>,
 }
 
 pub async fn get_gacha_resources(state: &AppState) -> Result<Vec<GachaResource>, String> {
@@ -80,10 +80,10 @@ async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<S
     }
 
     let icon_cache_dir = state.asset_cache_dir.join("icons");
+    let cache_path = icon_cache_dir.join(format!("{resource_id}.webp"));
 
-    // 本地缓存优先：角色/武器 ID 与其图标一一对应且固定，已下载的素材直接返回，
-    // 不依赖 nanoka.cc 是否可用（即使停运，已下载的图片仍可正常显示）。
-    if let Some(bytes) = read_local_icon_by_id(&icon_cache_dir, resource_id)? {
+    // 资源包与 nanoka 单图下载统一写入这个目录，运行时无需关心图片来源。
+    if let Some(bytes) = read_local_icon(&icon_cache_dir, resource_id)? {
         log::debug!(
             target: "app::assets",
             "event=icon_cache_hit resource_id={resource_id} bytes={}",
@@ -95,13 +95,12 @@ async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<S
     log::info!(target: "app::assets", "event=icon_cache_miss resource_id={resource_id}");
 
     // 本地缺失时才向 nanoka.cc 拉取 catalog 定位图标并下载新资源。
-    let catalog = load_catalog(state).await?;
+    let catalog = load_nanoka_catalog(state).await?;
     let icon_path = catalog
         .icons
         .get(&resource_id)
         .ok_or_else(|| format!("nanoka 数据中未找到资源 {resource_id}"))?;
     let url = icon_url(icon_path)?;
-    let cache_path = icon_cache_dir.join(icon_cache_name(resource_id, icon_path));
 
     let response = state
         .http
@@ -131,7 +130,7 @@ async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<S
         .bytes()
         .await
         .map_err(|error| format!("读取素材失败: {error}"))?;
-    if bytes.is_empty() || bytes.len() > MAX_ICON_BYTES {
+    if bytes.is_empty() || bytes.len() > MAX_ICON_BYTES || !is_webp(&bytes) {
         return Err("素材文件为空或超过大小限制".to_string());
     }
 
@@ -156,6 +155,20 @@ async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<S
 }
 
 async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
+    match crate::resource_pack::load_catalog(&state.asset_cache_dir) {
+        Ok(Some(catalog)) => {
+            log::debug!(target: "app::assets", "event=resource_pack_catalog_hit version={}", catalog.version);
+            return Ok(catalog);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            log::warn!(target: "app::assets", "event=resource_pack_catalog_invalid fallback=nanoka error={}", crate::logging::sanitize_message(&error));
+        }
+    }
+    load_nanoka_catalog(state).await
+}
+
+async fn load_nanoka_catalog(state: &AppState) -> Result<AssetCatalog, String> {
     let _refresh_guard = state.asset_catalog_refresh.lock().await;
     let now = now_ms()?;
     let cached_manifest = {
@@ -339,26 +352,18 @@ fn is_safe_version(version: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+'))
 }
 
-fn icon_cache_name(resource_id: i64, icon_path: &str) -> String {
-    // FNV-1a keeps filenames stable across app and Rust upgrades. A changed
-    // nanoka asset path naturally gets a new file without redownloading every
-    // unchanged icon when the game data version advances.
-    let hash = icon_path
-        .bytes()
-        .fold(0xcbf29ce484222325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-        });
-    format!("{resource_id}-{hash:016x}.webp")
-}
+fn read_local_icon(dir: &std::path::Path, resource_id: i64) -> Result<Option<Vec<u8>>, String> {
+    let canonical = dir.join(format!("{resource_id}.webp"));
+    match std::fs::read(&canonical) {
+        Ok(bytes) if is_webp(&bytes) && bytes.len() <= MAX_ICON_BYTES => return Ok(Some(bytes)),
+        Ok(_) => {
+            let _ = std::fs::remove_file(&canonical);
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("读取本地素材失败: {error}")),
+    }
 
-/// 按 `resource_id` 在本地缓存目录中查找已下载的素材。
-/// 文件名形如 `{resource_id}-{hash}.webp`，取最新修改的一份。
-/// 作为 `get_resource_icon` 的本地优先查询路径，使已下载素材的展示
-/// 不依赖 nanoka.cc 在线。
-fn read_local_icon_by_id(
-    dir: &std::path::Path,
-    resource_id: i64,
-) -> Result<Option<Vec<u8>>, String> {
+    // 兼容旧版本的 `<ID>-<路径哈希>.webp`，命中后迁移到统一文件名并清理重复项。
     let prefix = format!("{resource_id}-");
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -386,7 +391,26 @@ fn read_local_icon_by_id(
             }
         }
     }
-    Ok(latest.map(|(_, bytes)| bytes))
+    let Some((_, bytes)) = latest else {
+        return Ok(None);
+    };
+    if !is_webp(&bytes) || bytes.len() > MAX_ICON_BYTES {
+        return Err(format!("旧版素材 {resource_id} 格式异常"));
+    }
+    std::fs::write(&canonical, &bytes).map_err(|error| format!("迁移旧版素材失败: {error}"))?;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(&prefix) && name.ends_with(".webp") {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    Ok(Some(bytes))
+}
+
+fn is_webp(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
 }
 
 fn to_data_url(bytes: &[u8]) -> String {
@@ -403,6 +427,17 @@ fn now_ms() -> Result<i64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_dir(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "wuwa-assets-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
 
     #[test]
     fn converts_allowed_unreal_icon_path() {
@@ -424,13 +459,16 @@ mod tests {
     }
 
     #[test]
-    fn cache_name_changes_only_when_the_resource_or_asset_path_changes() {
-        let first = icon_cache_name(1104, "/Game/Aki/UI/Icon.Head");
+    fn migrates_legacy_icons_to_the_canonical_id_filename() {
+        let dir = test_dir("legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = b"RIFFxxxxWEBPlegacy";
+        std::fs::write(dir.join("1104-abcdef.webp"), bytes).unwrap();
 
-        assert_eq!(first, icon_cache_name(1104, "/Game/Aki/UI/Icon.Head"));
-        assert_ne!(first, icon_cache_name(1104, "/Game/Aki/UI/NewIcon.Head"));
-        assert_ne!(first, icon_cache_name(1105, "/Game/Aki/UI/Icon.Head"));
-        assert!(first.starts_with("1104-"));
+        assert_eq!(read_local_icon(&dir, 1104).unwrap().unwrap(), bytes);
+        assert_eq!(std::fs::read(dir.join("1104.webp")).unwrap(), bytes);
+        assert!(!dir.join("1104-abcdef.webp").exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
