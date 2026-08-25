@@ -40,12 +40,57 @@ interface GachaForecast {
   featuredThresholds: Array<{ probability: number; pulls: number }>;
 }
 
+interface ProbabilityModelPoint {
+  pull: number;
+  official: number | null;
+  historical: number | null;
+  calibrated: number | null;
+  sampleSize: number;
+}
+
+interface PersonalCalibration {
+  factor: number;
+  weight: number;
+}
+
 function fiveStarRateAtPity(pull: number) {
   if (pull <= 65) return 0.008;
   if (pull <= 70) return 0.008 + 0.04 * (pull - 65);
   if (pull <= 75) return 0.208 + 0.08 * (pull - 70);
   if (pull <= 78) return 0.608 + 0.1 * (pull - 75);
   return 1;
+}
+
+function getPersonalCalibration(pool: PoolInsight): PersonalCalibration {
+  if (!pool.average_pity || pool.complete_interval_count === 0) return { factor: 1, weight: 0 };
+  const observedRate = 1 / pool.average_pity;
+  const observedFactor = Math.min(1.3, Math.max(0.7, observedRate / OFFICIAL_FIVE_STAR_RATE));
+  const weight = Math.min(0.65, pool.complete_interval_count / (pool.complete_interval_count + 30));
+  return { factor: 1 + (observedFactor - 1) * weight, weight };
+}
+
+function calibratedFiveStarRateAtPity(pull: number, calibration: PersonalCalibration) {
+  const official = fiveStarRateAtPity(pull);
+  return official >= 1 ? 1 : Math.min(1, official * calibration.factor);
+}
+
+function buildProbabilityModel(pool: PoolInsight): ProbabilityModelPoint[] {
+  const hasKnownRuleModel = pool.pool_type !== '5';
+  const calibration = getPersonalCalibration(pool);
+  return pool.probability_curve.map((point) => {
+    const official = hasKnownRuleModel ? fiveStarRateAtPity(point.pull) * 100 : null;
+    const historical = point.sample_size > 0 ? point.percentage : null;
+    const calibrated = hasKnownRuleModel
+      ? calibratedFiveStarRateAtPity(point.pull, calibration) * 100
+      : historical;
+    return {
+      pull: point.pull,
+      official,
+      historical,
+      calibrated,
+      sampleSize: point.sample_size,
+    };
+  });
 }
 
 function theoreticalThreshold(target: number) {
@@ -64,7 +109,7 @@ function thresholdPulls(points: ForecastPoint[], key: 'fiveStar' | 'featured') {
   }));
 }
 
-function buildGachaForecast(pool: PoolInsight): GachaForecast {
+function buildGachaForecast(pool: PoolInsight, rateAtPity = fiveStarRateAtPity): GachaForecast {
   const isLimitedRole = LIMITED_ROLE_POOL_TYPES.has(pool.pool_type);
   const maxFiveStarPulls = Math.max(1, 79 - pool.current_pity);
   const maxFeaturedPulls = isLimitedRole ? maxFiveStarPulls + (pool.featured_guaranteed ? 0 : 79) : maxFiveStarPulls;
@@ -77,7 +122,7 @@ function buildGachaForecast(pool: PoolInsight): GachaForecast {
 
   for (let step = 1; step <= maxFeaturedPulls; step += 1) {
     if (step <= maxFiveStarPulls) {
-      const rate = fiveStarRateAtPity(pool.current_pity + step);
+      const rate = rateAtPity(pool.current_pity + step);
       const hit = fiveStarSurvival * rate;
       expectedFiveStar += step * hit;
       fiveStarSurvival *= 1 - rate;
@@ -89,7 +134,7 @@ function buildGachaForecast(pool: PoolInsight): GachaForecast {
         const [pityText, guaranteeText] = key.split(':');
         const pity = Number(pityText);
         const guaranteed = guaranteeText === '1';
-        const rate = fiveStarRateAtPity(pity + 1);
+        const rate = rateAtPity(pity + 1);
         const missProbability = stateProbability * (1 - rate);
         if (missProbability > 0) {
           const missKey = `${pity + 1}:${guaranteed ? 1 : 0}`;
@@ -115,7 +160,7 @@ function buildGachaForecast(pool: PoolInsight): GachaForecast {
 
   return {
     points,
-    nextPullRate: fiveStarRateAtPity(pool.current_pity + 1),
+    nextPullRate: rateAtPity(pool.current_pity + 1),
     expectedFiveStar,
     expectedFeatured: isLimitedRole ? expectedFeatured : null,
     fiveStarThresholds: thresholdPulls(points, 'fiveStar'),
@@ -201,6 +246,7 @@ function buildHistogramOption(
 }
 
 function buildProbabilityOption(pool: PoolInsight) {
+  const model = buildProbabilityModel(pool);
   return {
     animationDuration: 480,
     animationEasing: 'cubicOut',
@@ -211,8 +257,9 @@ function buildProbabilityOption(pool: PoolInsight) {
       borderColor: 'rgba(212,212,212,0.2)',
       textStyle: { color: '#e2e4e3', fontSize: 11 },
       formatter: (params: Array<{ dataIndex: number }>) => {
-        const point = pool.probability_curve[params[0]?.dataIndex ?? 0];
-        return `第 ${point.pull} 抽<br/><b>${point.percentage.toFixed(1)}%</b> 历史出金率 · ${point.sample_size} 次仍未出金`;
+        const point = model[params[0]?.dataIndex ?? 0];
+        const formatRate = (value: number | null) => value === null ? '不适用' : `${value.toFixed(1)}%`;
+        return `第 ${point.pull} 抽<br/>规则模型 <b>${formatRate(point.official)}</b><br/>个人校准 <b>${formatRate(point.calibrated)}</b><br/>历史出金率 ${formatRate(point.historical)} · ${point.sampleSize} 次仍未出金`;
       },
     },
     xAxis: {
@@ -226,21 +273,40 @@ function buildProbabilityOption(pool: PoolInsight) {
       axisLabel: { color: CHART_TEXT, fontSize: 10, formatter: '{value}%' },
       splitLine: { lineStyle: { color: CHART_GRID } },
     },
-    series: [{
-      type: 'line',
-      step: 'end',
-      showSymbol: false,
-      data: pool.probability_curve.map((point) => [point.pull, point.percentage]),
-      lineStyle: { color: '#8fc8be', width: 2 },
-      areaStyle: { color: 'rgba(143,200,190,0.07)' },
-      markLine: {
-        silent: true,
-        symbol: 'none',
-        label: { formatter: '官方基础 0.8%', color: '#d8bd84', fontSize: 10, position: 'insideEndTop' },
-        lineStyle: { color: 'rgba(216,189,132,0.7)', type: 'dashed' },
-        data: [{ yAxis: 0.8 }],
+    legend: {
+      top: 4,
+      right: 0,
+      textStyle: { color: CHART_TEXT, fontSize: 10 },
+      data: pool.pool_type === '5'
+        ? ['历史出金率']
+        : ['规则模型', '个人校准', '历史出金率'],
+    },
+    series: [
+      {
+        name: '规则模型',
+        type: 'line',
+        showSymbol: false,
+        data: model.map((point) => [point.pull, point.official]),
+        lineStyle: { color: '#d8bd84', width: 1.5, type: 'dashed' },
       },
-    }],
+      {
+        name: '个人校准',
+        type: 'line',
+        showSymbol: false,
+        data: model.map((point) => [point.pull, point.calibrated]),
+        lineStyle: { color: '#8fc8be', width: 2 },
+        areaStyle: { color: 'rgba(143,200,190,0.07)' },
+      },
+      {
+        name: '历史出金率',
+        type: 'line',
+        step: 'end',
+        showSymbol: false,
+        connectNulls: false,
+        data: model.map((point) => [point.pull, point.historical]),
+        lineStyle: { color: '#8eaaa5', width: 1, opacity: 0.75 },
+      },
+    ],
   };
 }
 
@@ -393,6 +459,7 @@ export default function AnalyticsPage() {
   const [insights, setInsights] = useState<{ key: string; data: GachaInsights } | null>(null);
   const [activePoolType, setActivePoolType] = useState<string | null>(null);
   const [plannedPulls, setPlannedPulls] = useState(20);
+  const [forecastModel, setForecastModel] = useState<'official' | 'personal'>('official');
   const [dateMode, setDateMode] = useState<'all' | 'custom'>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -488,10 +555,21 @@ export default function AnalyticsPage() {
       : null,
     [activePool],
   );
-  const forecast = useMemo(
+  const officialForecast = useMemo(
     () => dateMode === 'all' && activePool && SOFT_PITY_POOL_TYPES.has(activePool.pool_type) ? buildGachaForecast(activePool) : null,
     [activePool, dateMode],
   );
+  const personalCalibration = useMemo(
+    () => activePool ? getPersonalCalibration(activePool) : { factor: 1, weight: 0 },
+    [activePool],
+  );
+  const personalForecast = useMemo(
+    () => dateMode === 'all' && activePool && SOFT_PITY_POOL_TYPES.has(activePool.pool_type)
+      ? buildGachaForecast(activePool, (pull) => calibratedFiveStarRateAtPity(pull, personalCalibration))
+      : null,
+    [activePool, dateMode, personalCalibration],
+  );
+  const forecast = forecastModel === 'personal' ? personalForecast : officialForecast;
   const forecastOption = useMemo(() => forecast ? buildForecastOption(forecast) : null, [forecast]);
   const forecastNextTen = forecast
     ? forecast.points[Math.min(10, forecast.points.length - 1)]
@@ -500,6 +578,12 @@ export default function AnalyticsPage() {
   const safePlannedPulls = Math.min(Math.max(plannedPulls, 0), maxPlannedPulls);
   const plannedPoint = forecast?.points[safePlannedPulls] ?? null;
   const worstFiveStarPulls = forecast?.points.find((point) => point.fiveStar >= 0.999999)?.pulls ?? maxPlannedPulls;
+  const officialNextTen = officialForecast?.points[Math.min(10, officialForecast.points.length - 1)]?.fiveStar ?? 0;
+  const personalNextTen = personalForecast?.points[Math.min(10, personalForecast.points.length - 1)]?.fiveStar ?? 0;
+  const personalDelta = personalNextTen - officialNextTen;
+  const calibrationSignal = Math.abs(personalCalibration.factor - 1) < 0.01
+    ? '与规则接近'
+    : `个人倍率 × ${personalCalibration.factor.toFixed(3)}`;
   const openPoolRecords = () => {
     if (!activePool) return;
     const target = recordsPath({ poolType: activePool.pool_type, source: 'analytics' });
@@ -675,13 +759,26 @@ export default function AnalyticsPage() {
                         <div>
                           <span className="analysis-section-index">CONDITIONAL FORECAST / PITY {activePool.current_pity}</span>
                           <h2>从当前垫抽开始，未来有多大概率出金</h2>
-                          <p>已将前 {activePool.current_pity} 抽未出五星作为已知条件，从下一抽重新计算；分段软保底采用社区大样本模型，结果是概率预测，不是出金承诺。</p>
+                          <p>已将前 {activePool.current_pity} 抽未出五星作为已知条件，从下一抽重新计算；规则模型采用已确认的分段软保底，个人校准仅反映你的历史表现。</p>
                         </div>
-                        <div className="analysis-forecast-state" data-guaranteed={activePool.featured_guaranteed ? 'true' : 'false'}>
-                          <span>下一抽出金率</span>
-                          <strong>{(forecast.nextPullRate * 100).toFixed(1)}%</strong>
-                          <small>{LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? (activePool.featured_guaranteed ? '大保底 · 五星即 UP' : '小保底 · 五星 50% 为 UP') : '五星保底进度独立计算'}</small>
+                        <div className="analysis-model-tools">
+                          <div className="analysis-model-control" aria-label="概率预测模型">
+                            <button type="button" data-active={forecastModel === 'official' ? 'true' : 'false'} onClick={() => setForecastModel('official')}>规则模型</button>
+                            <button type="button" data-active={forecastModel === 'personal' ? 'true' : 'false'} onClick={() => setForecastModel('personal')} disabled={activePool.complete_interval_count === 0}>个人校准</button>
+                          </div>
+                          <div className="analysis-forecast-state" data-guaranteed={activePool.featured_guaranteed ? 'true' : 'false'}>
+                            <span>{forecastModel === 'personal' ? '校准后下一抽' : '下一抽出金率'}</span>
+                            <strong>{(forecast.nextPullRate * 100).toFixed(1)}%</strong>
+                            <small>{LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? (activePool.featured_guaranteed ? '大保底 · 五星即 UP' : '小保底 · 五星 50% 为 UP') : '五星保底进度独立计算'}</small>
+                          </div>
                         </div>
+                      </div>
+                      <div className="analysis-model-breakdown">
+                        <div data-active={forecastModel === 'official' ? 'true' : 'false'}><span>规则基线</span><strong>分段软保底</strong><small>1–65 抽为 0.8%，79 抽必出</small></div>
+                        <i>+</i>
+                        <div><span>你的历史</span><strong>{activePool.complete_interval_count} 个完整区间</strong><small>平均 {formatPull(activePool.average_pity)}</small></div>
+                        <i>→</i>
+                        <div data-active={forecastModel === 'personal' ? 'true' : 'false'}><span>个人校准</span><strong>{calibrationSignal} · {(personalCalibration.weight * 100).toFixed(0)}% 权重</strong><small>未来 10 抽较规则 {personalDelta >= 0 ? '+' : ''}{(personalDelta * 100).toFixed(2)} 个百分点</small></div>
                       </div>
                       <div className="analysis-forecast-body">
                         <div className="analysis-forecast-chart">
@@ -693,7 +790,7 @@ export default function AnalyticsPage() {
                         </div>
                         <aside className="analysis-forecast-summary">
                           <div className="analysis-forecast-now">
-                            <span>未来 10 抽</span>
+                            <span>{forecastModel === 'personal' ? '个人校准 · 未来 10 抽' : '规则模型 · 未来 10 抽'}</span>
                             <strong>{((forecastNextTen?.fiveStar ?? 0) * 100).toFixed(1)}%</strong>
                             <small>至少出现一个五星</small>
                           </div>
@@ -718,7 +815,7 @@ export default function AnalyticsPage() {
                         <i>·</i>
                         <span>P(未来 k 抽内出金) = 1 - ∏(1 - p<sub>i</sub>)</span>
                         <i>·</i>
-                        <span>1–65: 0.8% · 66–70: +4%/抽 · 71–75: +8%/抽 · 76 起: +10%/抽</span>
+                        <span>{forecastModel === 'personal' ? `个人倍率 × ${personalCalibration.factor.toFixed(3)} · 硬保底不变` : '1–65: 0.8% · 66–70: +4%/抽 · 71–75: +8%/抽 · 76 起: +10%/抽'}</span>
                       </div>
                       <div className="border-t border-white/[0.06] px-5 py-4">
                         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -741,11 +838,11 @@ export default function AnalyticsPage() {
                           </label>
                         </div>
                         <input type="range" min={0} max={maxPlannedPulls} value={safePlannedPulls} onChange={(event) => setPlannedPulls(Number(event.target.value))} className="mt-4 w-full accent-[#d8bd84]" aria-label="计划追加抽数" />
-                        <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06] md:grid-cols-4">
+                        <div className={`mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.06] bg-white/[0.06] ${LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? 'md:grid-cols-4' : 'md:grid-cols-2'}`}>
                           <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">至少一个五星</span><strong className="mt-1 block text-lg tabular-nums text-[#d8bd84]">{((plannedPoint?.fiveStar ?? 0) * 100).toFixed(1)}%</strong></div>
-                          <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">获得当期 UP</span><strong className="mt-1 block text-lg tabular-nums text-[#8fc8be]">{plannedPoint?.featured === null || plannedPoint?.featured === undefined ? '不适用' : `${(plannedPoint.featured * 100).toFixed(1)}%`}</strong></div>
+                          {LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">获得当期 UP</span><strong className="mt-1 block text-lg tabular-nums text-[#8fc8be]">{plannedPoint?.featured === null || plannedPoint?.featured === undefined ? '-' : `${(plannedPoint.featured * 100).toFixed(1)}%`}</strong></div> : null}
                           <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">五星最坏还需</span><strong className="mt-1 block text-lg tabular-nums text-tide">{worstFiveStarPulls} 抽</strong></div>
-                          <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">UP 最坏还需</span><strong className="mt-1 block text-lg tabular-nums text-tide">{LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? `${maxPlannedPulls} 抽` : '不适用'}</strong></div>
+                          {LIMITED_ROLE_POOL_TYPES.has(activePool.pool_type) ? <div className="bg-[#252625] px-3 py-3"><span className="text-[10px] text-wave">UP 最坏还需</span><strong className="mt-1 block text-lg tabular-nums text-tide">{maxPlannedPulls} 抽</strong></div> : null}
                         </div>
                       </div>
                     </section>
@@ -776,7 +873,9 @@ export default function AnalyticsPage() {
                       <section className="analysis-chart-panel">
                         <div className="analysis-chart-heading">
                           <div><span>CONDITIONAL RATE / 1–80</span><h3>第 N 抽实际有多容易出金</h3></div>
-                          <p>只看此前还没出五星的记录；这是历史估计，不是官方逐抽机制，金线为基础概率 0.8%</p>
+                          <p>{activePool.pool_type === '5'
+                            ? '新手池只展示历史出金率；逐抽规则未确认，不套用普通池模型。'
+                            : '规则模型作为基线，历史样本按有效样本量收缩到个人校准曲线；历史线仅供观察，不改变保底规则。'}</p>
                         </div>
                         <AnalyticsChart option={probabilityOption} height={292} prewarmDelay={240} />
                       </section>
