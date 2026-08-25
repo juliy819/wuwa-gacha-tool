@@ -115,6 +115,7 @@ fn install_archive(
                 .map_err(|error| format!("读取资源包图片 {resource_id} 失败: {error}"))?;
             atomic_write_replace(&icons_dir.join(format!("{resource_id}.webp")), &bytes)?;
         }
+        cleanup_legacy_icons(&icons_dir, catalog.icons.keys().copied())?;
 
         let metadata_dir = asset_dir.join("resource-pack");
         std::fs::create_dir_all(&metadata_dir)
@@ -127,6 +128,39 @@ fn install_archive(
 
     let _ = std::fs::remove_dir_all(&staging);
     result
+}
+
+fn cleanup_legacy_icons(
+    icons_dir: &Path,
+    resource_ids: impl IntoIterator<Item = i64>,
+) -> Result<(), String> {
+    let ids: std::collections::HashSet<String> = resource_ids
+        .into_iter()
+        .map(|id| format!("{id}-"))
+        .collect();
+    let entries =
+        std::fs::read_dir(icons_dir).map_err(|error| format!("读取旧版素材目录失败: {error}"))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".webp") {
+            continue;
+        }
+        let Some((prefix, hash)) = name
+            .strip_suffix(".webp")
+            .and_then(|value| value.split_once('-'))
+        else {
+            continue;
+        };
+        if ids.contains(&format!("{prefix}-"))
+            && !hash.is_empty()
+            && hash.chars().all(|character| character.is_ascii_hexdigit())
+        {
+            std::fs::remove_file(&path)
+                .map_err(|error| format!("清理旧版素材 {} 失败: {error}", path.display()))?;
+        }
+    }
+    Ok(())
 }
 
 fn extract_archive(archive: &[u8], output_dir: &Path) -> Result<(), String> {
@@ -452,6 +486,22 @@ mod tests {
         assert!(root.join("resource-pack/catalog.json").is_file());
         assert!(!root.join("resource-pack/icons/1104.webp").exists());
         assert!(!root.join("resource-pack.installing").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cleans_legacy_hashed_icons_after_pack_install() {
+        let root = test_dir("legacy-cleanup");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("1104.webp"), webp(1)).unwrap();
+        std::fs::write(root.join("1104-abcdef0123456789.webp"), webp(1)).unwrap();
+        std::fs::write(root.join("9999-abcdef0123456789.webp"), webp(1)).unwrap();
+
+        cleanup_legacy_icons(&root, [1104]).unwrap();
+
+        assert!(root.join("1104.webp").exists());
+        assert!(!root.join("1104-abcdef0123456789.webp").exists());
+        assert!(root.join("9999-abcdef0123456789.webp").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
