@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
@@ -18,9 +19,10 @@ import { useGachaStore } from '../store/useGachaStore';
 import { displayGachaUrl, displayPath, displaySensitiveText, displayUid } from '../lib/shareMode';
 import type { CloudGachaLink, GachaImportPreview } from '../types';
 
-type ScanMode = 'dir' | 'cloud' | 'url' | 'json';
+type ScanMode = 'dir' | 'cloud' | 'url' | 'json' | 'screenshot' | 'manual';
 
 export default function Home() {
+  const navigate = useNavigate();
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
   const addToast = useGachaStore((state) => state.addToast);
   const fetchHomeOverview = useGachaStore((state) => state.fetchHomeOverview);
@@ -233,6 +235,11 @@ export default function Home() {
     if (!useGachaStore.getState().error) setShowScanModal(false);
   };
 
+  const openBatchImport = (mode: 'screenshot' | 'manual') => {
+    setShowScanModal(false);
+    void navigate(`/ocr-import?mode=${mode}`);
+  };
+
   return (
     <PageTransition>
       <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
@@ -285,12 +292,14 @@ export default function Home() {
                 <ResonanceCloseButton onClick={() => setShowScanModal(false)} disabled={scanning || cloudOpening} />
               </div>
 
-              <div className="resonance-segmented mb-4 flex items-center gap-1 p-0.5">
+              <div className="resonance-segmented mb-4 grid grid-cols-3 gap-1 p-1">
                 {([
                   ['dir', '游戏同步', 'directory'],
                   ['cloud', '云鸣潮', 'cloud'],
                   ['url', '链接导入', 'coupling'],
                   ['json', '文件导入', 'ingress'],
+                  ['screenshot', '截图识别', 'echo'],
+                  ['manual', '批量手动', 'add'],
                 ] as const).map(([mode, label, iconKind]) => (
                   <button
                     key={mode}
@@ -507,6 +516,22 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              {scanMode === 'screenshot' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-wave">识别漂泊工坊或小黑盒截图，校验五星与抽数后批量写入。</p>
+                  <div className="border-l-2 border-[#8fc8be]/45 bg-[#8fc8be]/[0.05] px-3 py-2 text-xs leading-5 text-wave">
+                    识别结果不会直接写入；你可以先修改、排序、复制或删除条目。
+                  </div>
+                </div>
+              )}
+              {scanMode === 'manual' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-wave">一次编辑多条五星记录，适合根据其它工具或手写整理的结果批量补录。</p>
+                  <div className="border-l-2 border-[#d8bd84]/45 bg-[#d8bd84]/[0.05] px-3 py-2 text-xs leading-5 text-wave">
+                    可选择卡池、设置日期范围，并通过复制与拖拽快速完成批量录入。
+                  </div>
+                </div>
+              )}
               </motion.div>
               </motion.div>
 
@@ -525,7 +550,9 @@ export default function Home() {
                       ? cloudLink ? handleImportCloudUrl : handleOpenCloud
                       : scanMode === 'url'
                         ? handleScanByUrl
-                        : handleImportJson}
+                        : scanMode === 'json'
+                          ? handleImportJson
+                          : () => openBatchImport(scanMode)}
                   disabled={scanning || cloudOpening || previewingImport || (scanMode === 'dir'
                     ? !gameDirInput.trim()
                     : scanMode === 'url'
@@ -557,6 +584,10 @@ export default function Home() {
                         ? cloudLink ? '导入此链接' : '打开云鸣潮'
                         : scanMode === 'json'
                           ? '预检导入'
+                          : scanMode === 'screenshot'
+                            ? '进入截图识别'
+                            : scanMode === 'manual'
+                              ? '进入批量编辑'
                           : scanMode === 'url'
                             ? '导入链接'
                             : '同步记录'}

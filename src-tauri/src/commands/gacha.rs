@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
@@ -34,11 +34,11 @@ pub async fn get_resource_icon(
 
 #[derive(Debug, Deserialize)]
 pub struct InsertMockGachaRequest {
-    player_id: String,
-    card_pool_type: String,
-    resource_id: i64,
-    pulls: i32,
-    time: String,
+    pub(crate) player_id: String,
+    pub(crate) card_pool_type: String,
+    pub(crate) resource_id: i64,
+    pub(crate) pulls: i32,
+    pub(crate) time: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +64,13 @@ pub async fn insert_mock_gacha(
     state: State<'_, AppState>,
     request: InsertMockGachaRequest,
 ) -> Result<Vec<GachaRecord>, String> {
+    insert_mock_gacha_inner(&state, request).await
+}
+
+pub(crate) async fn insert_mock_gacha_inner(
+    state: &AppState,
+    request: InsertMockGachaRequest,
+) -> Result<Vec<GachaRecord>, String> {
     let target_time = parse_gacha_time(&request.time)?;
     if request.player_id.trim().is_empty() {
         return Err("请先选择玩家 UID".to_string());
@@ -73,7 +80,7 @@ pub async fn insert_mock_gacha(
         return Err(format!("抽数必须在 1 到 {hard_pity} 之间"));
     }
 
-    let resources = crate::assets::get_gacha_resources(&state).await?;
+    let resources = crate::assets::get_gacha_resources(state).await?;
     let target = resources
         .iter()
         .find(|resource| resource.resource_id == request.resource_id && resource.quality_level == 5)
@@ -491,8 +498,7 @@ pub struct GachaImportPreview {
 }
 
 fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, String), String> {
-    let content =
-        std::fs::read_to_string(file_path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let content = std::fs::read_to_string(file_path).map_err(|e| format!("读取文件失败: {}", e))?;
     let mut hasher = DefaultHasher::new();
     content.hash(&mut hasher);
     let file_hash = format!("{:016x}", hasher.finish());
@@ -543,7 +549,10 @@ fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, S
     Ok((player_id, all_records, file_hash))
 }
 
-fn ensure_preview_matches_file(expected_file_hash: Option<&str>, file_hash: &str) -> Result<(), String> {
+fn ensure_preview_matches_file(
+    expected_file_hash: Option<&str>,
+    file_hash: &str,
+) -> Result<(), String> {
     if expected_file_hash.is_some_and(|expected| expected != file_hash) {
         return Err("JSON 文件在预检后发生变化，请重新预检".to_string());
     }
@@ -559,8 +568,18 @@ pub fn preview_gacha_json_import(
     let db = state.db.lock().map_err(|e| e.to_string())?;
     let stats = db.preview_merge_records(&records)?;
     let existing_count = db.get_all_records(Some(&player_id))?.len();
-    let earliest_time = records.iter().map(|record| record.time.as_str()).min().unwrap().to_string();
-    let latest_time = records.iter().map(|record| record.time.as_str()).max().unwrap().to_string();
+    let earliest_time = records
+        .iter()
+        .map(|record| record.time.as_str())
+        .min()
+        .unwrap()
+        .to_string();
+    let latest_time = records
+        .iter()
+        .map(|record| record.time.as_str())
+        .max()
+        .unwrap()
+        .to_string();
     let mut pool_names: Vec<_> = records
         .iter()
         .map(|record| record.card_pool_name.clone())
@@ -795,7 +814,7 @@ pub fn get_stats(
             let mut boundaries = db.confirmed_pool_boundaries(player_id)?;
             boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
             boundaries
-        },
+        }
         None => Default::default(),
     };
     let query_ms = query_started.elapsed().as_millis();
@@ -844,7 +863,11 @@ pub fn get_home_overview(
         started.elapsed().as_millis(),
         records.len()
     );
-    Ok(HomeOverview { stats, records, confirmed_boundary_pool_types })
+    Ok(HomeOverview {
+        stats,
+        records,
+        confirmed_boundary_pool_types,
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -881,7 +904,7 @@ pub fn get_gacha_insights(
                 boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
             }
             boundaries
-        },
+        }
         (false, None) => Default::default(),
     };
     Ok(GachaInsights::from_records_with_boundaries(
@@ -907,7 +930,7 @@ pub fn get_character_pull_insights(
                 boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
             }
             boundaries
-        },
+        }
         None => Default::default(),
     };
     Ok(character_pull_insights_with_boundaries(
@@ -932,7 +955,7 @@ pub fn get_resource_acquisition_insights(
                 boundaries.extend(db.inferred_mock_pool_boundaries(player_id)?);
             }
             boundaries
-        },
+        }
         None => Default::default(),
     };
     Ok(resource_acquisition_insights_with_boundaries(

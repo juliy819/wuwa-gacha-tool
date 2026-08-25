@@ -7,6 +7,7 @@ import StatusBar from './components/StatusBar';
 import ResonancePulseLayer from './components/ResonancePulseLayer';
 import ImportSummaryPanel from './components/ImportSummaryPanel';
 import Home from './pages/Home';
+import OcrImportPage from './pages/OcrImportPage';
 import { useGachaStore } from './store/useGachaStore';
 import { useUpdateStore } from './store/useUpdateStore';
 
@@ -36,6 +37,7 @@ function AnimatedRoutes() {
       <Route path="/records" element={<DeferredRoute><RecordsPage /></DeferredRoute>} />
       <Route path="/analytics" element={<DeferredRoute><AnalyticsPage /></DeferredRoute>} />
       <Route path="/settings" element={<DeferredRoute><SettingsPage /></DeferredRoute>} />
+      <Route path="/ocr-import" element={<DeferredRoute><OcrImportPage /></DeferredRoute>} />
     </Routes>
   );
 }

@@ -598,7 +598,8 @@ impl GachaInsights {
                         pity = 0;
 
                         if tracks_featured {
-                            let cycle_has_start = seen_featured || confirmed_boundaries.contains(&pool_type);
+                            let cycle_has_start =
+                                seen_featured || confirmed_boundaries.contains(&pool_type);
                             let segment = FeaturedCycleSegmentInsight {
                                 record_id: record.id,
                                 resource_id: record.resource_id,

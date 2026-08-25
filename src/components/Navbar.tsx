@@ -34,7 +34,10 @@ export default function Navbar() {
     const container = containerRef.current;
     if (!container) return;
     const activeIndex = navItems.findIndex((item) => item.path === location.pathname);
-    if (activeIndex === -1) return;
+    if (activeIndex === -1) {
+      setIndicatorStyle({ left: 0, width: 0 });
+      return;
+    }
     const links = container.querySelectorAll('a');
     const activeLink = links[activeIndex] as HTMLElement;
     if (!activeLink) return;

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
+import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -16,6 +16,30 @@ export const gachaApi = {
 
   getGachaResources: (): Promise<GachaResource[]> => {
     return invoke('get_gacha_resources');
+  },
+
+  recognizeGachaScreenshots: (paths: string[]): Promise<OcrScreenshotResult> => {
+    return invoke('recognize_gacha_screenshots', { request: { paths } });
+  },
+
+  getOcrComponentStatus: (): Promise<OcrComponentStatus> => {
+    return invoke('get_ocr_component_status');
+  },
+
+  checkOcrComponentUpdate: (): Promise<OcrComponentUpdate> => {
+    return invoke('check_ocr_component_update');
+  },
+
+  installOcrComponent: (): Promise<OcrComponentStatus> => {
+    return invoke('install_ocr_component');
+  },
+
+  removeOcrComponent: (): Promise<OcrComponentStatus> => {
+    return invoke('remove_ocr_component');
+  },
+
+  importOcrGachaRows: (rows: InsertMockGachaRequest[], allowDateOverlap = false): Promise<OcrImportResult> => {
+    return invoke('import_ocr_gacha_rows', { request: { rows, allow_date_overlap: allowDateOverlap } });
   },
 
   insertMockGacha: (request: InsertMockGachaRequest): Promise<GachaRecord[]> => {

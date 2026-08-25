@@ -17,6 +17,7 @@ pub struct AppState {
     pub asset_cache_dir: PathBuf,
     pub asset_catalog_refresh: tokio::sync::Mutex<()>,
     pub resource_pack_refresh: tokio::sync::Mutex<()>,
+    pub app_data_dir: PathBuf,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -60,10 +61,11 @@ pub fn run() {
                 asset_cache_dir: app_data_dir.join("assets"),
                 asset_catalog_refresh: tokio::sync::Mutex::new(()),
                 resource_pack_refresh: tokio::sync::Mutex::new(()),
+                app_data_dir,
             });
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                // Resource refresh is delayed because it is not a startup dependency.
+                // 资源包不是首屏依赖，延迟检查避免与数据库和 WebView 初始化争抢资源。
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 let state = app_handle.state::<AppState>();
                 if let Err(error) = resource_pack::refresh(&state).await {
@@ -93,6 +95,12 @@ pub fn run() {
             commands::gacha::insert_mock_gacha,
             commands::gacha::update_mock_gacha,
             commands::gacha::delete_mock_gacha,
+            commands::ocr::recognize_gacha_screenshots,
+            commands::ocr::get_ocr_component_status,
+            commands::ocr::check_ocr_component_update,
+            commands::ocr::install_ocr_component,
+            commands::ocr::remove_ocr_component,
+            commands::ocr::import_ocr_gacha_rows,
             commands::gacha::decode_log,
             commands::gacha::fetch_gacha_data,
             commands::gacha::fetch_gacha_data_by_url,

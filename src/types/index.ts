@@ -22,6 +22,82 @@ export interface GachaResource {
   resource_type: 'role' | 'weapon';
 }
 
+export interface OcrAlternative {
+  resource_id: number;
+  name: string;
+  inliers: number;
+}
+
+export interface OcrCandidateRow {
+  key: string;
+  source: string;
+  strategy: string;
+  y: number;
+  resource_id: number;
+  resource_type: 'role' | 'weapon';
+  name: string;
+  pulls: number;
+  ocr_confidence: number;
+  icon_inliers: number;
+  icon_margin: number;
+  high_confidence: boolean;
+  alternatives: OcrAlternative[];
+}
+
+export interface OcrImageSummary {
+  source: string;
+  strategy: string;
+  rows: number;
+  high_confidence_rows: number;
+}
+
+export interface OcrScreenshotResult {
+  rows: OcrCandidateRow[];
+  images: OcrImageSummary[];
+}
+
+export interface OcrImportResult {
+  five_star_count: number;
+  inserted_record_count: number;
+  date_overlap_count?: number;
+  date_overlap_range?: { earliest: string; latest: string } | null;
+}
+
+export interface OcrComponentStatus {
+  supported: boolean;
+  installed: boolean;
+  healthy: boolean;
+  platform: string;
+  version: string | null;
+  install_dir: string;
+  reason: string | null;
+  latest_version: string | null;
+  update_available: boolean;
+}
+
+export interface OcrComponentUpdate {
+  current_version: string | null;
+  latest_version: string | null;
+  update_available: boolean;
+  reason: string | null;
+}
+
+export interface OcrDownloadProgress {
+  phase: 'manifest' | 'component';
+  downloaded: number;
+  total: number | null;
+}
+
+export interface OcrRecognitionProgress {
+  completed_images: number;
+  total_images: number;
+  recognized_rows: number;
+  source: string;
+  current_image_processed?: number;
+  current_image_total?: number;
+  strategy?: string;
+}
+
 export interface InsertMockGachaRequest {
   player_id: string;
   card_pool_type: string;

@@ -2543,3 +2543,33 @@ tr.record-target-highlight > td {
   }
 
 }
+
+@keyframes ocrRecognitionProgress {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
+}
+
+.ocr-recognition-progress > div {
+  animation: ocrRecognitionProgress 1.15s ease-in-out infinite;
+}
+
+.batch-import-row {
+  position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
+  transition: border-color 160ms ease, background-color 160ms ease, box-shadow 180ms ease;
+}
+.batch-import-row-ocr { grid-template-columns: 26px 44px minmax(150px, 1fr) 92px 112px 100px 116px; }
+.batch-import-row-manual { grid-template-columns: 26px 44px minmax(150px, 1fr) 92px 112px 116px; }
+.batch-import-row:hover { border-color: rgba(143, 200, 190, 0.18); background-color: rgba(255, 255, 255, 0.028); }
+
+@media (max-width: 1040px) {
+  .batch-import-row-ocr { grid-template-columns: 22px 40px minmax(130px, 1fr) 76px 98px 86px 104px; }
+  .batch-import-row-manual { grid-template-columns: 22px 40px minmax(130px, 1fr) 76px 98px 104px; }
+}
+
+@media (max-width: 767px) {
+  .batch-import-page { padding-left: 14px; padding-right: 14px; }
+  .batch-import-row { min-width: 700px; }
+  .batch-import-row-manual { min-width: 590px; }
+}
