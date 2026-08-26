@@ -242,9 +242,8 @@ export default function Home() {
 
   return (
     <PageTransition>
-      <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
-        <div className="page-container home-page-container w-full space-y-5 p-6">
-          <header className="page-header home-page-header relative flex items-end justify-between gap-4 overflow-hidden py-1">
+      <div className="page-container flex h-full flex-col gap-5 overflow-hidden p-6">
+          <header className="page-header home-page-header relative flex shrink-0 items-end justify-between gap-4 overflow-hidden py-1">
             <ResonanceField />
             <div className="relative z-10">
               <h1 className="page-title text-xl font-semibold text-tide">抽卡概览</h1>
@@ -256,20 +255,23 @@ export default function Home() {
             </button>
           </header>
 
+          <div className="min-h-0 flex-1">
           {!initialized || (activePlayerId && statsPlayerId !== activePlayerId) ? (
-            <div className="resonance-panel min-h-[360px]" aria-busy="true" aria-label="Loading gacha overview" />
+            <div className="resonance-panel h-full" aria-busy="true" aria-label="Loading gacha overview" />
           ) : stats && stats.total_draws > 0 ? (
-            <HomeDashboard
-              stats={stats}
-              records={records}
-              confirmedBoundaryPools={confirmedBoundaryPools}
-            />
+            <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
+              <HomeDashboard
+                stats={stats}
+                records={records}
+                confirmedBoundaryPools={confirmedBoundaryPools}
+              />
+            </div>
           ) : (
             <ResonanceEmptyState
               variant="scan"
               title="暂无抽卡数据"
               description="从游戏、抽卡链接或文件导入抽卡记录"
-              className="resonance-panel min-h-[360px]"
+              className="resonance-panel h-full"
             >
               <button onClick={(e) => { createRipple(e); openScanModal(); }} className="tide-btn core-action-btn core-action-btn-scan click-ripple mt-1 flex items-center gap-2 px-4 py-2">
                 <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-scan"><ResonanceIcon kind="ingress" size={14} /></ResonanceActionIcon>
@@ -277,7 +279,7 @@ export default function Home() {
               </button>
             </ResonanceEmptyState>
           )}
-        </div>
+          </div>
 
         <Modal
           open={showScanModal}

@@ -706,7 +706,7 @@ export default function AnalyticsPage() {
               ) : !activePlayerId && initialized ? (
                 <ResonanceEmptyState variant="records" title="暂无可分析记录" description="完成一次扫描或导入后，这里会显示历史出金表现" />
               ) : activePool ? (
-                <motion.div key={`${activePool.pool_type}-${includeMock}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                <motion.div key={`${activePool.pool_type}-${includeMock}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-4 pb-7">
                   <section className="analysis-pool-overview">
                     <div className="analysis-pool-heading">
                       <div>
