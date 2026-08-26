@@ -178,6 +178,7 @@ export default function OcrImportPage() {
   const recognizedKinds = useMemo(() => new Set(rows.map((row) => row.resource_type)), [rows]);
   const invalidCount = rows.filter((row) => !rowIsValid(row)).length;
   const dateRangeValid = useRecognizedDates && hasRecognizedDates ? effectiveStart <= effectiveEnd && recognizedDateOrderValid : Boolean(start && end && start <= end);
+  const showConfigPanels = mode === 'manual' || component?.healthy === true;
 
   useEffect(() => {
     if (activePlayerId && !targetPlayerId) setTargetPlayerId(activePlayerId);
@@ -437,6 +438,7 @@ export default function OcrImportPage() {
 
         <div className="mt-4 grid gap-4 md:grid-cols-[230px_minmax(0,1fr)]">
           <aside className="space-y-3">
+            {showConfigPanels && <>
             <section className="border-b border-white/[0.07] pb-3">
               <h2 className="text-sm font-medium text-tide">导入范围</h2>
               <label className="mt-2.5 grid gap-1 text-xs text-wave">目标 UID
@@ -462,6 +464,7 @@ export default function OcrImportPage() {
               <p className="mt-1.5 text-[11px] leading-4 text-wave">{useRecognizedDates && hasRecognizedDates ? '已采用截图日期；同一天的记录按图片顺序拟定具体时间。' : '顶部为最新记录，日期随排序自动重算。'}</p>
               {!recognizedDateOrderValid && <p className="mt-2 border-l-2 border-amber-300/55 bg-amber-300/[0.06] px-2.5 py-2 text-[11px] leading-5 text-amber-200">截图日期顺序异常，请将较新的记录移到上方，或切换为手动范围。</p>}
             </section>
+            </>}
 
             {mode === 'screenshot' && <section>
               <h2 className="text-sm font-medium text-tide">OCR 组件</h2>
@@ -560,7 +563,7 @@ export default function OcrImportPage() {
               })}</AnimatePresence>
             </Reorder.Group>
 
-            {!rows.length && <div className="mt-3 flex min-h-[300px] flex-col items-center justify-center border border-dashed border-white/[0.1] text-center"><ResonanceIcon kind={mode === 'screenshot' ? 'capture' : 'batch-edit'} size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">{mode === 'screenshot' ? component?.healthy ? '选择截图开始本地识别' : '安装并通过 OCR 组件检测后即可识别' : '添加第一条五星记录'}</p><button type="button" disabled={mode === 'screenshot' && !component?.healthy} onClick={mode === 'screenshot' ? requestScreenshots : addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf] disabled:text-wave/50"><ResonanceIcon kind={mode === 'screenshot' ? 'capture' : 'add'} size={13} />{mode === 'screenshot' ? '选择截图' : '添加记录'}</button></div>}
+            {!rows.length && <div className="mt-3 flex min-h-[300px] flex-col items-center justify-center border border-dashed border-white/[0.1] text-center">{mode === 'screenshot' && !component ? <><LoaderCircle size={27} className="animate-spin text-wave" /><p className="mt-3 text-sm text-wave">正在检测本地环境</p></> : mode === 'screenshot' && !component?.healthy ? <><ResonanceIcon kind="download" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">安装 OCR 组件后即可识别截图</p><button type="button" onClick={() => void installComponent()} disabled={componentBusy} className="tide-btn mt-3 flex h-9 items-center gap-2 px-4 text-sm">{componentBusy ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="download" size={14} />}{componentBusy ? '正在下载' : '下载 OCR 组件'}</button></> : <><ResonanceIcon kind={mode === 'screenshot' ? 'capture' : 'batch-edit'} size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">{mode === 'screenshot' ? '选择截图开始本地识别' : '添加第一条五星记录'}</p><button type="button" onClick={mode === 'screenshot' ? requestScreenshots : addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind={mode === 'screenshot' ? 'capture' : 'add'} size={13} />{mode === 'screenshot' ? '选择截图' : '添加记录'}</button></>}</div>}
 
             {rows.length > 0 && <footer className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-4"><div className="text-xs text-wave">目标 UID：<span className="text-tide">{targetPlayerId.trim() || '未填写'}</span> · {rows.length} 条五星{reviewCount > 0 && <span className="ml-2 text-amber-300">仍有 {reviewCount} 条需核对</span>}{anomalyIndices.size > 0 && <span className="ml-2 text-amber-300">{anomalyIndices.size} 条序列异常</span>}{!recognizedDateOrderValid && <span className="ml-2 text-amber-300">日期顺序异常</span>}{mismatchCount > 0 && <span className="ml-2 text-red-300">{mismatchCount} 条与卡池不匹配</span>}{invalidCount > 0 && <span className="ml-2 text-red-300">仍有 {invalidCount} 条抽数无效</span>}</div><button type="button" onClick={() => { setImportError(''); setConfirming(true); }} disabled={!targetPlayerId.trim() || reviewCount > 0 || mismatchCount > 0 || invalidCount > 0 || !dateRangeValid || importing} className="tide-btn h-9 px-5 text-sm disabled:opacity-40">生成导入确认</button></footer>}
           </main>
