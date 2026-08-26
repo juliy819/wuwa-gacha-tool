@@ -10,7 +10,9 @@ import Modal from '../components/Modal';
 import ResourceIcon from '../components/ResourceIcon';
 import ResonanceCloseButton from '../components/ResonanceCloseButton';
 import ResonanceIcon from '../components/ResonanceModeIcon';
+import { ShareMaskedInput } from '../components/ShareMaskedField';
 import Tooltip from '../components/Tooltip';
+import { displayPath, displaySensitiveText, displayUid } from '../lib/shareMode';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
 import type { GachaResource, OcrCandidateRow, OcrComponentStatus, OcrDownloadProgress, OcrImageSummary, OcrRecognitionProgress } from '../types';
@@ -508,7 +510,7 @@ export default function OcrImportPage() {
             <section className="border-b border-white/[0.07] pb-3">
               <h2 className="text-sm font-medium text-tide">导入范围</h2>
               <label className="mt-2.5 grid gap-1 text-xs text-wave">目标 UID
-                <input value={targetPlayerId} onChange={(event) => setTargetPlayerId(event.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="请输入游戏 UID" className={`glass-input h-9 w-full px-3 text-sm text-tide ${targetPlayerId.trim() ? '' : '!border-amber-300/55'}`} />
+                <ShareMaskedInput value={targetPlayerId} displayValue={displayUid(targetPlayerId)} onChange={(event) => setTargetPlayerId(event.target.value.replace(/\D/g, ''))} inputMode="numeric" placeholder="请输入游戏 UID" className={`glass-input h-9 w-full px-3 text-sm text-tide ${targetPlayerId.trim() ? '' : '!border-amber-300/55'}`} />
               </label>
               <label className="mt-2.5 grid gap-1 text-xs text-wave">目标卡池
                 <span className="relative block">
@@ -544,7 +546,7 @@ export default function OcrImportPage() {
                   </summary>
                   <div className="mt-2.5 border-l border-white/[0.08] pl-3">
                     <button type="button" onClick={() => setRemoveConfirming(true)} className="flex h-7 items-center gap-1.5 text-[11px] text-wave hover:text-red-300"><ResonanceIcon kind="delete" size={13} />删除本地组件</button>
-                    <p className="mt-1.5 break-all text-[10px] leading-4 text-wave/70">{component.install_dir}</p>
+                    <p className="mt-1.5 break-all text-[10px] leading-4 text-wave/70">{displayPath(component.install_dir)}</p>
                   </div>
                 </details>
               ) : (
@@ -558,7 +560,7 @@ export default function OcrImportPage() {
                     {componentBusy && <div className="mt-2"><div className="flex justify-between text-[10px] text-wave"><span>{downloadProgress?.phase === 'manifest' ? '获取组件清单' : '下载 OCR 组件'}</span><span>{downloadProgress?.total ? `${Math.floor(downloadProgress.downloaded / downloadProgress.total * 100)}%` : '准备中'}</span></div><div className="mt-1 h-1.5 overflow-hidden bg-white/[0.08]"><div className="h-full bg-[#8fc8be] transition-[width] duration-200" style={{ width: downloadProgress?.total ? `${Math.min(100, downloadProgress.downloaded / downloadProgress.total * 100)}%` : '8%' }} /></div></div>}
                   </>}
                   {component.installed && !componentBusy && <button type="button" onClick={() => setRemoveConfirming(true)} className="mt-3 flex h-7 items-center gap-1.5 text-[11px] text-wave hover:text-red-300"><ResonanceIcon kind="delete" size={13} />删除本地组件</button>}
-                  <p className="mt-2 break-all text-[10px] leading-4 text-wave/70">{component.install_dir}</p>
+                  <p className="mt-2 break-all text-[10px] leading-4 text-wave/70">{displayPath(component.install_dir)}</p>
                 </div>
               )}
             </section>}
@@ -580,7 +582,7 @@ export default function OcrImportPage() {
                           <div className="max-h-[200px] space-y-1 overflow-y-auto border-t border-white/[0.08] pt-1.5">
                             {images.map((image) => (
                               <div key={`${image.source}-${image.strategy}`} className="flex items-center justify-between gap-4 text-[11px] text-wave">
-                                <span className="max-w-[200px] truncate" title={image.source}>{image.source}</span>
+                                <span className="max-w-[200px] truncate" title={displayPath(image.source)}>{displayPath(image.source)}</span>
                                 <span className="shrink-0 tabular-nums text-tide">{image.rows} 条</span>
                               </div>
                             ))}
@@ -598,8 +600,8 @@ export default function OcrImportPage() {
               </div>
             </div>
 
-            {error && <div className="mt-3 shrink-0 flex gap-2 border-l-2 border-red-400 bg-red-400/[0.06] px-3 py-2 text-xs text-red-200"><ResonanceIcon kind="error" size={15} className="shrink-0" />{error}</div>}
-            {recognizing && <div className="mt-3 shrink-0 border border-white/[0.07] bg-white/[0.02] px-3 py-3"><div className="flex items-center justify-between gap-3 text-xs"><span className="flex min-w-0 items-center gap-2 text-tide"><LoaderCircle size={13} className="shrink-0 animate-spin" /><span className="truncate">{recognitionProgress?.strategy === 'starting' ? `正在启动 OCR 组件 · ${recognitionProgress.source}` : recognitionProgress?.total_images ? `正在分析 ${Math.min(recognitionProgress.completed_images + 1, recognitionProgress.total_images)}/${recognitionProgress.total_images} 张 · ${recognitionProgress.source}` : '正在初始化 OCR 引擎'}</span></span><span className="shrink-0 tabular-nums text-[#a8d7cf]">已识别 {recognitionProgress?.recognized_rows ?? 0} 条</span></div><div className="ocr-recognition-progress mt-2 h-1.5 overflow-hidden bg-white/[0.08]"><div className="h-full w-1/3 bg-[#8fc8be]" /></div></div>}
+            {error && <div className="mt-3 shrink-0 flex gap-2 border-l-2 border-red-400 bg-red-400/[0.06] px-3 py-2 text-xs text-red-200"><ResonanceIcon kind="error" size={15} className="shrink-0" />{displaySensitiveText(error)}</div>}
+            {recognizing && <div className="mt-3 shrink-0 border border-white/[0.07] bg-white/[0.02] px-3 py-3"><div className="flex items-center justify-between gap-3 text-xs"><span className="flex min-w-0 items-center gap-2 text-tide"><LoaderCircle size={13} className="shrink-0 animate-spin" /><span className="truncate">{recognitionProgress?.strategy === 'starting' ? `正在启动 OCR 组件 · ${displayPath(recognitionProgress.source)}` : recognitionProgress?.total_images ? `正在分析 ${Math.min(recognitionProgress.completed_images + 1, recognitionProgress.total_images)}/${recognitionProgress.total_images} 张 · ${displayPath(recognitionProgress.source)}` : '正在初始化 OCR 引擎'}</span></span><span className="shrink-0 tabular-nums text-[#a8d7cf]">已识别 {recognitionProgress?.recognized_rows ?? 0} 条</span></div><div className="ocr-recognition-progress mt-2 h-1.5 overflow-hidden bg-white/[0.08]"><div className="h-full w-1/3 bg-[#8fc8be]" /></div></div>}
 
             <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
               {rows.length > 0 && (
@@ -652,7 +654,7 @@ export default function OcrImportPage() {
               {!rows.length && <div ref={dropZoneRef} className={`flex h-full min-h-[240px] flex-col items-center justify-center border border-dashed text-center transition-all duration-150 ${dropState === 'active' ? 'ocr-drop-zone-active' : dropState === 'guiding' ? 'ocr-drop-guiding border-[#8fc8be]/30 bg-[#8fc8be]/[0.02]' : 'border-white/[0.1]'}`}>{dropState !== 'idle' && mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="ingress" size={32} className={dropState === 'active' ? 'text-[#8fc8be]' : 'text-wave'} /><p className="mt-4 text-base font-medium text-tide">{dropState === 'active' ? '松开以识别截图' : '将截图拖到此处'}</p>{dropState === 'guiding' && <p className="mt-2 text-xs text-wave">仅支持 PNG · JPG · WebP 格式</p>}</> : mode === 'screenshot' && !component ? <><LoaderCircle size={27} className="animate-spin text-wave" /><p className="mt-3 text-sm text-wave">正在检测本地环境</p></> : mode === 'screenshot' && !component?.healthy ? <><ResonanceIcon kind="download" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">安装 OCR 组件后即可识别截图</p><button type="button" onClick={() => void installComponent()} disabled={componentBusy} className="tide-btn mt-3 flex h-9 items-center gap-2 px-4 text-sm">{componentBusy ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="download" size={14} />}{componentBusy ? '正在下载' : '下载 OCR 组件'}</button></> : mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="capture" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">选择或拖拽截图开始本地识别</p><p className="mt-1 text-xs text-wave">支持 PNG、JPG、WebP 格式，可批量拖入</p><button type="button" onClick={requestScreenshots} className="mt-4 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="capture" size={13} />选择截图</button></> : <><ResonanceIcon kind="batch-edit" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">添加第一条五星记录</p><button type="button" onClick={addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="add" size={13} />添加记录</button></>}</div>}
             </div>
 
-            {rows.length > 0 && <footer className="mt-4 shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-4"><div className="text-xs text-wave">目标 UID：<span className="text-tide">{targetPlayerId.trim() || '未填写'}</span> · {rows.length} 条五星{reviewCount > 0 && <span className="ml-2 text-amber-300">仍有 {reviewCount} 条需核对</span>}{anomalyIndices.size > 0 && <span className="ml-2 text-amber-300">{anomalyIndices.size} 条序列异常</span>}{!recognizedDateOrderValid && <span className="ml-2 text-amber-300">日期顺序异常</span>}{mismatchCount > 0 && <span className="ml-2 text-red-300">{mismatchCount} 条与卡池不匹配</span>}{invalidCount > 0 && <span className="ml-2 text-red-300">仍有 {invalidCount} 条抽数无效</span>}</div><button type="button" onClick={() => { setImportError(''); setConfirming(true); }} disabled={!targetPlayerId.trim() || reviewCount > 0 || mismatchCount > 0 || invalidCount > 0 || !dateRangeValid || importing} className="tide-btn h-9 px-5 text-sm disabled:opacity-40">生成导入确认</button></footer>}
+            {rows.length > 0 && <footer className="mt-4 shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-4"><div className="text-xs text-wave">目标 UID：<span className="text-tide">{displayUid(targetPlayerId.trim()) || '未填写'}</span> · {rows.length} 条五星{reviewCount > 0 && <span className="ml-2 text-amber-300">仍有 {reviewCount} 条需核对</span>}{anomalyIndices.size > 0 && <span className="ml-2 text-amber-300">{anomalyIndices.size} 条序列异常</span>}{!recognizedDateOrderValid && <span className="ml-2 text-amber-300">日期顺序异常</span>}{mismatchCount > 0 && <span className="ml-2 text-red-300">{mismatchCount} 条与卡池不匹配</span>}{invalidCount > 0 && <span className="ml-2 text-red-300">仍有 {invalidCount} 条抽数无效</span>}</div><button type="button" onClick={() => { setImportError(''); setConfirming(true); }} disabled={!targetPlayerId.trim() || reviewCount > 0 || mismatchCount > 0 || invalidCount > 0 || !dateRangeValid || importing} className="tide-btn h-9 px-5 text-sm disabled:opacity-40">生成导入确认</button></footer>}
           </main>
         </div>
       </div>
@@ -690,10 +692,10 @@ export default function OcrImportPage() {
       </Modal>
 
       <Modal open={confirming} onClose={() => { if (!importing) { setImportError(''); setConfirming(false); } }} closeDisabled={importing} className="max-w-[520px]" labelledBy="batch-confirm-title">
-        <div className="flex items-start justify-between border-b border-white/[0.06] p-5"><div><h2 id="batch-confirm-title" className="modal-title text-base font-medium text-tide">确认写入模拟记录</h2><p className="mt-2 text-sm leading-6 text-wave">将向 UID {targetPlayerId.trim() || '未填写'} 的“{POOL_TYPES.find((item) => item.type === pool)?.name}”插入 {rows.length} 条五星，并自动补足每段抽数。</p></div><ResonanceCloseButton onClick={() => setConfirming(false)} disabled={importing} /></div>
+        <div className="flex items-start justify-between border-b border-white/[0.06] p-5"><div><h2 id="batch-confirm-title" className="modal-title text-base font-medium text-tide">确认写入模拟记录</h2><p className="mt-2 text-sm leading-6 text-wave">将向 UID {displayUid(targetPlayerId.trim()) || '未填写'} 的“{POOL_TYPES.find((item) => item.type === pool)?.name}”插入 {rows.length} 条五星，并自动补足每段抽数。</p></div><ResonanceCloseButton onClick={() => setConfirming(false)} disabled={importing} /></div>
         <dl className="grid grid-cols-2 gap-3 p-5 text-xs"><div><dt className="text-wave">日期范围</dt><dd className="mt-1 text-tide">{effectiveStart} 至 {effectiveEnd}</dd></div><div><dt className="text-wave">日期来源</dt><dd className="mt-1 text-tide">{useRecognizedDates && hasRecognizedDates ? '截图识别' : '手动范围'}</dd></div><div><dt className="text-wave">写入顺序</dt><dd className="mt-1 text-tide">从列表底部到顶部</dd></div><div><dt className="text-wave">数据类型</dt><dd className="mt-1 text-tide">模拟记录</dd></div></dl>
         {dateOverlap && <label className="mx-5 mb-4 flex items-start gap-2 border-l-2 border-amber-300/55 bg-amber-300/[0.06] px-3 py-2 text-xs leading-5 text-amber-100"><input type="checkbox" checked={allowDateOverlap} onChange={(event) => setAllowDateOverlap(event.target.checked)} className="mt-1 accent-amber-300" /><span>目标 UID 的“{POOL_TYPES.find((item) => item.type === pool)?.name}”已有 {dateOverlap.count} 条记录落在 {dateOverlap.earliest} 至 {dateOverlap.latest}，与本次日期范围重叠。我确认仍要导入，并会检查导入后的抽数顺序。</span></label>}
-        {importError && <div className="mx-5 mb-4 flex gap-2 border-l-2 border-red-400 bg-red-400/[0.06] px-3 py-2 text-xs leading-5 text-red-200"><ResonanceIcon kind="error" size={15} className="mt-0.5 shrink-0" /><span>{importError}</span></div>}
+        {importError && <div className="mx-5 mb-4 flex gap-2 border-l-2 border-red-400 bg-red-400/[0.06] px-3 py-2 text-xs leading-5 text-red-200"><ResonanceIcon kind="error" size={15} className="mt-0.5 shrink-0" /><span>{displaySensitiveText(importError)}</span></div>}
         <div className="flex justify-end gap-2 border-t border-white/[0.06] p-4"><button type="button" disabled={importing} onClick={() => { setImportError(''); setConfirming(false); }} className="h-9 px-4 text-sm text-wave">返回校验</button><button type="button" disabled={importing || Boolean(dateOverlap && !allowDateOverlap)} onClick={() => void importRows()} className="tide-btn flex h-9 min-w-[116px] items-center justify-center gap-2 px-4 text-sm disabled:opacity-40">{importing && <LoaderCircle size={14} className="animate-spin" />}{importing ? '正在写入' : '确认导入'}</button></div>
       </Modal>
     </section>
