@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { AnimatePresence, motion, Reorder } from 'framer-motion';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { LoaderCircle } from 'lucide-react';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import DatePickerField from '../components/DatePickerField';
 import Modal from '../components/Modal';
 import ResourceIcon from '../components/ResourceIcon';
@@ -153,6 +154,14 @@ export default function OcrImportPage() {
   const [allowDateOverlap, setAllowDateOverlap] = useState(false);
   const [dateOverlap, setDateOverlap] = useState<{ count: number; earliest: string; latest: string } | null>(null);
   const [useRecognizedDates, setUseRecognizedDates] = useState(false);
+  const [dropState, setDropState] = useState<'idle' | 'guiding' | 'active'>('idle');
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const recognizePathsRef = useRef<(paths: string[]) => Promise<void>>(async () => {});
+  const addToastRef = useRef(addToast);
+  addToastRef.current = addToast;
+  const dropEnabledRef = useRef(false);
+  const dropModeRef = useRef<ImportMode>(mode);
+  dropModeRef.current = mode;
 
   const hardPity = pool === '5' ? 50 : 80;
   const fiveStarResources = useMemo(() => resources.filter((resource) => {
@@ -220,6 +229,56 @@ export default function OcrImportPage() {
     }
   }, [mode]);
 
+  useEffect(() => {
+    dropEnabledRef.current = mode === 'screenshot' && component?.healthy === true && !recognizing && !importing && rows.length === 0;
+  }, [mode, component, recognizing, importing, rows.length]);
+
+  useEffect(() => {
+    if (mode !== 'screenshot') {
+      setDropState('idle');
+      return;
+    }
+    const checkOverZone = (position: { x: number; y: number }) => {
+      const el = dropZoneRef.current;
+      if (!el) return false;
+      const dpr = window.devicePixelRatio || 1;
+      const x = position.x / dpr;
+      const y = position.y / dpr;
+      const rect = el.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    let disposed = false;
+    let disposeFn: (() => void) | null = null;
+    void getCurrentWebview().onDragDropEvent((event) => {
+      if (disposed) return;
+      if (dropModeRef.current !== 'screenshot') return;
+      const { payload } = event;
+      if (payload.type === 'enter' || payload.type === 'over') {
+        if (!dropEnabledRef.current) { setDropState('idle'); return; }
+        setDropState(checkOverZone(payload.position) ? 'active' : 'guiding');
+      } else if (payload.type === 'drop') {
+        if (dropEnabledRef.current && checkOverZone(payload.position)) {
+          const validPaths = payload.paths.filter((p) => /\.(png|jpe?g|webp)$/i.test(p));
+          if (validPaths.length) {
+            void recognizePathsRef.current(validPaths);
+          } else {
+            addToastRef.current('error', '拖入的文件中没有支持的截图格式（PNG、JPG、WebP）');
+          }
+        }
+        setDropState('idle');
+      } else {
+        setDropState('idle');
+      }
+    }).then((dispose) => {
+      if (disposed) { dispose(); } else { disposeFn = dispose; }
+    });
+    return () => {
+      disposed = true;
+      if (disposeFn) { disposeFn(); disposeFn = null; }
+      setDropState('idle');
+    };
+  }, [mode]);
+
   const installComponent = async () => {
     setComponentBusy(true);
     setDownloadProgress({ phase: 'manifest', downloaded: 0, total: null });
@@ -261,9 +320,7 @@ export default function OcrImportPage() {
     });
   };
 
-  const runScreenshotPicker = async () => {
-    const selected = await open({ multiple: true, filters: [{ name: '截图', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
-    const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+  const recognizePaths = async (paths: string[]) => {
     if (!paths.length) return;
     setRecognizing(true);
     setRecognitionProgress({ completed_images: 0, total_images: paths.length, recognized_rows: 0, source: '' });
@@ -299,6 +356,14 @@ export default function OcrImportPage() {
       setRecognizing(false);
       setRecognitionProgress(null);
     }
+  };
+  recognizePathsRef.current = recognizePaths;
+
+  const runScreenshotPicker = async () => {
+    const selected = await open({ multiple: true, filters: [{ name: '截图', extensions: ['png', 'jpg', 'jpeg', 'webp'] }] });
+    const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
+    if (!paths.length) return;
+    await recognizePaths(paths);
   };
 
   const requestScreenshots = () => {
@@ -416,9 +481,10 @@ export default function OcrImportPage() {
   };
 
   return (
-    <section className="batch-import-page h-full overflow-x-hidden overflow-y-auto px-5 py-5">
-      <div className="mx-auto max-w-[1440px]">
-        <header className="flex flex-wrap items-end justify-between gap-4 border-b border-white/[0.07] pb-4">
+    <section className="batch-import-page relative flex h-full flex-col px-5 py-5">
+      <div className={`ocr-drop-overlay ${dropState !== 'idle' ? 'active' : ''}`} aria-hidden="true" />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <header className="flex shrink-0 flex-wrap items-end justify-between gap-4 border-b border-white/[0.07] pb-4">
           <div className="flex min-w-0 items-start gap-3">
             <Tooltip content="返回首页"><button type="button" onClick={() => void navigate('/')} className="mt-0.5 flex h-8 w-8 items-center justify-center text-wave hover:text-tide" aria-label="返回首页"><ResonanceIcon kind="previous" size={17} /></button></Tooltip>
             <div>
@@ -436,8 +502,8 @@ export default function OcrImportPage() {
           )}
         </header>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-[230px_minmax(0,1fr)]">
-          <aside className="space-y-3">
+        <div className="mt-4 grid min-h-0 flex-1 gap-4 md:grid-cols-[230px_minmax(0,1fr)]">
+          <aside className="min-h-0 space-y-3 overflow-y-auto pr-1">
             {showConfigPanels && <>
             <section className="border-b border-white/[0.07] pb-3">
               <h2 className="text-sm font-medium text-tide">导入范围</h2>
@@ -498,27 +564,46 @@ export default function OcrImportPage() {
             </section>}
           </aside>
 
-          <main className="min-w-0">
-            <div className="flex items-center justify-between gap-3">
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            <div className="flex shrink-0 items-center justify-between gap-3">
               <div><h2 className="text-sm font-medium text-tide">{mode === 'screenshot' ? '五星记录校验' : '五星记录'}</h2><p className="mt-1 text-xs text-wave">可修改、复制、拖拽排序或删除条目。</p></div>
-              <button type="button" onClick={addRow} disabled={!fiveStarResources.length || importing} className="flex h-8 items-center gap-1.5 px-2 text-xs text-wave hover:text-tide"><ResonanceIcon kind="add" size={14} />添加</button>
+              <div className="flex items-center gap-3">
+                {mode === 'screenshot' && rows.length > 0 && (
+                  <div className="flex items-center gap-3 text-xs">
+                    <span className="text-tide"><strong className="mr-1 text-base">{rows.length}</strong>记录</span>
+                    <span className="text-emerald-300"><strong className="mr-1 text-base">{rows.length - reviewCount}</strong>可导入</span>
+                    <span className="text-amber-300"><strong className="mr-1 text-base">{reviewCount}</strong>待核对</span>
+                    {images.length > 0 && (
+                      <Tooltip content={
+                        <div className="space-y-1.5">
+                          <div className="text-tide">{images.length} 张截图 · 共 {rows.length} 条五星</div>
+                          <div className="max-h-[200px] space-y-1 overflow-y-auto border-t border-white/[0.08] pt-1.5">
+                            {images.map((image) => (
+                              <div key={`${image.source}-${image.strategy}`} className="flex items-center justify-between gap-4 text-[11px] text-wave">
+                                <span className="max-w-[200px] truncate" title={image.source}>{image.source}</span>
+                                <span className="shrink-0 tabular-nums text-tide">{image.rows} 条</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      }>
+                        <button type="button" className="flex h-7 w-7 items-center justify-center rounded border border-white/[0.08] text-wave hover:border-[#8fc8be]/30 hover:text-[#a8d7cf]" aria-label="查看识别详情">
+                          <ResonanceIcon kind="info" size={14} />
+                        </button>
+                      </Tooltip>
+                    )}
+                  </div>
+                )}
+                <button type="button" onClick={addRow} disabled={!fiveStarResources.length || importing} className="flex h-8 items-center gap-1.5 px-2 text-xs text-wave hover:text-tide"><ResonanceIcon kind="add" size={14} />添加</button>
+              </div>
             </div>
 
-            {mode === 'screenshot' && <section className="mt-3 border border-white/[0.07] bg-white/[0.018] px-3 py-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-                <div className="flex min-w-0 items-center gap-2 text-xs">
-                  <span className="font-medium text-tide">识别摘要</span>
-                  {images.length ? <span className="truncate text-wave">{images.length} 张截图 · 共识别 {rows.length} 条五星{images.reduce((count, image) => count + (image.date_rows ?? 0), 0) > 0 ? ` · ${images.reduce((count, image) => count + (image.date_rows ?? 0), 0)} 条日期` : ''}</span> : <span className="text-wave">尚未选择截图</span>}
-                </div>
-                {rows.length > 0 && <div className="flex shrink-0 items-center gap-3 text-xs"><span className="text-tide"><strong className="mr-1 text-base">{rows.length}</strong>记录</span><span className="text-emerald-300"><strong className="mr-1 text-base">{rows.length - reviewCount}</strong>可导入</span><span className="text-amber-300"><strong className="mr-1 text-base">{reviewCount}</strong>待核对</span></div>}
-              </div>
-              {images.length > 0 && <div className="mt-2 flex max-h-8 flex-wrap gap-x-4 gap-y-1 overflow-y-auto border-t border-white/[0.06] pt-2 text-[11px] text-wave">{images.map((image) => <span key={`${image.source}-${image.strategy}`} className="max-w-full truncate" title={image.source}>{image.source} · {image.rows} 条</span>)}</div>}
-            </section>}
+            {error && <div className="mt-3 shrink-0 flex gap-2 border-l-2 border-red-400 bg-red-400/[0.06] px-3 py-2 text-xs text-red-200"><ResonanceIcon kind="error" size={15} className="shrink-0" />{error}</div>}
+            {recognizing && <div className="mt-3 shrink-0 border border-white/[0.07] bg-white/[0.02] px-3 py-3"><div className="flex items-center justify-between gap-3 text-xs"><span className="flex min-w-0 items-center gap-2 text-tide"><LoaderCircle size={13} className="shrink-0 animate-spin" /><span className="truncate">{recognitionProgress?.strategy === 'starting' ? `正在启动 OCR 组件 · ${recognitionProgress.source}` : recognitionProgress?.total_images ? `正在分析 ${Math.min(recognitionProgress.completed_images + 1, recognitionProgress.total_images)}/${recognitionProgress.total_images} 张 · ${recognitionProgress.source}` : '正在初始化 OCR 引擎'}</span></span><span className="shrink-0 tabular-nums text-[#a8d7cf]">已识别 {recognitionProgress?.recognized_rows ?? 0} 条</span></div><div className="ocr-recognition-progress mt-2 h-1.5 overflow-hidden bg-white/[0.08]"><div className="h-full w-1/3 bg-[#8fc8be]" /></div></div>}
 
-            {error && <div className="mt-3 flex gap-2 border-l-2 border-red-400 bg-red-400/[0.06] px-3 py-2 text-xs text-red-200"><ResonanceIcon kind="error" size={15} className="shrink-0" />{error}</div>}
-            {recognizing && <div className="mt-3 border border-white/[0.07] bg-white/[0.02] px-3 py-3"><div className="flex items-center justify-between gap-3 text-xs"><span className="flex min-w-0 items-center gap-2 text-tide"><LoaderCircle size={13} className="shrink-0 animate-spin" /><span className="truncate">{recognitionProgress?.strategy === 'starting' ? `正在启动 OCR 组件 · ${recognitionProgress.source}` : recognitionProgress?.total_images ? `正在分析 ${Math.min(recognitionProgress.completed_images + 1, recognitionProgress.total_images)}/${recognitionProgress.total_images} 张 · ${recognitionProgress.source}` : '正在初始化 OCR 引擎'}</span></span><span className="shrink-0 tabular-nums text-[#a8d7cf]">已识别 {recognitionProgress?.recognized_rows ?? 0} 条</span></div><div className="ocr-recognition-progress mt-2 h-1.5 overflow-hidden bg-white/[0.08]"><div className="h-full w-1/3 bg-[#8fc8be]" /></div></div>}
-
-            <Reorder.Group axis="y" values={rows} onReorder={setRows} className="mt-3 space-y-2">
+            <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+              {rows.length > 0 && (
+                <Reorder.Group axis="y" values={rows} onReorder={setRows} className="space-y-2 pb-2">
               <AnimatePresence initial={false}>{rows.map((row, index) => {
                 const pullsValid = rowIsValid(row);
                 const sequenceAnomaly = anomalyIndices.has(index);
@@ -561,11 +646,13 @@ export default function OcrImportPage() {
                   </Reorder.Item>
                 );
               })}</AnimatePresence>
-            </Reorder.Group>
+                </Reorder.Group>
+              )}
 
-            {!rows.length && <div className="mt-3 flex min-h-[300px] flex-col items-center justify-center border border-dashed border-white/[0.1] text-center">{mode === 'screenshot' && !component ? <><LoaderCircle size={27} className="animate-spin text-wave" /><p className="mt-3 text-sm text-wave">正在检测本地环境</p></> : mode === 'screenshot' && !component?.healthy ? <><ResonanceIcon kind="download" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">安装 OCR 组件后即可识别截图</p><button type="button" onClick={() => void installComponent()} disabled={componentBusy} className="tide-btn mt-3 flex h-9 items-center gap-2 px-4 text-sm">{componentBusy ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="download" size={14} />}{componentBusy ? '正在下载' : '下载 OCR 组件'}</button></> : <><ResonanceIcon kind={mode === 'screenshot' ? 'capture' : 'batch-edit'} size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">{mode === 'screenshot' ? '选择截图开始本地识别' : '添加第一条五星记录'}</p><button type="button" onClick={mode === 'screenshot' ? requestScreenshots : addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind={mode === 'screenshot' ? 'capture' : 'add'} size={13} />{mode === 'screenshot' ? '选择截图' : '添加记录'}</button></>}</div>}
+              {!rows.length && <div ref={dropZoneRef} className={`flex h-full min-h-[240px] flex-col items-center justify-center border border-dashed text-center transition-all duration-150 ${dropState === 'active' ? 'ocr-drop-zone-active' : dropState === 'guiding' ? 'ocr-drop-guiding border-[#8fc8be]/30 bg-[#8fc8be]/[0.02]' : 'border-white/[0.1]'}`}>{dropState !== 'idle' && mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="ingress" size={32} className={dropState === 'active' ? 'text-[#8fc8be]' : 'text-wave'} /><p className="mt-4 text-base font-medium text-tide">{dropState === 'active' ? '松开以识别截图' : '将截图拖到此处'}</p>{dropState === 'guiding' && <p className="mt-2 text-xs text-wave">仅支持 PNG · JPG · WebP 格式</p>}</> : mode === 'screenshot' && !component ? <><LoaderCircle size={27} className="animate-spin text-wave" /><p className="mt-3 text-sm text-wave">正在检测本地环境</p></> : mode === 'screenshot' && !component?.healthy ? <><ResonanceIcon kind="download" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">安装 OCR 组件后即可识别截图</p><button type="button" onClick={() => void installComponent()} disabled={componentBusy} className="tide-btn mt-3 flex h-9 items-center gap-2 px-4 text-sm">{componentBusy ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="download" size={14} />}{componentBusy ? '正在下载' : '下载 OCR 组件'}</button></> : mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="capture" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">选择或拖拽截图开始本地识别</p><p className="mt-1 text-xs text-wave">支持 PNG、JPG、WebP 格式，可批量拖入</p><button type="button" onClick={requestScreenshots} className="mt-4 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="capture" size={13} />选择截图</button></> : <><ResonanceIcon kind="batch-edit" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">添加第一条五星记录</p><button type="button" onClick={addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="add" size={13} />添加记录</button></>}</div>}
+            </div>
 
-            {rows.length > 0 && <footer className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-4"><div className="text-xs text-wave">目标 UID：<span className="text-tide">{targetPlayerId.trim() || '未填写'}</span> · {rows.length} 条五星{reviewCount > 0 && <span className="ml-2 text-amber-300">仍有 {reviewCount} 条需核对</span>}{anomalyIndices.size > 0 && <span className="ml-2 text-amber-300">{anomalyIndices.size} 条序列异常</span>}{!recognizedDateOrderValid && <span className="ml-2 text-amber-300">日期顺序异常</span>}{mismatchCount > 0 && <span className="ml-2 text-red-300">{mismatchCount} 条与卡池不匹配</span>}{invalidCount > 0 && <span className="ml-2 text-red-300">仍有 {invalidCount} 条抽数无效</span>}</div><button type="button" onClick={() => { setImportError(''); setConfirming(true); }} disabled={!targetPlayerId.trim() || reviewCount > 0 || mismatchCount > 0 || invalidCount > 0 || !dateRangeValid || importing} className="tide-btn h-9 px-5 text-sm disabled:opacity-40">生成导入确认</button></footer>}
+            {rows.length > 0 && <footer className="mt-4 shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-4"><div className="text-xs text-wave">目标 UID：<span className="text-tide">{targetPlayerId.trim() || '未填写'}</span> · {rows.length} 条五星{reviewCount > 0 && <span className="ml-2 text-amber-300">仍有 {reviewCount} 条需核对</span>}{anomalyIndices.size > 0 && <span className="ml-2 text-amber-300">{anomalyIndices.size} 条序列异常</span>}{!recognizedDateOrderValid && <span className="ml-2 text-amber-300">日期顺序异常</span>}{mismatchCount > 0 && <span className="ml-2 text-red-300">{mismatchCount} 条与卡池不匹配</span>}{invalidCount > 0 && <span className="ml-2 text-red-300">仍有 {invalidCount} 条抽数无效</span>}</div><button type="button" onClick={() => { setImportError(''); setConfirming(true); }} disabled={!targetPlayerId.trim() || reviewCount > 0 || mismatchCount > 0 || invalidCount > 0 || !dateRangeValid || importing} className="tide-btn h-9 px-5 text-sm disabled:opacity-40">生成导入确认</button></footer>}
           </main>
         </div>
       </div>

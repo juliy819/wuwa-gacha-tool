@@ -1167,6 +1167,7 @@ a:active .resonance-action-icon { transform: scale(0.9); }
   position: relative;
   display: flex;
   min-height: 100%;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -1654,13 +1655,15 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   min-height: 0;
   flex: 1;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   background:
     linear-gradient(rgba(225, 234, 229, 0.012) 1px, transparent 1px),
     linear-gradient(90deg, rgba(225, 234, 229, 0.01) 1px, transparent 1px),
     #202020;
   background-size: 48px 48px, 48px 48px, auto;
 }
-.analysis-content { width: 100%; margin: 0; padding: 18px 24px 28px; }
+.analysis-content { width: 100%; margin: 0; padding: 18px 24px 0; flex: 1; display: flex; flex-direction: column; }
 .analysis-pool-overview,
 .analysis-forecast-section,
 .analysis-forecast-unavailable,
@@ -1880,7 +1883,7 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   .analysis-pool-button { grid-template-columns: 1fr; padding: 10px 8px; }
   .analysis-pool-pity { grid-row: 2; }
   .analysis-pool-sample { display: none; }
-  .analysis-content { padding: 12px 14px 20px; }
+  .analysis-content { padding: 12px 14px 0; }
   .analysis-pool-heading { align-items: flex-start; }
   .analysis-method-note { align-items: flex-start; }
   .analysis-method-note em { display: none; }
@@ -2572,4 +2575,40 @@ tr.record-target-highlight > td {
   .batch-import-page { padding-left: 14px; padding-right: 14px; }
   .batch-import-row { min-width: 700px; }
   .batch-import-row-manual { min-width: 590px; }
+}
+
+.ocr-drop-guiding {
+  position: relative;
+  z-index: 45;
+  border-color: rgba(143, 200, 190, 0.5) !important;
+  background: rgba(143, 200, 190, 0.04) !important;
+  animation: ocr-drop-pulse 2s ease-in-out infinite;
+}
+@keyframes ocr-drop-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(143, 200, 190, 0.2); }
+  50% { box-shadow: 0 0 22px 6px rgba(143, 200, 190, 0.28); }
+}
+
+.ocr-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+.ocr-drop-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ocr-drop-zone-active {
+  position: relative;
+  z-index: 45;
+  border-color: #8fc8be !important;
+  background: rgba(143, 200, 190, 0.08) !important;
+  box-shadow: 0 0 32px 8px rgba(143, 200, 190, 0.3), inset 0 0 56px rgba(143, 200, 190, 0.08) !important;
 }
