@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",

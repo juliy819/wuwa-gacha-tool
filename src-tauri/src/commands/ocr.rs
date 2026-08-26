@@ -4,6 +4,14 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+// CREATE_NO_WINDOW flag for Windows to hide the console window of child processes.
+// See: https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -217,8 +225,11 @@ fn run_self_check(executable: &Path) -> Result<(), String> {
     if !executable.is_file() {
         return Err("OCR 组件可执行文件不存在".to_string());
     }
-    let output = Command::new(executable)
-        .arg("--self-check")
+    let mut command = Command::new(executable);
+    command.arg("--self-check");
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
         .output()
         .map_err(|error| format!("无法启动 OCR 组件: {error}"))?;
     if output.status.success() {
@@ -607,12 +618,16 @@ pub async fn recognize_gacha_screenshots(
     .map_err(|error| format!("创建 OCR 请求失败: {error}"))?;
 
     let output = tokio::task::spawn_blocking(move || {
-        let mut child = Command::new(&executable)
+        let mut command = Command::new(&executable);
+        command
             .arg("--request")
             .arg(&request_path)
             .current_dir(executable.parent().unwrap_or(&root))
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        command.creation_flags(CREATE_NO_WINDOW);
+        let mut child = command
             .spawn()
             .map_err(|error| format!("无法启动 OCR 组件: {error}"))?;
         let stdout = child
