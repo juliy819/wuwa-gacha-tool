@@ -41,6 +41,7 @@ export interface OcrCandidateRow {
   icon_inliers: number;
   icon_margin: number;
   high_confidence: boolean;
+  recognized_date?: string | null;
   alternatives: OcrAlternative[];
 }
 
@@ -49,6 +50,8 @@ export interface OcrImageSummary {
   strategy: string;
   rows: number;
   high_confidence_rows: number;
+  date_rows?: number;
+  reference_date?: string | null;
 }
 
 export interface OcrScreenshotResult {

@@ -12,6 +12,12 @@ export type ResonanceModeIconKind =
   | 'matrix'
   | 'columns'
   | 'scan'
+  | 'capture'
+  | 'batch-edit'
+  | 'reorder'
+  | 'move-up'
+  | 'move-down'
+  | 'settings'
   | 'add'
   | 'save'
   | 'refresh'
@@ -142,6 +148,56 @@ export default function ResonanceModeIcon({ kind, size = 18, detail, className }
             <path d="M5.4 10h3.1l1.5-4.2 1.5 8.4L13 10h3.1" />
             <path d="M10 2v2.1M10 15.9V18M2 10h2.1M15.9 10H18" opacity="0.42" />
             <path className="resonance-mode-node" d="M10 8.45 11.55 10 10 11.55 8.45 10Z" />
+          </>
+        );
+      case 'capture':
+        return (
+          <>
+            <path d="M7 3H3v4M13 3h4v4M17 13v4h-4M7 17H3v-4" />
+            <path d="M3.8 10h3l1.5-3.2 2.2 6.4 1.8-3.2h3.9" />
+            <path d="M5.5 6.2h2M12.5 6.2h2M5.5 13.8h2M12.5 13.8h2" opacity="0.38" />
+            <path className="resonance-mode-node" d="M10 8.25 11.75 10 10 11.75 8.25 10Z" />
+          </>
+        );
+      case 'batch-edit':
+        return (
+          <>
+            <path d="M3 5h7l2 2h5M3 10h5l2-2 2.2 4.4L14 10h3M3 15h7l2-2h2.2" />
+            <path d="m12.8 15.9 1-2.8 2.7-2.7 1.5 1.5-2.7 2.7Z" />
+            <path d="M5 7.5h2M13 7.5h2M5 12.5h2" opacity="0.38" />
+            <path className="resonance-mode-node" d="M10 8.4 11.6 10 10 11.6 8.4 10Z" />
+          </>
+        );
+      case 'reorder':
+        return (
+          <>
+            <path d="M5 5h7l2 2h2M5 10h3l2-2.5 2.2 5L14 10h2M5 15h7l2-2h2" />
+            <path d="M2.5 5h1M2.5 10h1M2.5 15h1" opacity="0.7" />
+            <path d="M17.5 4v12M16 5.5 17.5 4 19 5.5M16 14.5l1.5 1.5 1.5-1.5" opacity="0.42" />
+          </>
+        );
+      case 'move-up':
+        return (
+          <>
+            <path d="M10 17V4M6.5 7.5 10 4l3.5 3.5" />
+            <path d="M3 12h4l1.4-2.2L10 13l1.6-3.2L13 12h4" opacity="0.42" />
+            <path className="resonance-mode-node" d="M10 10.4 11.6 12 10 13.6 8.4 12Z" />
+          </>
+        );
+      case 'move-down':
+        return (
+          <>
+            <path d="M10 3v13M6.5 12.5 10 16l3.5-3.5" />
+            <path d="M3 8h4l1.4-2.2L10 9l1.6-3.2L13 8h4" opacity="0.42" />
+            <path className="resonance-mode-node" d="M10 6.4 11.6 8 10 9.6 8.4 8Z" />
+          </>
+        );
+      case 'settings':
+        return (
+          <>
+            <path d="M7 3.3A7 7 0 0 0 3.3 7M13 3.3A7 7 0 0 1 16.7 7M16.7 13a7 7 0 0 1-3.7 3.7M7 16.7A7 7 0 0 1 3.3 13" />
+            <path d="M5 7h5M13 7h2M5 13h2M10 13h5M7 5v4M13 11v4" />
+            <path className="resonance-mode-node" d="M10 8.2 11.8 10 10 11.8 8.2 10Z" />
           </>
         );
       case 'add':

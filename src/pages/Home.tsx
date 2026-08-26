@@ -298,8 +298,8 @@ export default function Home() {
                   ['cloud', '云鸣潮', 'cloud'],
                   ['url', '链接导入', 'coupling'],
                   ['json', '文件导入', 'ingress'],
-                  ['screenshot', '截图识别', 'echo'],
-                  ['manual', '批量手动', 'add'],
+                  ['screenshot', '截图识别', 'capture'],
+                  ['manual', '批量手动', 'batch-edit'],
                 ] as const).map(([mode, label, iconKind]) => (
                   <button
                     key={mode}
@@ -518,7 +518,7 @@ export default function Home() {
               )}
               {scanMode === 'screenshot' && (
                 <div className="space-y-3">
-                  <p className="text-sm text-wave">识别漂泊工坊或小黑盒截图，校验五星与抽数后批量写入。</p>
+                  <p className="text-sm text-wave">识别漂泊工坊、小黑盒或 Wegame 截图，校验五星与抽数后批量写入。</p>
                   <div className="border-l-2 border-[#8fc8be]/45 bg-[#8fc8be]/[0.05] px-3 py-2 text-xs leading-5 text-wave">
                     识别结果不会直接写入；你可以先修改、排序、复制或删除条目。
                   </div>

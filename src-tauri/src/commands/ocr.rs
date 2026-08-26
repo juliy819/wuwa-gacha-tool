@@ -124,6 +124,8 @@ pub struct OcrCandidateRow {
     icon_inliers: i32,
     icon_margin: i32,
     high_confidence: bool,
+    #[serde(default)]
+    recognized_date: Option<String>,
     alternatives: Vec<OcrAlternative>,
 }
 
@@ -133,6 +135,10 @@ pub struct OcrImageSummary {
     strategy: String,
     rows: usize,
     high_confidence_rows: usize,
+    #[serde(default)]
+    date_rows: usize,
+    #[serde(default)]
+    reference_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -883,19 +889,21 @@ mod tests {
                 "key": "0-0-100", "source": "sample.png", "strategy": "wide-list-v1",
                 "y": 100, "resource_id": 1104, "resource_type": "role", "name": "凌阳",
                 "pulls": 12, "ocr_confidence": 0.99, "icon_inliers": 20,
-                "icon_margin": 10, "high_confidence": true,
+                "icon_margin": 10, "high_confidence": true, "recognized_date": "2025-08-20",
                 "alternatives": [{"resource_id": 1203, "name": "安可", "inliers": 10}]
             }],
             "images": [{
                 "source": "sample.png", "strategy": "wide-list-v1", "rows": 1,
-                "high_confidence_rows": 1
+                "high_confidence_rows": 1, "date_rows": 1, "reference_date": "2026-03-04"
             }]
         }"#;
 
         let result: OcrScreenshotResult = serde_json::from_str(payload).unwrap();
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].resource_type, "role");
+        assert_eq!(result.rows[0].recognized_date.as_deref(), Some("2025-08-20"));
         assert_eq!(result.rows[0].alternatives.len(), 1);
+        assert_eq!(result.images[0].date_rows, 1);
     }
 
     fn mock_row(resource_id: i64) -> InsertMockGachaRequest {
