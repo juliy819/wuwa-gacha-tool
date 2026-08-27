@@ -33,7 +33,7 @@ import {
   SYNC_DANGER_DAYS,
   type SyncFreshness,
 } from '../lib/utils';
-import type { GameDirValidation, PoolBoundaryStatus, RecordSummary } from '../types';
+import type { GameDirValidation, PoolBoundaryStatus, RecordSummary, ResourcePackStatus } from '../types';
 
 type DeleteTarget = { playerId: string | null };
 type ExportTarget = { playerId: string; earliestDate: string; latestDate: string };
@@ -94,7 +94,17 @@ export default function SettingsPage() {
   const [updating, setUpdating] = useState(false);
   const [updateProgress, setUpdateProgress] = useState(0);
   const [appVersion, setAppVersion] = useState('');
+  const [resourcePack, setResourcePack] = useState<ResourcePackStatus | null>(null);
+  const [resourcePackBusy, setResourcePackBusy] = useState(false);
   const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useUiFeedback();
+
+  useEffect(() => {
+    let cancelled = false;
+    gachaApi.getResourcePackStatus().then((status) => {
+      if (!cancelled) setResourcePack(status);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!settings) fetchSettings();
@@ -526,6 +536,26 @@ export default function SettingsPage() {
     }
   };
 
+  const handleRefreshResourcePack = async () => {
+    if (resourcePackBusy) return;
+    setResourcePackBusy(true);
+    try {
+      const status = await gachaApi.refreshResourcePack();
+      setResourcePack(status);
+      addToast('success', status.installed ? '资源包已更新并可用' : '资源包检查完成');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        setResourcePack(await gachaApi.getResourcePackStatus());
+      } catch {
+        setResourcePack((current) => current ? { ...current, last_error: message } : current);
+      }
+      addToast('error', `资源包下载失败：${message}`);
+    } finally {
+      setResourcePackBusy(false);
+    }
+  };
+
   return (
     <PageTransition>
       <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
@@ -598,6 +628,44 @@ export default function SettingsPage() {
                   {isDirty && validation?.valid && <span className="text-[11px] text-[#c9ab78]">有未保存的修改</span>}
                   {!isDirty && savedPath && <span className="text-[11px] text-wave">当前设置已保存</span>}
                 </div>
+              </motion.section>
+
+              <motion.section
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.03 }}
+                className="resonance-panel settings-panel settings-control-panel p-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-tide">
+                    <ResonanceActionIcon tone="gold"><ResonanceIcon kind="traces" size={15} /></ResonanceActionIcon>
+                    本地资源包
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshResourcePack()}
+                    disabled={resourcePackBusy}
+                    className="flex shrink-0 items-center gap-1.5 text-xs text-wave transition-colors hover:text-tide disabled:opacity-50"
+                  >
+                    <ResonanceActionIcon size="sm">{resourcePackBusy ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="refresh" size={14} />}</ResonanceActionIcon>
+                    {resourcePackBusy ? '检查中' : '检查更新'}
+                  </button>
+                </div>
+                <div className="mt-3 flex items-center gap-2 text-[11px]">
+                  {resourcePackBusy ? (
+                    <><LoaderCircle size={13} className="animate-spin text-wave" /><span className="text-wave">正在检查资源包</span></>
+                  ) : resourcePack?.last_error ? (
+                    <><ResonanceIcon kind="error" size={13} className="text-[#d99a9a]" /><span className="text-[#d99a9a]">资源包下载失败，可点击“检查更新”重试</span></>
+                  ) : resourcePack?.installed ? (
+                    <><ResonanceIcon kind="success" size={13} className="text-[#8fc8be]" /><span className="text-[#8fc8be]">已安装 · v{resourcePack.version}</span></>
+                  ) : (
+                    <><ResonanceIcon kind="info" size={13} className="text-wave" /><span className="text-wave">尚未安装，点击“检查更新”下载</span></>
+                  )}
+                </div>
+                {resourcePack?.installed && !resourcePack.last_error && (
+                  <p className="mt-2 text-[11px] leading-5 text-wave">包含 {resourcePack.resource_count.toLocaleString()} 项素材、{resourcePack.icon_count.toLocaleString()} 张图标和 {resourcePack.portrait_count.toLocaleString()} 张立绘。</p>
+                )}
+                {resourcePack?.last_error && <p className="mt-2 break-words text-[11px] leading-5 text-[#d99a9a]">{displaySensitiveText(resourcePack.last_error)}</p>}
               </motion.section>
 
               <section className="feedback-preference-row">

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest } from '../types';
+import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest, ResourcePackStatus } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -13,6 +13,9 @@ export const gachaApi = {
   getResourceIcon: (resourceId: number): Promise<string> => {
     return invoke('get_resource_icon', { resourceId });
   },
+
+  getResourcePackStatus: (): Promise<ResourcePackStatus> => invoke('get_resource_pack_status'),
+  refreshResourcePack: (): Promise<ResourcePackStatus> => invoke('refresh_resource_pack'),
 
   getGachaResources: (): Promise<GachaResource[]> => {
     return invoke('get_gacha_resources');

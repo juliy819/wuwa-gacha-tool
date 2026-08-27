@@ -17,6 +17,7 @@ pub struct AppState {
     pub asset_cache_dir: PathBuf,
     pub asset_catalog_refresh: tokio::sync::Mutex<()>,
     pub resource_pack_refresh: tokio::sync::Mutex<()>,
+    pub resource_pack_last_error: Mutex<Option<String>>,
     pub app_data_dir: PathBuf,
 }
 
@@ -61,6 +62,7 @@ pub fn run() {
                 asset_cache_dir: app_data_dir.join("assets"),
                 asset_catalog_refresh: tokio::sync::Mutex::new(()),
                 resource_pack_refresh: tokio::sync::Mutex::new(()),
+                resource_pack_last_error: Mutex::new(None),
                 app_data_dir,
             });
             let app_handle = app.handle().clone();
@@ -122,6 +124,8 @@ pub fn run() {
             commands::gacha::get_game_dir,
             commands::gacha::validate_game_dir,
             commands::updater::download_and_install_update,
+            resource_pack::get_resource_pack_status,
+            resource_pack::refresh_resource_pack,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

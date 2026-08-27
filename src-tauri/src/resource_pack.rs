@@ -7,6 +7,7 @@ use sha2::{Digest, Sha256};
 
 use crate::assets::AssetCatalog;
 use crate::AppState;
+use tauri::State;
 
 const RESOURCE_MANIFEST_URL: &str = "https://github.com/juliy819/wuwa-gacha-tool-resources/releases/latest/download/resource-manifest.json";
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
@@ -27,7 +28,49 @@ struct ResourceManifest {
 
 pub(crate) async fn refresh(state: &AppState) -> Result<(), String> {
     let _guard = state.resource_pack_refresh.lock().await;
-    refresh_inner(&state.http, &state.asset_cache_dir).await
+    let result = refresh_inner(&state.http, &state.asset_cache_dir).await;
+    if let Ok(mut last_error) = state.resource_pack_last_error.lock() {
+        *last_error = result.as_ref().err().cloned();
+    }
+    result
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ResourcePackStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub resource_count: usize,
+    pub icon_count: usize,
+    pub portrait_count: usize,
+    pub last_error: Option<String>,
+}
+
+#[tauri::command]
+pub(crate) async fn get_resource_pack_status(
+    state: State<'_, AppState>,
+) -> Result<ResourcePackStatus, String> {
+    let last_error = state
+        .resource_pack_last_error
+        .lock()
+        .ok()
+        .and_then(|value| value.clone());
+    let catalog = load_catalog(&state.asset_cache_dir)?;
+    Ok(ResourcePackStatus {
+        installed: catalog.is_some(),
+        version: catalog.as_ref().map(|value| value.version.clone()),
+        resource_count: catalog.as_ref().map_or(0, |value| value.resources.len()),
+        icon_count: catalog.as_ref().map_or(0, |value| value.icons.len()),
+        portrait_count: catalog.as_ref().map_or(0, |value| value.portraits.len()),
+        last_error,
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn refresh_resource_pack(
+    state: State<'_, AppState>,
+) -> Result<ResourcePackStatus, String> {
+    refresh(&state).await?;
+    get_resource_pack_status(state).await
 }
 
 async fn refresh_inner(client: &reqwest::Client, asset_dir: &Path) -> Result<(), String> {

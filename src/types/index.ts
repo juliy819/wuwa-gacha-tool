@@ -85,6 +85,15 @@ export interface OcrComponentUpdate {
   reason: string | null;
 }
 
+export interface ResourcePackStatus {
+  installed: boolean;
+  version: string | null;
+  resource_count: number;
+  icon_count: number;
+  portrait_count: number;
+  last_error: string | null;
+}
+
 export interface OcrDownloadProgress {
   phase: 'manifest' | 'component';
   downloaded: number;

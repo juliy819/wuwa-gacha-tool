@@ -2176,19 +2176,6 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 .settings-panel > div:first-child svg,
 .settings-panel > div:first-child > div:first-child svg { color: #b4b4b4; }
 .settings-console-grid { position: relative; }
-.settings-console-grid::before {
-  content: '';
-  position: absolute;
-  left: 44.5%;
-  top: 56px;
-  bottom: 56px;
-  width: 12%;
-  z-index: 0;
-  pointer-events: none;
-  border-block: 1px solid rgba(143, 200, 190, 0.09);
-  background:
-    linear-gradient(90deg, rgba(143, 200, 190, 0.14), transparent 52%) center / 100% 1px no-repeat;
-}
 .settings-control-panel { overflow: hidden; transition: border-color 200ms ease, transform 260ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 200ms ease; }
 .settings-control-panel::after {
   content: '';
@@ -2460,7 +2447,6 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   .page-signal-settings { width: 300px; opacity: 0.56; }
 }
 @media (max-width: 767px) {
-  .settings-console-grid::before { display: none; }
   .ratio-dial-layout { grid-template-columns: minmax(106px, 132px) minmax(84px, 1fr); }
 }
 
@@ -2474,11 +2460,6 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
 
   .settings-console-grid {
     grid-template-columns: minmax(520px, 760px) minmax(760px, 1fr);
-  }
-
-  .settings-console-grid::before {
-    left: 760px;
-    width: 16px;
   }
 
 }

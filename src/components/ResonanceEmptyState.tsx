@@ -43,7 +43,6 @@ export default function ResonanceEmptyState({
               animate={{ pathLength: 1, opacity: 1 }}
               transition={{ duration: 0.72, ease: [0.16, 1, 0.3, 1] }}
             />
-            <path d="M18 92H302" stroke="#d4d4d4" strokeOpacity="0.06" strokeWidth="0.8" />
             <path d="M48 87v10M86 89v6M234 89v6M272 87v10" stroke="#d4d4d4" strokeOpacity="0.12" strokeWidth="0.7" />
             <circle cx="160" cy="62" r="37" stroke="#d4d4d4" strokeOpacity="0.12" strokeWidth="0.8" strokeDasharray="2 5" />
             <motion.path
