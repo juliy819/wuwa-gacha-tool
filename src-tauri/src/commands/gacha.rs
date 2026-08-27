@@ -32,6 +32,14 @@ pub async fn get_resource_icon(
     crate::assets::get_resource_icon(&state, resource_id).await
 }
 
+#[tauri::command]
+pub async fn get_resource_portrait(
+    state: State<'_, AppState>,
+    resource_id: i64,
+) -> Result<String, String> {
+    crate::assets::get_resource_portrait(&state, resource_id).await
+}
+
 #[derive(Debug, Deserialize)]
 pub struct InsertMockGachaRequest {
     pub(crate) player_id: String,

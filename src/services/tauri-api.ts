@@ -13,6 +13,9 @@ export const gachaApi = {
   getResourceIcon: (resourceId: number): Promise<string> => {
     return invoke('get_resource_icon', { resourceId });
   },
+  getResourcePortrait: (resourceId: number): Promise<string> => {
+    return invoke('get_resource_portrait', { resourceId });
+  },
 
   getResourcePackStatus: (): Promise<ResourcePackStatus> => invoke('get_resource_pack_status'),
   refreshResourcePack: (): Promise<ResourcePackStatus> => invoke('refresh_resource_pack'),

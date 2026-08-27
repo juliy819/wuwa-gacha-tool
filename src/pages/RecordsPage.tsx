@@ -33,6 +33,7 @@ import {
 } from '../types';
 
 type ViewMode = 'list' | 'grid' | 'table';
+type GridStyle = 'avatar' | 'portrait';
 type RecordScope = 'five' | 'all';
 type SortOrder = 'desc' | 'asc';
 type ListGrouping = 'five-star' | 'featured';
@@ -53,13 +54,14 @@ interface RecordPreferences {
   scope: RecordScope;
   sortOrder: SortOrder;
   listGrouping: ListGrouping;
+  gridStyle: GridStyle;
   itemsPerPage: number;
 }
 
 const GRID_ROWS_PER_PAGE = 5;
-const GRID_MIN_ITEM_WIDTH = 108;
-const GRID_GAP = 12;
-const GRID_HORIZONTAL_PADDING = 32;
+const GRID_MIN_ITEM_WIDTH = 112;
+const GRID_GAP = 10;
+const GRID_HORIZONTAL_PADDING = 24;
 const RECORD_PREFERENCES_KEY = 'wuwa-record-preferences-v1';
 const LIMITED_ROLE_POOL_TYPES = new Set(['1', '8', '10', '12']);
 const DEFAULT_RECORD_PREFERENCES: RecordPreferences = {
@@ -67,6 +69,7 @@ const DEFAULT_RECORD_PREFERENCES: RecordPreferences = {
   scope: 'five',
   sortOrder: 'desc',
   listGrouping: 'five-star',
+  gridStyle: 'avatar',
   itemsPerPage: 50,
 };
 
@@ -78,6 +81,7 @@ function loadRecordPreferences(): RecordPreferences {
       scope: stored.scope === 'all' ? 'all' : 'five',
       sortOrder: stored.sortOrder === 'asc' ? 'asc' : 'desc',
       listGrouping: stored.listGrouping === 'featured' ? 'featured' : 'five-star',
+      gridStyle: stored.gridStyle === 'portrait' ? 'portrait' : 'avatar',
       itemsPerPage: [25, 50, 100].includes(stored.itemsPerPage ?? 0) ? stored.itemsPerPage! : DEFAULT_RECORD_PREFERENCES.itemsPerPage,
     };
   } catch {
@@ -96,20 +100,28 @@ const getBarColor = (pity: number) => {
   return '#e88a7a';
 };
 
-function RecordAvatar({ record, size = 'md' }: { record: GachaRecord; size?: 'sm' | 'md' | 'lg' }) {
+function RecordAvatar({ record, size = 'md', gridStyle = 'avatar' }: { record: GachaRecord; size?: 'sm' | 'md' | 'lg'; gridStyle?: GridStyle }) {
   const color = QUALITY_COLORS[record.quality_level] ?? '#8a8a8a';
   const dimensions = size === 'sm' ? 'h-8 w-8' : size === 'lg' ? 'h-full w-full' : 'h-12 w-12';
   const isFiveStar = record.quality_level === QUALITY.FIVE_STAR;
+  const unstyledPortrait = size === 'lg' && gridStyle === 'portrait';
+  const frameClassName = unstyledPortrait
+    ? ''
+    : `record-resource-frame ${isFiveStar ? 'record-resource-frame-five' : ''} rounded-md border`;
+  const frameStyle = unstyledPortrait
+    ? undefined
+    : { borderColor: record.is_off_rate ? 'rgba(216,72,72,0.65)' : `${color}55`, background: `${color}10` };
 
   return (
     <div
-      className={`record-resource-frame ${isFiveStar ? 'record-resource-frame-five' : ''} relative shrink-0 overflow-hidden rounded-md border ${dimensions}`}
-      style={{ borderColor: record.is_off_rate ? 'rgba(216,72,72,0.65)' : `${color}55`, background: `${color}10` }}
+      className={`${frameClassName} relative shrink-0 overflow-hidden ${dimensions}`}
+      style={frameStyle}
     >
       <ResourceIcon
         resourceId={record.resource_id}
         alt={record.name}
-        className="h-full w-full object-cover"
+        preferPortrait={size === 'lg' && gridStyle === 'portrait' && record.resource_type === 'role'}
+        className={`h-full w-full ${size === 'lg' && gridStyle === 'portrait' && record.resource_type === 'role' ? 'object-cover object-top' : record.resource_type === 'weapon' && size === 'lg' && gridStyle === 'portrait' ? 'object-contain' : 'object-cover'}`}
         fallback={(
           <div className="absolute inset-0 flex items-center justify-center text-sm font-medium" style={{ color }}>
             {record.name.charAt(0)}
@@ -184,6 +196,7 @@ export default function RecordsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(preferences.viewMode);
   const [sortOrder, setSortOrder] = useState<SortOrder>(preferences.sortOrder);
   const [listGrouping, setListGrouping] = useState<ListGrouping>(preferences.listGrouping);
+  const [gridStyle, setGridStyle] = useState<GridStyle>(preferences.gridStyle);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageInput, setPageInput] = useState('1');
   const [itemsPerPage, setItemsPerPage] = useState(preferences.itemsPerPage);
@@ -211,13 +224,13 @@ export default function RecordsPage() {
   const suppressNextPageResetRef = useRef(false);
 
   useEffect(() => {
-    const nextPreferences = { viewMode, scope, sortOrder, listGrouping, itemsPerPage };
+    const nextPreferences = { viewMode, scope, sortOrder, listGrouping, gridStyle, itemsPerPage };
     try {
       localStorage.setItem(RECORD_PREFERENCES_KEY, JSON.stringify(nextPreferences));
     } catch {
       // Preferences are optional; private storage modes may reject writes.
     }
-  }, [itemsPerPage, listGrouping, scope, sortOrder, viewMode]);
+  }, [gridStyle, itemsPerPage, listGrouping, scope, sortOrder, viewMode]);
 
   useEffect(() => () => {
     if (highlightTimerRef.current !== null) window.clearTimeout(highlightTimerRef.current);
@@ -375,7 +388,8 @@ export default function RecordsPage() {
 
     const updateGridColumns = () => {
       const availableWidth = Math.max(0, content.clientWidth - GRID_HORIZONTAL_PADDING);
-      const columns = Math.max(1, Math.floor((availableWidth + GRID_GAP) / (GRID_MIN_ITEM_WIDTH + GRID_GAP)));
+      const minItemWidth = gridStyle === 'portrait' ? GRID_MIN_ITEM_WIDTH : 100;
+      const columns = Math.max(1, Math.floor((availableWidth + GRID_GAP) / (minItemWidth + GRID_GAP)));
       setGridColumns(columns);
     };
 
@@ -383,7 +397,7 @@ export default function RecordsPage() {
     const observer = new ResizeObserver(updateGridColumns);
     observer.observe(content);
     return () => observer.disconnect();
-  }, []);
+  }, [gridStyle]);
 
   const chronologicalRecordsWithPity = useMemo<RecordWithPity[]>(() => {
     const ordered = [...records].sort((a, b) => {
@@ -461,7 +475,6 @@ export default function RecordsPage() {
 
   const effectiveScope: RecordScope = viewMode === 'table' ? scope : 'five';
   const gridItemsPerPage = gridColumns * GRID_ROWS_PER_PAGE;
-  const effectiveItemsPerPage = viewMode === 'grid' ? gridItemsPerPage : itemsPerPage;
 
   const activePoolCurrentPity = useMemo(() => {
     if (activePoolType === 'all') return null;
@@ -471,6 +484,8 @@ export default function RecordsPage() {
     if (stats.currentPity === 0) return null;
     return stats.currentPity;
   }, [activePoolType, poolStats]);
+
+  const effectiveItemsPerPage = viewMode === 'grid' ? gridItemsPerPage : itemsPerPage;
 
   const activePoolTrailingOffRate = useMemo<RecordWithPity | null>(() => {
     if (activePoolType === 'all' || !LIMITED_ROLE_POOL_TYPES.has(activePoolType)) return null;
@@ -695,7 +710,7 @@ export default function RecordsPage() {
       return;
     }
     setCurrentPage(1);
-  }, [activePoolType, scope, query, viewMode, itemsPerPage, listGrouping, sortOrder, pityRange]);
+  }, [activePoolType, scope, query, viewMode, itemsPerPage, listGrouping, sortOrder, pityRange, gridStyle]);
 
   useEffect(() => {
     setPageInput(String(activePagedList.safeCurrentPage));
@@ -766,6 +781,13 @@ export default function RecordsPage() {
   const cacheValid = recordsLoaded && recordsPlayerId === activePlayerId;
   const recordsLoading = !initialized || !cacheValid || loading;
   const activeRecordsLoading = recordsLoading || (showingFeaturedAcquisitions && !acquisitionInsightsLoaded);
+  const toolbarControl = viewMode === 'table'
+    ? 'scope'
+    : viewMode === 'grid'
+      ? 'grid-style'
+      : canShowFeaturedGrouping
+        ? 'list-grouping'
+        : null;
 
   return (
     <PageTransition>
@@ -891,45 +913,34 @@ export default function RecordsPage() {
             <div className="records-toolbar flex min-h-[59px] flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
               <motion.div
                 initial={false}
-                animate={{
-                  width: viewMode === 'table' ? 158 : 0,
-                  opacity: viewMode === 'table' ? 1 : 0,
-                }}
+                animate={{ width: toolbarControl ? 150 : 0, opacity: 1 }}
                 transition={{
-                  width: { duration: 0.28, ease: [0.4, 0, 0.2, 1] },
-                  opacity: { duration: 0.2, ease: [0.4, 0, 0.2, 1] },
+                  width: { duration: 0.24, ease: [0.4, 0, 0.2, 1] },
+                  opacity: { duration: 0 },
                 }}
-                aria-hidden={viewMode !== 'table'}
-                className="shrink-0 overflow-hidden"
+                className="relative h-8 shrink-0 overflow-hidden"
               >
-                <div className="mr-2 flex w-[150px] items-center gap-0.5 whitespace-nowrap rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5">
-                  {(['five', 'all'] as const).map((value) => (
-                    <button key={value} disabled={viewMode !== 'table'} onClick={() => setScope(value)} className={`relative whitespace-nowrap rounded px-3 py-1.5 text-xs ${scope === value ? 'text-tide' : 'text-wave hover:text-tide'}`}>
-                      {scope === value && (
-                        <motion.span layoutId="record-scope-indicator" className="resonance-tab-indicator absolute inset-0" transition={{ type: 'spring', stiffness: 440, damping: 36 }}>
-                          <span className="resonance-tab-surface" />
-                        </motion.span>
-                      )}
-                      <span className="relative z-10">{value === 'five' ? '五星记录' : '全部记录'}</span>
-                    </button>
-                  ))}
-                </div>
-              </motion.div>
-
-              <AnimatePresence initial={false}>
-                {canShowFeaturedGrouping ? (
+                <AnimatePresence initial={false} mode="sync">
+                  {toolbarControl === 'scope' && (
+                    <motion.div key="scope" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -6 }} transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }} className="absolute inset-0 flex w-[150px] items-center gap-0.5 whitespace-nowrap rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5">
+                      {(['five', 'all'] as const).map((value) => (
+                        <button key={value} onClick={() => setScope(value)} className={`relative flex-1 whitespace-nowrap rounded px-3 py-1.5 text-xs ${scope === value ? 'text-tide' : 'text-wave hover:text-tide'}`}>
+                          {scope === value && <motion.span layoutId="record-scope-indicator" className="resonance-tab-indicator absolute inset-0" transition={{ type: 'spring', stiffness: 440, damping: 36 }}><span className="resonance-tab-surface" /></motion.span>}
+                          <span className="relative z-10">{value === 'five' ? '五星记录' : '全部记录'}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
+                  {toolbarControl === 'list-grouping' && (
                   <motion.div
-                    key="featured-grouping"
-                    initial={{ width: 0, opacity: 0 }}
-                    animate={{ width: 150, opacity: 1 }}
-                    exit={{ width: 0, opacity: 0 }}
-                    transition={{
-                      width: { duration: 0.24, ease: [0.4, 0, 0.2, 1] },
-                      opacity: { duration: 0.16, ease: [0.4, 0, 0.2, 1] },
-                    }}
-                    className="shrink-0 overflow-hidden"
+                    key="list-grouping"
+                    initial={{ opacity: 0, x: 6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -6 }}
+                    transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
+                    className="absolute inset-0 flex w-[150px] items-center gap-0.5 whitespace-nowrap rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5"
+                    aria-label="列表统计方式"
                   >
-                    <div className="flex w-[150px] items-center gap-0.5 whitespace-nowrap rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="列表统计方式">
                       {(['five-star', 'featured'] as const).map((value) => (
                         <button
                           key={value}
@@ -950,10 +961,20 @@ export default function RecordsPage() {
                           <span className="relative z-10">{value === 'five-star' ? '五星成本' : activePoolType === 'all' ? 'UP 合并' : 'UP 获取'}</span>
                         </button>
                       ))}
-                    </div>
                   </motion.div>
-                ) : null}
-              </AnimatePresence>
+                  )}
+                  {toolbarControl === 'grid-style' && (
+                    <motion.div key="grid-style" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -6 }} transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }} className="absolute inset-0 flex w-[150px] items-center gap-0.5 rounded-md border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="宫格样式">
+                      {(['avatar', 'portrait'] as const).map((style) => (
+                        <motion.button key={style} type="button" onClick={() => setGridStyle(style)} aria-pressed={gridStyle === style} whileTap={{ scale: 0.96 }} className={`relative h-full flex-1 rounded px-2.5 text-xs ${gridStyle === style ? 'text-tide' : 'text-wave hover:bg-white/[0.04] hover:text-tide'}`} title={style === 'avatar' ? '头像样式' : '立绘样式'}>
+                          {gridStyle === style && <motion.span layoutId="record-grid-style-indicator" className="resonance-tab-indicator absolute inset-0" transition={{ type: 'spring', stiffness: 440, damping: 36 }}><span className="resonance-tab-surface" /></motion.span>}
+                          <span className="relative z-10">{style === 'avatar' ? '头像' : '立绘'}</span>
+                        </motion.button>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
 
               <div className="relative min-w-[180px] flex-1 md:max-w-[320px]">
                 <input
@@ -1015,7 +1036,7 @@ export default function RecordsPage() {
               )}
             </AnimatePresence>
 
-            <AnimatePresence initial={false} mode="wait">
+            <AnimatePresence initial={false} mode="popLayout">
             {activeRecordsLoading ? (
               <motion.div
                 key="records-loading"
@@ -1210,44 +1231,41 @@ export default function RecordsPage() {
                 )}
 
                 {viewMode === 'grid' && (
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(108px,1fr))] gap-3 p-4">
+                  <AnimatePresence initial={false} mode="popLayout">
+                    <motion.div key={gridStyle} initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }} className="grid gap-2.5 p-3" style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>
                     {showCurrentPity && (
-                      <div data-seq="00" className={`record-grid-card resonance-panel record-grid-card-five record-pity-pull-card min-w-0 p-2.5 ${sortOrder === 'asc' ? 'order-last' : ''}`} style={{ opacity: 0.85 }}>
-                        <div className="relative aspect-square overflow-hidden rounded-md">
+                      <div data-seq="00" className={`record-grid-card resonance-panel record-grid-card-five record-pity-pull-card min-w-0 ${gridStyle === 'avatar' ? 'p-2.5' : ''} ${sortOrder === 'asc' ? 'order-last' : ''}`} style={{ opacity: 0.85 }}>
+                        <div className={`relative overflow-hidden ${gridStyle === 'portrait' ? 'aspect-[3/4]' : 'aspect-square rounded-md'}`}>
                           <PityPullAvatar size="lg" />
                         </div>
-                        <div className="mt-2 truncate text-center text-xs text-tide">垫抽中</div>
-                        <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave">
-                          <span className="inline-flex items-baseline gap-0.5 rounded border px-2 py-1 text-xs font-semibold tabular-nums"
-                            style={{
-                              borderColor: activePoolCurrentPity >= 66 ? 'rgba(216,189,132,0.2)' : 'rgba(111,170,160,0.2)',
-                              backgroundColor: activePoolCurrentPity >= 66 ? 'rgba(216,189,132,0.07)' : 'rgba(111,170,160,0.07)',
-                              color: activePoolCurrentPity >= 66 ? '#d8bd84' : '#8fc8be',
-                            }}>
-                            已垫{activePoolCurrentPity}抽
-                          </span>
-                        </div>
+                        {gridStyle === 'avatar' ? (
+                          <>
+                            <div className="mt-2 truncate text-center text-xs text-tide" title="垫抽中">垫抽中</div>
+                            <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave"><PityBadge pity={activePoolCurrentPity} /></div>
+                          </>
+                        ) : <div className="record-grid-caption flex h-8 items-center gap-2 px-2.5"><span className="min-w-0 flex-1 truncate text-xs text-tide" title="垫抽中">垫抽中</span><span className="shrink-0 text-[13px] font-medium tabular-nums" style={{ color: getBarColor(activePoolCurrentPity) }}>{activePoolCurrentPity} 抽</span></div>}
                       </div>
                     )}
                     {pagedList.pageItems.map(({ record, pity, isLowerBound }, index) => {
                       return (
-                        <div key={getRecordKey(record, index)} data-record-id={record.id} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 p-2.5 ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
-                          <div className="relative aspect-square overflow-hidden rounded-md">
-                            <RecordAvatar record={record} size="lg" />
-                            {record.is_off_rate && (
-                              <span className="absolute bottom-1.5 right-1.5">
-                                <OffRateStamp active compact />
-                              </span>
-                            )}
+                        <div key={getRecordKey(record, index)} data-record-id={record.id} data-seq={String(index + 1).padStart(2, '0')} onClick={() => openAcquisition(record)} role={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'button' : undefined} tabIndex={record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 0 : undefined} className={`record-grid-card resonance-panel min-w-0 ${gridStyle === 'avatar' ? 'p-2.5' : ''} ${record.quality_level === QUALITY.FIVE_STAR ? 'record-grid-card-five' : ''} ${record.is_off_rate ? 'record-grid-card-off-rate' : ''} ${record.quality_level === QUALITY.FIVE_STAR && !record.is_off_rate ? 'cursor-pointer' : ''} ${record.id === highlightedRecordId ? 'record-target-highlight' : ''}`}>
+                          <div className={`record-grid-media relative overflow-hidden ${gridStyle === 'portrait' ? 'aspect-[3/4]' : 'aspect-square rounded-md'}`}>
+                            <RecordAvatar record={record} size="lg" gridStyle={gridStyle} />
+                            {gridStyle === 'avatar' && record.is_off_rate && <span className="absolute bottom-1.5 right-1.5"><OffRateStamp active compact /></span>}
                           </div>
-                          <div className="mt-2 truncate text-center text-xs text-tide">{record.name}</div>
-                          <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave">
-                            <PityBadge pity={pity} lowerBound={isLowerBound} />
-                          </div>
+                          {gridStyle === 'avatar' ? (
+                            <>
+                              <div className="mt-2 truncate text-center text-xs text-tide" title={record.name}>{record.name}</div>
+                              <div className="mt-1 flex h-6 items-center justify-center text-[10px] text-wave"><PityBadge pity={pity} lowerBound={isLowerBound} /></div>
+                            </>
+                          ) : (
+                            <div className="record-grid-caption flex h-8 items-center gap-2 px-2.5"><span className="min-w-0 flex-1 truncate text-xs text-tide" title={record.name}>{record.name}</span><span className="shrink-0 text-[13px] font-medium tabular-nums" style={{ color: getBarColor(pity) }}>{isLowerBound ? '≥' : ''}{pity} 抽</span></div>
+                          )}
                         </div>
                       );
                     })}
-                  </div>
+                    </motion.div>
+                  </AnimatePresence>
                 )}
 
                 {viewMode === 'table' && (
@@ -1448,7 +1466,9 @@ export default function RecordsPage() {
         {selectedAcquisition && (
           <div className="acquisition-trace-modal">
             <div className="flex items-start gap-3 border-b border-white/[0.07] p-5">
-              <RecordAvatar record={{ resource_id: selectedAcquisition.resource_id, name: selectedAcquisition.name, quality_level: 5, is_off_rate: false } as GachaRecord} size="md" />
+              <div className="record-acquisition-media relative h-24 w-20 shrink-0 overflow-hidden">
+                <ResourceIcon resourceId={selectedAcquisition.resource_id} alt={selectedAcquisition.name} preferPortrait={selectedAcquisition.resource_type === 'role'} className={`h-full w-full ${selectedAcquisition.resource_type === 'role' ? 'object-cover object-top' : 'object-contain p-3'}`} fallback={<RecordAvatar record={{ resource_id: selectedAcquisition.resource_id, resource_type: selectedAcquisition.resource_type, name: selectedAcquisition.name, quality_level: 5, is_off_rate: false } as GachaRecord} size="lg" />} />
+              </div>
               <div className="min-w-0">
                 <span className="records-meta-label">ACQUISITION TRACE</span>
                 <h2 id="acquisition-trace-title" className="mt-1 text-lg font-semibold text-tide">{selectedAcquisition.name}</h2>

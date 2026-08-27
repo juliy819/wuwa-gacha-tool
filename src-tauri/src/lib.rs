@@ -95,6 +95,7 @@ pub fn run() {
             commands::cloud_gacha::open_cloud_gacha_window,
             commands::cloud_gacha::close_cloud_gacha_window,
             commands::gacha::get_resource_icon,
+            commands::gacha::get_resource_portrait,
             commands::gacha::get_gacha_resources,
             commands::gacha::insert_mock_gacha,
             commands::gacha::update_mock_gacha,

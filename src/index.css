@@ -2161,6 +2161,10 @@ time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'zer
   background: linear-gradient(90deg, transparent, rgba(216, 189, 132, 0.68), transparent);
 }
 .record-grid-card-five:hover { border-color: rgba(216, 189, 132, 0.42); box-shadow: 0 9px 24px rgba(0, 0, 0, 0.2), inset 0 -1px 0 rgba(216, 189, 132, 0.28); }
+.record-grid-caption { border-top: 1px solid rgba(255, 255, 255, 0.055); }
+.record-grid-card-off-rate { border-color: rgba(216, 72, 72, 0.72); box-shadow: inset 0 0 0 1px rgba(216, 72, 72, 0.08); }
+.record-grid-card-off-rate::before { background: linear-gradient(90deg, transparent, rgba(216, 72, 72, 0.74), transparent); }
+.record-grid-card-off-rate:hover { border-color: rgba(232, 91, 91, 0.92); box-shadow: 0 9px 24px rgba(0, 0, 0, 0.2), inset 0 0 0 1px rgba(216, 72, 72, 0.14); }
 .resonance-table thead { background: #242424 !important; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.055); }
 .resonance-table thead th { color: #9da6a1; }
 .resonance-table tbody tr { transition: background-color 120ms ease; }

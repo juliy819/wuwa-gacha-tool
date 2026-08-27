@@ -4,7 +4,9 @@ import { gachaApi } from '../services/tauri-api';
 
 const RETRY_DELAY_MS = 60_000;
 const iconCache = new Map<number, string>();
+const portraitCache = new Map<number, string>();
 const pendingIcons = new Map<number, Promise<string>>();
+const pendingPortraits = new Map<number, Promise<string>>();
 const failedAt = new Map<number, number>();
 
 const loadResourceIcon = (resourceId: number) => {
@@ -40,29 +42,51 @@ const loadResourceIcon = (resourceId: number) => {
   return request;
 };
 
+const loadResourcePortrait = (resourceId: number) => {
+  const cached = portraitCache.get(resourceId);
+  if (cached) return Promise.resolve(cached);
+  const pending = pendingPortraits.get(resourceId);
+  if (pending) return pending;
+  const request = gachaApi.getResourcePortrait(resourceId)
+    .then((url) => {
+      portraitCache.set(resourceId, url);
+      return url;
+    })
+    .catch(() => loadResourceIcon(resourceId))
+    .finally(() => pendingPortraits.delete(resourceId));
+  pendingPortraits.set(resourceId, request);
+  return request;
+};
+
 interface ResourceIconProps {
   resourceId: number;
   alt: string;
   className?: string;
   fallback: ReactNode;
   defer?: boolean;
+  preferPortrait?: boolean;
 }
 
-export default function ResourceIcon({ resourceId, alt, className, fallback, defer = false }: ResourceIconProps) {
-  const [url, setUrl] = useState(() => iconCache.get(resourceId) ?? null);
+export default function ResourceIcon({ resourceId, alt, className, fallback, defer = false, preferPortrait = false }: ResourceIconProps) {
+  const cache = preferPortrait ? portraitCache : iconCache;
+  const [url, setUrl] = useState(() => cache.get(resourceId) ?? null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let active = true;
-    setUrl(iconCache.get(resourceId) ?? null);
+    setUrl(cache.get(resourceId) ?? null);
     setFailed(false);
 
-    const cached = iconCache.get(resourceId);
+    const cached = cache.get(resourceId);
     if (cached) return () => { active = false; };
 
     const load = () => {
-      loadResourceIcon(resourceId)
+      const request = preferPortrait
+        ? loadResourcePortrait(resourceId)
+        : loadResourceIcon(resourceId);
+      request
         .then((nextUrl) => {
+          cache.set(resourceId, nextUrl);
           if (active) setUrl(nextUrl);
         })
         .catch(() => {
@@ -77,7 +101,7 @@ export default function ResourceIcon({ resourceId, alt, className, fallback, def
       active = false;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [defer, resourceId]);
+  }, [defer, preferPortrait, resourceId]);
 
   if (!url || failed) return fallback;
 

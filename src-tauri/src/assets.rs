@@ -12,6 +12,7 @@ const MANIFEST_CACHE_KEY: &str = "manifest";
 const CATALOG_CACHE_PREFIX: &str = "catalog:";
 const MANIFEST_TTL_MS: i64 = 6 * 60 * 60 * 1000;
 const MAX_ICON_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PORTRAIT_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Manifest {
@@ -31,6 +32,22 @@ struct NanokaResource {
     rank: i32,
     #[serde(default)]
     zh: String,
+    #[serde(default)]
+    portrait: String,
+    #[serde(default)]
+    background: String,
+}
+
+impl NanokaResource {
+    fn portrait_path(&self) -> Option<&str> {
+        if !self.portrait.is_empty() {
+            Some(&self.portrait)
+        } else if !self.background.is_empty() {
+            Some(&self.background)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -74,6 +91,35 @@ pub async fn get_resource_icon(state: &AppState, resource_id: i64) -> Result<Str
         );
     }
     result
+}
+
+pub async fn get_resource_portrait(state: &AppState, resource_id: i64) -> Result<String, String> {
+    if resource_id <= 0 {
+        return Err("无效的资源 ID".to_string());
+    }
+    let started = Instant::now();
+    let dir = state.asset_cache_dir.join("portraits");
+    let cache = dir.join(format!("{resource_id}.webp"));
+    if let Some(bytes) = read_local_asset(&dir, resource_id, MAX_PORTRAIT_BYTES)? {
+        return Ok(to_data_url(&bytes));
+    }
+    let catalog = load_nanoka_catalog(state).await?;
+    let path = catalog
+        .portraits
+        .get(&resource_id)
+        .ok_or_else(|| format!("nanoka 数据中未找到角色立绘 {resource_id}"))?;
+    let bytes = download_asset(state, path, MAX_PORTRAIT_BYTES).await?;
+    std::fs::create_dir_all(&dir).map_err(|error| format!("创建立绘缓存目录失败: {error}"))?;
+    let temp = dir.join(format!("{resource_id}.tmp"));
+    std::fs::write(&temp, &bytes).map_err(|error| format!("写入立绘缓存失败: {error}"))?;
+    if let Err(error) = std::fs::rename(&temp, &cache) {
+        let _ = std::fs::remove_file(&temp);
+        if !cache.is_file() {
+            return Err(format!("提交立绘缓存失败: {error}"));
+        }
+    }
+    log::info!(target: "app::assets", "event=portrait_downloaded resource_id={resource_id} bytes={} elapsed_ms={}", bytes.len(), started.elapsed().as_millis());
+    Ok(to_data_url(&bytes))
 }
 
 async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<String, String> {
@@ -156,6 +202,63 @@ async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<S
     Ok(to_data_url(&bytes))
 }
 
+async fn download_asset(
+    state: &AppState,
+    asset_path: &str,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    let url = icon_url(asset_path)?;
+    let response = state
+        .http
+        .get(&url)
+        .send()
+        .await
+        .map_err(|error| format!("下载素材失败: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("下载素材失败: HTTP {}", response.status()));
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    if !content_type.starts_with("image/webp") {
+        return Err(format!("素材响应类型异常: {content_type}"));
+    }
+    if response
+        .content_length()
+        .is_some_and(|length| length as usize > max_bytes)
+    {
+        return Err("素材文件超过大小限制".to_string());
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("读取素材失败: {error}"))?
+        .to_vec();
+    if bytes.is_empty() || bytes.len() > max_bytes || !is_webp(&bytes) {
+        return Err("素材文件为空或超过大小限制".to_string());
+    }
+    Ok(bytes)
+}
+
+fn read_local_asset(
+    dir: &std::path::Path,
+    resource_id: i64,
+    max_bytes: usize,
+) -> Result<Option<Vec<u8>>, String> {
+    let path = dir.join(format!("{resource_id}.webp"));
+    match std::fs::read(&path) {
+        Ok(bytes) if is_webp(&bytes) && bytes.len() <= max_bytes => Ok(Some(bytes)),
+        Ok(_) => {
+            let _ = std::fs::remove_file(path);
+            Ok(None)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("读取本地素材失败: {error}")),
+    }
+}
+
 async fn load_catalog(state: &AppState) -> Result<AssetCatalog, String> {
     match crate::resource_pack::load_catalog(&state.asset_cache_dir) {
         Ok(Some(catalog)) => {
@@ -219,7 +322,7 @@ async fn load_nanoka_catalog(state: &AppState) -> Result<AssetCatalog, String> {
     } {
         let catalog: AssetCatalog = serde_json::from_str(&cached.json)
             .map_err(|error| format!("解析素材目录缓存失败: {error}"))?;
-        if !catalog.resources.is_empty() {
+        if !catalog.resources.is_empty() && !catalog.portraits.is_empty() {
             log::debug!(
                 target: "app::assets",
                 "event=catalog_cache_hit version={} resources={} icons={}",
@@ -281,11 +384,17 @@ async fn fetch_catalog(client: &reqwest::Client, version: &str) -> Result<AssetC
 
     let mut icons = HashMap::with_capacity(characters.len() + weapons.len());
     let mut resources = Vec::with_capacity(characters.len() + weapons.len());
+    let mut portraits = HashMap::new();
     for (resource_type, entries) in [("role", characters), ("weapon", weapons)] {
         for (id, resource) in entries {
             if let Ok(resource_id) = id.parse::<i64>() {
                 if !resource.icon.is_empty() {
                     icons.insert(resource_id, resource.icon.clone());
+                }
+                if resource_type == "role" {
+                    if let Some(portrait) = resource.portrait_path() {
+                        portraits.insert(resource_id, portrait.to_string());
+                    }
                 }
                 if (3..=5).contains(&resource.rank) && !resource.zh.is_empty() {
                     resources.push(GachaResource {
@@ -305,7 +414,7 @@ async fn fetch_catalog(client: &reqwest::Client, version: &str) -> Result<AssetC
     Ok(AssetCatalog {
         version: version.to_string(),
         icons,
-        portraits: HashMap::new(),
+        portraits,
         resources,
     })
 }
@@ -481,5 +590,58 @@ mod tests {
         assert!(!is_safe_version(""));
         assert!(!is_safe_version("3.6/../etc"));
         assert!(!is_safe_version("3.6 alpha"));
+    }
+
+    #[test]
+    fn uses_nanoka_background_as_the_portrait_fallback() {
+        let resource: NanokaResource = serde_json::from_str(
+            r#"{
+                "icon": "/Game/icon",
+                "rank": 5,
+                "zh": "测试角色",
+                "background": "/Game/portrait"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(resource.portrait_path(), Some("/Game/portrait"));
+    }
+
+    #[test]
+    fn prefers_explicit_nanoka_portrait_over_background() {
+        let resource: NanokaResource = serde_json::from_str(
+            r#"{
+                "icon": "/Game/icon",
+                "rank": 5,
+                "zh": "测试角色",
+                "portrait": "/Game/portrait",
+                "background": "/Game/background"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(resource.portrait_path(), Some("/Game/portrait"));
+    }
+
+    #[test]
+    fn reads_valid_local_portrait_and_removes_invalid_file() {
+        let dir = test_dir("portrait");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bytes = b"RIFFxxxxWEBPportrait";
+        std::fs::write(dir.join("1104.webp"), bytes).unwrap();
+
+        assert_eq!(
+            read_local_asset(&dir, 1104, MAX_PORTRAIT_BYTES)
+                .unwrap()
+                .unwrap(),
+            bytes
+        );
+
+        std::fs::write(dir.join("1104.webp"), b"not-webp").unwrap();
+        assert!(read_local_asset(&dir, 1104, MAX_PORTRAIT_BYTES)
+            .unwrap()
+            .is_none());
+        assert!(!dir.join("1104.webp").exists());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
