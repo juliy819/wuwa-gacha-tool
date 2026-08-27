@@ -26,6 +26,20 @@ type EditableRow = OcrCandidateRow & {
 type PendingReset = { type: 'screenshots' };
 type ScreenshotExample = { src: string; label: string; alt: string; tall?: boolean };
 
+// Installation is process-scoped: the page can be unmounted while a Tauri
+// command is still downloading, so a new page must join the existing task.
+let ocrInstallPromise: Promise<OcrComponentStatus> | null = null;
+let latestOcrDownloadProgress: OcrDownloadProgress | null = null;
+
+function installOcrComponentShared() {
+  if (!ocrInstallPromise) {
+    ocrInstallPromise = gachaApi.installOcrComponent().finally(() => {
+      ocrInstallPromise = null;
+    });
+  }
+  return ocrInstallPromise;
+}
+
 const SCREENSHOT_EXAMPLES: ScreenshotExample[] = [
   { src: '/ocr-examples/漂泊工坊5.jpg', label: '漂泊工坊 · 手机列表', alt: '漂泊工坊手机列表截图示例', tall: true },
   { src: '/ocr-examples/小黑盒2.jpg', label: '小黑盒 · 手机列表', alt: '小黑盒手机列表截图示例', tall: true },
@@ -211,23 +225,52 @@ export default function OcrImportPage() {
   }, [dateRangeValid, effectiveEnd, effectiveStart, pool, rows.length, targetPlayerId]);
 
   useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) {
+      if (mode === 'screenshot') {
+        setComponent({
+          supported: false,
+          installed: false,
+          healthy: false,
+          platform: 'browser',
+          version: null,
+          install_dir: '',
+          reason: '截图识别仅支持桌面应用',
+          latest_version: null,
+          update_available: false,
+        });
+      }
+      return;
+    }
     void gachaApi.getGachaResources().then(setResources).catch(() => setError('资源目录加载失败，请检查网络后重试'));
     if (mode === 'screenshot') {
+      let disposed = false;
       void gachaApi.getOcrComponentStatus().then((status) => {
+        if (disposed) return;
         setComponent(status);
         if (!status.installed || !status.healthy) return;
         setCheckingComponentUpdate(true);
         void gachaApi.checkOcrComponentUpdate()
-          .then((update) => setComponent((current) => current ? { ...current, latest_version: update.latest_version, update_available: update.update_available } : current))
-          .finally(() => setCheckingComponentUpdate(false));
-      }).catch((statusError) => setError(String(statusError)));
+          .then((update) => {
+            if (disposed) return;
+            setComponent((current) => current ? { ...current, latest_version: update.latest_version, update_available: update.update_available } : current);
+          })
+          .finally(() => { if (!disposed) setCheckingComponentUpdate(false); });
+      }).catch((statusError) => { if (!disposed) setError(String(statusError)); });
       let unlisten: (() => void) | undefined;
-      void listen<OcrDownloadProgress>('ocr-download-progress', (event) => setDownloadProgress(event.payload))
-        .then((dispose) => { unlisten = dispose; });
+      void listen<OcrDownloadProgress>('ocr-download-progress', (event) => {
+        latestOcrDownloadProgress = event.payload;
+        if (!disposed) setDownloadProgress(event.payload);
+      }).then((dispose) => { if (disposed) dispose(); else unlisten = dispose; });
       let unlistenRecognition: (() => void) | undefined;
-      void listen<OcrRecognitionProgress>('ocr-recognition-progress', (event) => setRecognitionProgress(event.payload))
-        .then((dispose) => { unlistenRecognition = dispose; });
-      return () => { unlisten?.(); unlistenRecognition?.(); };
+      void listen<OcrRecognitionProgress>('ocr-recognition-progress', (event) => {
+        if (!disposed) setRecognitionProgress(event.payload);
+      }).then((dispose) => { if (disposed) dispose(); else unlistenRecognition = dispose; });
+      if (ocrInstallPromise) {
+        setComponentBusy(true);
+        setDownloadProgress(latestOcrDownloadProgress ?? { phase: 'manifest', downloaded: 0, total: null });
+        void ocrInstallPromise.then((status) => { if (!disposed) setComponent(status); }).catch((installError) => { if (!disposed) setError(String(installError)); }).finally(() => { if (!disposed) { setComponentBusy(false); setDownloadProgress(null); } });
+      }
+      return () => { disposed = true; unlisten?.(); unlistenRecognition?.(); };
     }
   }, [mode]);
 
@@ -236,7 +279,7 @@ export default function OcrImportPage() {
   }, [mode, component, recognizing, importing, rows.length]);
 
   useEffect(() => {
-    if (mode !== 'screenshot') {
+    if (mode !== 'screenshot' || !('__TAURI_INTERNALS__' in window)) {
       setDropState('idle');
       return;
     }
@@ -273,6 +316,8 @@ export default function OcrImportPage() {
       }
     }).then((dispose) => {
       if (disposed) { dispose(); } else { disposeFn = dispose; }
+    }).catch(() => {
+      if (!disposed) setDropState('idle');
     });
     return () => {
       disposed = true;
@@ -282,16 +327,19 @@ export default function OcrImportPage() {
   }, [mode]);
 
   const installComponent = async () => {
+    if (ocrInstallPromise) return;
     setComponentBusy(true);
-    setDownloadProgress({ phase: 'manifest', downloaded: 0, total: null });
+    latestOcrDownloadProgress = { phase: 'manifest', downloaded: 0, total: null };
+    setDownloadProgress(latestOcrDownloadProgress);
     setError('');
     try {
-      setComponent(await gachaApi.installOcrComponent());
+      setComponent(await installOcrComponentShared());
     } catch (installError) {
       setError(String(installError));
     } finally {
       setComponentBusy(false);
       setDownloadProgress(null);
+      latestOcrDownloadProgress = null;
     }
   };
 
@@ -651,7 +699,7 @@ export default function OcrImportPage() {
                 </Reorder.Group>
               )}
 
-              {!rows.length && <div ref={dropZoneRef} className={`flex h-full min-h-[240px] flex-col items-center justify-center border border-dashed text-center transition-all duration-150 ${dropState === 'active' ? 'ocr-drop-zone-active' : dropState === 'guiding' ? 'ocr-drop-guiding border-[#8fc8be]/30 bg-[#8fc8be]/[0.02]' : 'border-white/[0.1]'}`}>{dropState !== 'idle' && mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="ingress" size={32} className={dropState === 'active' ? 'text-[#8fc8be]' : 'text-wave'} /><p className="mt-4 text-base font-medium text-tide">{dropState === 'active' ? '松开以识别截图' : '将截图拖到此处'}</p>{dropState === 'guiding' && <p className="mt-2 text-xs text-wave">仅支持 PNG · JPG · WebP 格式</p>}</> : mode === 'screenshot' && !component ? <><LoaderCircle size={27} className="animate-spin text-wave" /><p className="mt-3 text-sm text-wave">正在检测本地环境</p></> : mode === 'screenshot' && !component?.healthy ? <><ResonanceIcon kind="download" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">安装 OCR 组件后即可识别截图</p><button type="button" onClick={() => void installComponent()} disabled={componentBusy} className="tide-btn mt-3 flex h-9 items-center gap-2 px-4 text-sm">{componentBusy ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="download" size={14} />}{componentBusy ? '正在下载' : '下载 OCR 组件'}</button></> : mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="capture" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">选择或拖拽截图开始本地识别</p><p className="mt-1 text-xs text-wave">支持 PNG、JPG、WebP 格式，可批量拖入</p><button type="button" onClick={requestScreenshots} className="mt-4 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="capture" size={13} />选择截图</button></> : <><ResonanceIcon kind="batch-edit" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">添加第一条五星记录</p><button type="button" onClick={addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="add" size={13} />添加记录</button></>}</div>}
+              {!rows.length && <div ref={dropZoneRef} className={`flex h-full min-h-[240px] flex-col items-center justify-center border border-dashed text-center transition-all duration-150 ${dropState === 'active' ? 'ocr-drop-zone-active' : dropState === 'guiding' ? 'ocr-drop-guiding border-[#8fc8be]/30 bg-[#8fc8be]/[0.02]' : 'border-white/[0.1]'}`}>{dropState !== 'idle' && mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="ingress" size={32} className={dropState === 'active' ? 'text-[#8fc8be]' : 'text-wave'} /><p className="mt-4 text-base font-medium text-tide">{dropState === 'active' ? '松开以识别截图' : '将截图拖到此处'}</p>{dropState === 'guiding' && <p className="mt-2 text-xs text-wave">仅支持 PNG · JPG · WebP 格式</p>}</> : mode === 'screenshot' && !component ? <><LoaderCircle size={27} className="animate-spin text-wave" /><p className="mt-3 text-sm text-wave">正在检测本地环境</p></> : mode === 'screenshot' && component && !component.supported ? <><ResonanceIcon kind="capture" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">请在桌面应用中使用截图识别</p><p className="mt-1 text-xs text-wave">浏览器预览不支持本地 OCR 与文件拖拽</p></> : mode === 'screenshot' && !component?.healthy ? <><ResonanceIcon kind="download" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">安装 OCR 组件后即可识别截图</p><button type="button" onClick={() => void installComponent()} disabled={componentBusy} className="tide-btn mt-3 flex h-9 items-center gap-2 px-4 text-sm">{componentBusy ? <LoaderCircle size={14} className="animate-spin" /> : <ResonanceIcon kind="download" size={14} />}{componentBusy ? '正在下载' : '下载 OCR 组件'}</button></> : mode === 'screenshot' && component?.healthy ? <><ResonanceIcon kind="capture" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">选择或拖拽截图开始本地识别</p><p className="mt-1 text-xs text-wave">支持 PNG、JPG、WebP 格式，可批量拖入</p><button type="button" onClick={requestScreenshots} className="mt-4 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="capture" size={13} />选择截图</button></> : <><ResonanceIcon kind="batch-edit" size={27} className="text-wave" /><p className="mt-3 text-sm text-tide">添加第一条五星记录</p><button type="button" onClick={addRow} className="mt-3 flex items-center gap-1.5 text-xs text-[#a8d7cf]"><ResonanceIcon kind="add" size={13} />添加记录</button></>}</div>}
             </div>
 
             {rows.length > 0 && <footer className="mt-4 shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] pt-4"><div className="text-xs text-wave">目标 UID：<span className="text-tide">{displayUid(targetPlayerId.trim()) || '未填写'}</span> · {rows.length} 条五星{reviewCount > 0 && <span className="ml-2 text-amber-300">仍有 {reviewCount} 条需核对</span>}{anomalyIndices.size > 0 && <span className="ml-2 text-amber-300">{anomalyIndices.size} 条序列异常</span>}{!recognizedDateOrderValid && <span className="ml-2 text-amber-300">日期顺序异常</span>}{mismatchCount > 0 && <span className="ml-2 text-red-300">{mismatchCount} 条与卡池不匹配</span>}{invalidCount > 0 && <span className="ml-2 text-red-300">仍有 {invalidCount} 条抽数无效</span>}</div><button type="button" onClick={() => { setImportError(''); setConfirming(true); }} disabled={!targetPlayerId.trim() || reviewCount > 0 || mismatchCount > 0 || invalidCount > 0 || !dateRangeValid || importing} className="tide-btn h-9 px-5 text-sm disabled:opacity-40">生成导入确认</button></footer>}
