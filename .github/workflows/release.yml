@@ -144,23 +144,26 @@ jobs:
             | head -1 \
             || echo "")
 
-          # 按 commit type 分类（conventional commits 格式：type(scope): subject）
-          # 匹配：feat / feat(scope): / feat!: / feat(scope)!:  等
+          # 按 AGENTS.md 约定的 commit type 分类。
+          # 匹配：feat: / feat(scope): / feat!: / feat(scope)!: 等。
           FEAT=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
-            | grep -E '^(feat|feature)[:(]' \
+            | grep -E '^feat(\([^)]*\))?!?:' \
             | sed 's/^/- ✨ /' || true)
-          STYLE=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
-            | grep -E '^(style|ui)[:(]' \
-            | sed 's/^/- 🎨 /' || true)
           FIX=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
-            | grep -E '^(fix|bug)[:(]' \
+            | grep -E '^fix(\([^)]*\))?!?:' \
             | sed 's/^/- 🐛 /' || true)
-          CHORE=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
-            | grep -E '^(chore|ci|docs|build|refactor|perf|test)[:(]' \
+          PERF=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^perf(\([^)]*\))?!?:' \
+            | sed 's/^/- ⚡ /' || true)
+          DOCS=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^docs(\([^)]*\))?!?:' \
+            | sed 's/^/- 📚 /' || true)
+          MAINTENANCE=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
+            | grep -E '^(refactor|chore|ci)(\([^)]*\))?!?:' \
             | grep -vE '^chore\(release\): bump version' \
             | sed 's/^/- 🔧 /' || true)
           OTHER=$(git log --pretty=format:'%s' --no-merges ${PREV_TAG:+$PREV_TAG..HEAD} \
-            | grep -vE '^(feat|feature|style|ui|fix|bug|chore|ci|docs|build|refactor|perf|test)[:(]' \
+            | grep -vE '^(feat|fix|perf|refactor|docs|ci|chore)(\([^)]*\))?!?:' \
             | sed 's/^/- 📝 /' || true)
 
           {
@@ -181,13 +184,6 @@ jobs:
               echo ""
             fi
 
-            if [ -n "$STYLE" ]; then
-              echo "### 🎨 UI / Style"
-              echo ""
-              echo "$STYLE"
-              echo ""
-            fi
-
             if [ -n "$FIX" ]; then
               echo "### 🐛 Bug Fixes"
               echo ""
@@ -195,10 +191,24 @@ jobs:
               echo ""
             fi
 
-            if [ -n "$CHORE" ]; then
-              echo "### 🔧 Chores"
+            if [ -n "$PERF" ]; then
+              echo "### ⚡ Performance"
               echo ""
-              echo "$CHORE"
+              echo "$PERF"
+              echo ""
+            fi
+
+            if [ -n "$DOCS" ]; then
+              echo "### 📚 Documentation"
+              echo ""
+              echo "$DOCS"
+              echo ""
+            fi
+
+            if [ -n "$MAINTENANCE" ]; then
+              echo "### 🔧 Maintenance"
+              echo ""
+              echo "$MAINTENANCE"
               echo ""
             fi
 
@@ -209,7 +219,7 @@ jobs:
               echo ""
             fi
 
-            if [ -z "$FEAT$STYLE$FIX$CHORE$OTHER" ]; then
+            if [ -z "$FEAT$FIX$PERF$DOCS$MAINTENANCE$OTHER" ]; then
               echo "_No commits found since last release._"
               echo ""
             fi
