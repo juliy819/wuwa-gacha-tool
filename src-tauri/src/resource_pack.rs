@@ -27,8 +27,29 @@ struct ResourceManifest {
 }
 
 pub(crate) async fn refresh(state: &AppState) -> Result<(), String> {
-    let _guard = state.resource_pack_refresh.lock().await;
-    let result = refresh_inner(&state.http, &state.asset_cache_dir).await;
+    let _guard = match state.resource_pack_refresh.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            let _existing = state.resource_pack_refresh.lock().await;
+            return Ok(());
+        }
+    };
+    update_progress(&state.resource_pack_progress, |progress| {
+        *progress = ResourcePackProgress {
+            in_progress: true,
+            phase: Some("manifest".to_string()),
+            ..ResourcePackProgress::default()
+        };
+    });
+    let result = refresh_inner(
+        &state.http,
+        &state.asset_cache_dir,
+        &state.resource_pack_progress,
+    )
+    .await;
+    update_progress(&state.resource_pack_progress, |progress| {
+        progress.in_progress = false;
+    });
     if let Ok(mut last_error) = state.resource_pack_last_error.lock() {
         *last_error = result.as_ref().err().cloned();
     }
@@ -43,6 +64,20 @@ pub(crate) struct ResourcePackStatus {
     pub icon_count: usize,
     pub portrait_count: usize,
     pub last_error: Option<String>,
+    pub in_progress: bool,
+    pub phase: Option<String>,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub proxy: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ResourcePackProgress {
+    pub in_progress: bool,
+    pub phase: Option<String>,
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub proxy: Option<String>,
 }
 
 #[tauri::command]
@@ -55,6 +90,11 @@ pub(crate) async fn get_resource_pack_status(
         .ok()
         .and_then(|value| value.clone());
     let catalog = load_catalog(&state.asset_cache_dir)?;
+    let progress = state
+        .resource_pack_progress
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone();
     Ok(ResourcePackStatus {
         installed: catalog.is_some(),
         version: catalog.as_ref().map(|value| value.version.clone()),
@@ -62,6 +102,11 @@ pub(crate) async fn get_resource_pack_status(
         icon_count: catalog.as_ref().map_or(0, |value| value.icons.len()),
         portrait_count: catalog.as_ref().map_or(0, |value| value.portraits.len()),
         last_error,
+        in_progress: progress.in_progress,
+        phase: progress.phase,
+        downloaded: progress.downloaded,
+        total: progress.total,
+        proxy: progress.proxy,
     })
 }
 
@@ -73,9 +118,20 @@ pub(crate) async fn refresh_resource_pack(
     get_resource_pack_status(state).await
 }
 
-async fn refresh_inner(client: &reqwest::Client, asset_dir: &Path) -> Result<(), String> {
-    let manifest_bytes =
-        fetch_github_bytes(client, RESOURCE_MANIFEST_URL, MAX_MANIFEST_BYTES).await?;
+async fn refresh_inner(
+    client: &reqwest::Client,
+    asset_dir: &Path,
+    progress: &std::sync::Mutex<ResourcePackProgress>,
+) -> Result<(), String> {
+    let manifest_bytes = fetch_github_bytes(
+        client,
+        RESOURCE_MANIFEST_URL,
+        MAX_MANIFEST_BYTES,
+        progress,
+        "manifest",
+        None,
+    )
+    .await?;
     let manifest: ResourceManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("资源包清单无效: {error}"))?;
     validate_manifest(&manifest)?;
@@ -87,7 +143,15 @@ async fn refresh_inner(client: &reqwest::Client, asset_dir: &Path) -> Result<(),
         return Ok(());
     }
 
-    let archive = fetch_github_bytes(client, &manifest.archive_url, manifest.archive_size).await?;
+    let archive = fetch_github_bytes(
+        client,
+        &manifest.archive_url,
+        manifest.archive_size,
+        progress,
+        "archive",
+        Some(&manifest.archive_sha256),
+    )
+    .await?;
     if archive.len() as u64 != manifest.archive_size {
         return Err(format!(
             "资源包大小校验失败: expected={}, actual={}",
@@ -354,11 +418,26 @@ async fn fetch_github_bytes(
     client: &reqwest::Client,
     url: &str,
     max_size: u64,
+    progress: &std::sync::Mutex<ResourcePackProgress>,
+    phase: &str,
+    expected_sha256: Option<&str>,
 ) -> Result<Vec<u8>, String> {
     let mut errors = Vec::new();
     for (source, candidate) in github_download_sources(url) {
-        match fetch_bytes_once(client, &candidate, max_size).await {
+        update_progress(progress, |value| {
+            value.phase = Some(phase.to_string());
+            value.downloaded = 0;
+            value.total = None;
+            value.proxy = Some(source.to_string());
+        });
+        match fetch_bytes_once(client, &candidate, max_size, progress).await {
             Ok(bytes) => {
+                if let Some(expected) = expected_sha256 {
+                    if sha256_hex(&bytes) != expected.to_ascii_lowercase() {
+                        errors.push(format!("{source}: SHA-256 校验失败"));
+                        continue;
+                    }
+                }
                 log::info!(target: "app::resource_pack", "event=download_succeeded source={source} bytes={}", bytes.len());
                 return Ok(bytes);
             }
@@ -372,6 +451,7 @@ async fn fetch_bytes_once(
     client: &reqwest::Client,
     url: &str,
     max_size: u64,
+    progress: &std::sync::Mutex<ResourcePackProgress>,
 ) -> Result<Vec<u8>, String> {
     let mut response =
         tokio::time::timeout(std::time::Duration::from_secs(5), client.get(url).send())
@@ -387,15 +467,30 @@ async fn fetch_bytes_once(
     {
         return Err("响应超过大小限制".to_string());
     }
+    let expected_length = response.content_length();
+    update_progress(progress, |value| {
+        value.total = expected_length;
+    });
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
         if bytes.len().saturating_add(chunk.len()) as u64 > max_size {
             return Err("响应超过大小限制".to_string());
         }
         bytes.extend_from_slice(&chunk);
+        update_progress(progress, |value| {
+            value.downloaded = bytes.len() as u64;
+        });
     }
     if bytes.is_empty() {
         return Err("响应为空".to_string());
+    }
+    if let Some(expected) = expected_length {
+        if bytes.len() as u64 != expected {
+            return Err(format!(
+                "响应长度不完整: expected={expected}, actual={}",
+                bytes.len()
+            ));
+        }
     }
     Ok(bytes)
 }
@@ -405,8 +500,6 @@ fn github_download_sources(url: &str) -> Vec<(&'static str, String)> {
         return vec![("原始地址", url.to_string())];
     }
     vec![
-        ("ghproxy.net", format!("https://ghproxy.net/{url}")),
-        ("GitHub 官方", url.to_string()),
         (
             "cors.isteed.cc",
             format!(
@@ -419,11 +512,22 @@ fn github_download_sources(url: &str) -> Vec<(&'static str, String)> {
             "cdn.gh-proxy.org",
             format!("https://cdn.gh-proxy.org/{url}"),
         ),
+        ("ghproxy.net", format!("https://ghproxy.net/{url}")),
         (
             "edgeone.gh-proxy.org",
             format!("https://edgeone.gh-proxy.org/{url}"),
         ),
+        ("GitHub 官方", url.to_string()),
     ]
+}
+
+fn update_progress(
+    progress: &std::sync::Mutex<ResourcePackProgress>,
+    update: impl FnOnce(&mut ResourcePackProgress),
+) {
+    if let Ok(mut value) = progress.lock() {
+        update(&mut value);
+    }
 }
 
 fn load_installed_manifest(asset_dir: &Path) -> Option<ResourceManifest> {
@@ -510,6 +614,23 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ))
+    }
+
+    #[test]
+    fn download_sources_match_the_verified_updater_order() {
+        let url = "https://github.com/example/repo/releases/download/v1/file.zip";
+        let sources = github_download_sources(url);
+        assert_eq!(
+            sources.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            vec![
+                "cors.isteed.cc",
+                "hk.gh-proxy.org",
+                "cdn.gh-proxy.org",
+                "ghproxy.net",
+                "edgeone.gh-proxy.org",
+                "GitHub 官方",
+            ]
+        );
     }
 
     fn webp(marker: u8) -> Vec<u8> {
@@ -650,7 +771,8 @@ mod tests {
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .unwrap();
-        refresh_inner(&client, &root).await.unwrap();
+        let progress = std::sync::Mutex::new(ResourcePackProgress::default());
+        refresh_inner(&client, &root, &progress).await.unwrap();
         let catalog = load_catalog(&root).unwrap().unwrap();
         assert!(catalog.resources.len() >= 100);
         assert!(catalog.icons.len() >= 100);
@@ -665,11 +787,16 @@ mod tests {
             .timeout(std::time::Duration::from_secs(1))
             .build()
             .unwrap();
-        assert!(
-            fetch_github_bytes(&offline, RESOURCE_MANIFEST_URL, MAX_MANIFEST_BYTES)
-                .await
-                .is_err()
-        );
+        assert!(fetch_github_bytes(
+            &offline,
+            RESOURCE_MANIFEST_URL,
+            MAX_MANIFEST_BYTES,
+            &progress,
+            "manifest",
+            None,
+        )
+        .await
+        .is_err());
         assert!(load_catalog(&root).unwrap().is_some());
         assert_eq!(
             std::fs::read_dir(root.join("icons")).unwrap().count(),

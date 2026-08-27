@@ -29,9 +29,9 @@ const OCR_MANIFEST_URL: &str = "https://github.com/juliy819/wuwa-gacha-tool-ocr-
 const MAX_COMPONENT_BYTES: u64 = 500 * 1024 * 1024;
 const GITHUB_PROXIES: &[&str] = &[
     "https://cors.isteed.cc/",
-    "https://ghproxy.net/",
     "https://hk.gh-proxy.org/",
     "https://cdn.gh-proxy.org/",
+    "https://ghproxy.net/",
     "https://edgeone.gh-proxy.org/",
 ];
 
@@ -886,10 +886,26 @@ mod tests {
 
     use super::{
         component_platform, fetch_bytes, fetch_manifest, has_consecutive_standard_characters,
-        has_standard_weapon_in_featured_pool, is_remote_version_newer, run_self_check,
+        has_standard_weapon_in_featured_pool, is_remote_version_newer, proxy_urls, run_self_check,
         OcrScreenshotResult, MAX_COMPONENT_BYTES,
     };
     use crate::commands::gacha::InsertMockGachaRequest;
+
+    #[test]
+    fn component_download_sources_match_the_verified_updater_order() {
+        let url = "https://github.com/example/repo/releases/download/v1/file.zip";
+        assert_eq!(
+            proxy_urls(url),
+            vec![
+                format!("https://cors.isteed.cc/{url}"),
+                format!("https://hk.gh-proxy.org/{url}"),
+                format!("https://cdn.gh-proxy.org/{url}"),
+                format!("https://ghproxy.net/{url}"),
+                format!("https://edgeone.gh-proxy.org/{url}"),
+                url.to_string(),
+            ]
+        );
+    }
 
     #[test]
     fn only_reports_strictly_newer_component_versions() {

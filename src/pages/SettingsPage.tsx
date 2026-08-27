@@ -100,10 +100,22 @@ export default function SettingsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    gachaApi.getResourcePackStatus().then((status) => {
-      if (!cancelled) setResourcePack(status);
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    let timer: number | null = null;
+    const refreshStatus = async () => {
+      try {
+        const status = await gachaApi.getResourcePackStatus();
+        if (!cancelled) setResourcePack(status);
+      } catch {
+        // Browser preview and app shutdown can make the command unavailable.
+      } finally {
+        if (!cancelled) timer = window.setTimeout(refreshStatus, 500);
+      }
+    };
+    void refreshStatus();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
@@ -537,7 +549,7 @@ export default function SettingsPage() {
   };
 
   const handleRefreshResourcePack = async () => {
-    if (resourcePackBusy) return;
+    if (resourcePackBusy || resourcePack?.in_progress) return;
     setResourcePackBusy(true);
     try {
       const status = await gachaApi.refreshResourcePack();
@@ -555,6 +567,16 @@ export default function SettingsPage() {
       setResourcePackBusy(false);
     }
   };
+
+  const resourcePackDownloading = resourcePackBusy || resourcePack?.in_progress === true;
+  const resourcePackPercent = resourcePack?.total
+    ? Math.min(100, Math.floor(resourcePack.downloaded / resourcePack.total * 100))
+    : null;
+  const resourcePackAction = resourcePack?.last_error
+    ? '重试下载'
+    : resourcePack?.installed
+      ? '检查更新'
+      : '下载资源包';
 
   return (
     <PageTransition>
@@ -644,24 +666,33 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     onClick={() => void handleRefreshResourcePack()}
-                    disabled={resourcePackBusy}
+                    disabled={resourcePackDownloading}
                     className="flex shrink-0 items-center gap-1.5 text-xs text-wave transition-colors hover:text-tide disabled:opacity-50"
                   >
-                    <ResonanceActionIcon size="sm">{resourcePackBusy ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="refresh" size={14} />}</ResonanceActionIcon>
-                    {resourcePackBusy ? '检查中' : '检查更新'}
+                    <ResonanceActionIcon size="sm">{resourcePackDownloading ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind={resourcePack?.installed ? 'refresh' : 'download'} size={14} />}</ResonanceActionIcon>
+                    {resourcePackDownloading ? '下载中' : resourcePackAction}
                   </button>
                 </div>
                 <div className="mt-3 flex items-center gap-2 text-[11px]">
-                  {resourcePackBusy ? (
-                    <><LoaderCircle size={13} className="animate-spin text-wave" /><span className="text-wave">正在检查资源包</span></>
+                  {resourcePackDownloading ? (
+                    <><LoaderCircle size={13} className="animate-spin text-wave" /><span className="text-wave">{resourcePack?.phase === 'archive' ? '正在下载资源包' : '正在获取资源包清单'}{resourcePack?.proxy ? ` · ${resourcePack.proxy}` : ''}</span></>
                   ) : resourcePack?.last_error ? (
-                    <><ResonanceIcon kind="error" size={13} className="text-[#d99a9a]" /><span className="text-[#d99a9a]">资源包下载失败，可点击“检查更新”重试</span></>
+                    <><ResonanceIcon kind="error" size={13} className="text-[#d99a9a]" /><span className="text-[#d99a9a]">{resourcePack.installed ? '资源包更新失败，本地版本仍可用' : '资源包下载失败，可手动重试'}</span></>
                   ) : resourcePack?.installed ? (
                     <><ResonanceIcon kind="success" size={13} className="text-[#8fc8be]" /><span className="text-[#8fc8be]">已安装 · v{resourcePack.version}</span></>
                   ) : (
-                    <><ResonanceIcon kind="info" size={13} className="text-wave" /><span className="text-wave">尚未安装，点击“检查更新”下载</span></>
+                    <><ResonanceIcon kind="info" size={13} className="text-wave" /><span className="text-wave">尚未安装，应用启动后会自动下载</span></>
                   )}
                 </div>
+                {resourcePackDownloading && (
+                  <div className="mt-2">
+                    <div className="flex justify-between text-[10px] text-wave">
+                      <span>{resourcePack?.phase === 'archive' ? '资源包' : '清单'}</span>
+                      <span>{resourcePackPercent === null ? '准备中' : `${resourcePackPercent}%`}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden bg-white/[0.08]"><div className="h-full bg-[#8fc8be] transition-[width] duration-200" style={{ width: resourcePackPercent === null ? '8%' : `${resourcePackPercent}%` }} /></div>
+                  </div>
+                )}
                 {resourcePack?.installed && !resourcePack.last_error && (
                   <p className="mt-2 text-[11px] leading-5 text-wave">包含 {resourcePack.resource_count.toLocaleString()} 项素材、{resourcePack.icon_count.toLocaleString()} 张图标和 {resourcePack.portrait_count.toLocaleString()} 张立绘。</p>
                 )}

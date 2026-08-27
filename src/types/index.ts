@@ -92,6 +92,11 @@ export interface ResourcePackStatus {
   icon_count: number;
   portrait_count: number;
   last_error: string | null;
+  in_progress: boolean;
+  phase: 'manifest' | 'archive' | null;
+  downloaded: number;
+  total: number | null;
+  proxy: string | null;
 }
 
 export interface OcrDownloadProgress {

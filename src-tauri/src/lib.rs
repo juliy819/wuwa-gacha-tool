@@ -18,6 +18,7 @@ pub struct AppState {
     pub asset_catalog_refresh: tokio::sync::Mutex<()>,
     pub resource_pack_refresh: tokio::sync::Mutex<()>,
     pub resource_pack_last_error: Mutex<Option<String>>,
+    pub resource_pack_progress: Mutex<resource_pack::ResourcePackProgress>,
     pub app_data_dir: PathBuf,
 }
 
@@ -63,6 +64,7 @@ pub fn run() {
                 asset_catalog_refresh: tokio::sync::Mutex::new(()),
                 resource_pack_refresh: tokio::sync::Mutex::new(()),
                 resource_pack_last_error: Mutex::new(None),
+                resource_pack_progress: Mutex::new(resource_pack::ResourcePackProgress::default()),
                 app_data_dir,
             });
             let app_handle = app.handle().clone();
