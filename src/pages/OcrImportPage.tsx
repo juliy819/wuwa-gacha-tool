@@ -730,7 +730,7 @@ export default function OcrImportPage() {
       </Modal>
 
       <Modal open={removeConfirming} onClose={() => setRemoveConfirming(false)} className="max-w-[440px]" labelledBy="ocr-remove-title">
-        <div className="flex items-start justify-between border-b border-white/[0.06] p-5"><div><h2 id="ocr-remove-title" className="modal-title text-base font-medium text-tide">删除本地 OCR 组件？</h2><p className="mt-2 text-xs leading-5 text-wave">将删除本地 OCR runtime、模型和头像模板，不会影响抽卡记录、资源包或其他设置。之后再次进行截图识别时需要重新下载。</p></div><ResonanceCloseButton onClick={() => setRemoveConfirming(false)} /></div>
+        <div className="flex items-start justify-between border-b border-white/[0.06] p-5"><div><h2 id="ocr-remove-title" className="modal-title text-base font-medium text-tide">删除本地 OCR 组件？</h2><p className="mt-2 text-xs leading-5 text-wave">将删除本地 OCR runtime 和模型，不会影响抽卡记录、资源包或其他设置。之后再次进行截图识别时需要重新下载。</p></div><ResonanceCloseButton onClick={() => setRemoveConfirming(false)} /></div>
         <div className="flex justify-end gap-2 p-4"><button type="button" onClick={() => setRemoveConfirming(false)} className="h-9 px-4 text-sm text-wave hover:text-tide">取消</button><button type="button" onClick={() => void removeComponent()} className="flex h-9 items-center gap-2 border border-red-300/30 px-4 text-sm text-red-200 hover:bg-red-300/[0.08]"><ResonanceIcon kind="delete" size={14} />删除组件</button></div>
       </Modal>
 

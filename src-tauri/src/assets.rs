@@ -46,6 +46,8 @@ pub(crate) struct AssetCatalog {
     pub(crate) version: String,
     pub(crate) icons: HashMap<i64, String>,
     #[serde(default)]
+    pub(crate) portraits: HashMap<i64, String>,
+    #[serde(default)]
     pub(crate) resources: Vec<GachaResource>,
 }
 
@@ -303,6 +305,7 @@ async fn fetch_catalog(client: &reqwest::Client, version: &str) -> Result<AssetC
     Ok(AssetCatalog {
         version: version.to_string(),
         icons,
+        portraits: HashMap::new(),
         resources,
     })
 }

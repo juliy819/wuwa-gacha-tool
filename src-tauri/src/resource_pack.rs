@@ -14,6 +14,7 @@ const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_EXTRACTED_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_CATALOG_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_ICON_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_PORTRAIT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 4_096;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -116,6 +117,18 @@ fn install_archive(
             atomic_write_replace(&icons_dir.join(format!("{resource_id}.webp")), &bytes)?;
         }
         cleanup_legacy_icons(&icons_dir, catalog.icons.keys().copied())?;
+        let portraits_dir = asset_dir.join("portraits");
+        std::fs::create_dir_all(&portraits_dir)
+            .map_err(|error| format!("创建角色立绘目录失败: {error}"))?;
+        for resource_id in catalog.portraits.keys() {
+            let bytes = std::fs::read(
+                staging
+                    .join("portraits")
+                    .join(format!("{resource_id}.webp")),
+            )
+            .map_err(|error| format!("读取资源包立绘 {resource_id} 失败: {error}"))?;
+            atomic_write_replace(&portraits_dir.join(format!("{resource_id}.webp")), &bytes)?;
+        }
 
         let metadata_dir = asset_dir.join("resource-pack");
         std::fs::create_dir_all(&metadata_dir)
@@ -186,11 +199,14 @@ fn extract_archive(archive: &[u8], output_dir: &Path) -> Result<(), String> {
         }
         let is_catalog = relative_text == "catalog.json";
         let is_icon = is_valid_icon_path(&relative_text);
-        if !is_catalog && !is_icon {
+        let is_portrait = is_valid_portrait_path(&relative_text);
+        if !is_catalog && !is_icon && !is_portrait {
             return Err(format!("资源包包含未知文件: {relative_text}"));
         }
         let limit = if is_catalog {
             MAX_CATALOG_BYTES
+        } else if is_portrait {
+            MAX_PORTRAIT_BYTES
         } else {
             MAX_ICON_BYTES
         };
@@ -227,6 +243,14 @@ fn validate_staged_pack(catalog: &AssetCatalog, dir: &Path) -> Result<(), String
             return Err(format!("资源包图片 {resource_id} 无效"));
         }
     }
+    for resource_id in catalog.portraits.keys() {
+        let path = dir.join("portraits").join(format!("{resource_id}.webp"));
+        let bytes = std::fs::read(&path)
+            .map_err(|_| format!("资源包缺少 catalog 声明的立绘 {resource_id}"))?;
+        if bytes.len() as u64 > MAX_PORTRAIT_BYTES || !is_webp(&bytes) {
+            return Err(format!("资源包立绘 {resource_id} 无效"));
+        }
+    }
     Ok(())
 }
 
@@ -249,6 +273,13 @@ fn validate_catalog_shape(catalog: &AssetCatalog) -> Result<(), String> {
         .all(|(id, path)| *id > 0 && path == &format!("{id}.webp"))
     {
         return Err("资源包图片路径无效".to_string());
+    }
+    if !catalog
+        .portraits
+        .iter()
+        .all(|(id, path)| *id > 0 && path == &format!("{id}.webp"))
+    {
+        return Err("资源包立绘路径无效".to_string());
     }
     Ok(())
 }
@@ -399,6 +430,16 @@ fn is_valid_icon_path(path: &str) -> bool {
     !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit())
 }
 
+fn is_valid_portrait_path(path: &str) -> bool {
+    let Some(name) = path.strip_prefix("portraits/") else {
+        return false;
+    };
+    !name.contains('/')
+        && name.strip_suffix(".webp").is_some_and(|id| {
+            !id.is_empty() && id.chars().all(|character| character.is_ascii_digit())
+        })
+}
+
 fn is_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -438,6 +479,7 @@ mod tests {
         AssetCatalog {
             version: "test".to_string(),
             icons: [(icon_id, format!("{icon_id}.webp"))].into(),
+            portraits: std::collections::HashMap::new(),
             resources: vec![GachaResource {
                 resource_id: icon_id,
                 name: "测试资源".to_string(),
@@ -447,7 +489,12 @@ mod tests {
         }
     }
 
-    fn archive(catalog: &AssetCatalog, icon_id: i64, icon: Option<&[u8]>) -> Vec<u8> {
+    fn archive(
+        catalog: &AssetCatalog,
+        icon_id: i64,
+        icon: Option<&[u8]>,
+        portrait: Option<&[u8]>,
+    ) -> Vec<u8> {
         let mut output = Cursor::new(Vec::new());
         {
             let mut zip = zip::ZipWriter::new(&mut output);
@@ -460,6 +507,11 @@ mod tests {
                 zip.start_file(format!("resource-pack/icons/{icon_id}.webp"), options)
                     .unwrap();
                 zip.write_all(icon).unwrap();
+            }
+            if let Some(portrait) = portrait {
+                zip.start_file(format!("resource-pack/portraits/{icon_id}.webp"), options)
+                    .unwrap();
+                zip.write_all(portrait).unwrap();
             }
             zip.finish().unwrap();
         }
@@ -479,10 +531,17 @@ mod tests {
     fn installs_icons_into_the_single_shared_directory() {
         let root = test_dir("install");
         let icon = webp(1);
-        let archive = archive(&catalog(1104), 1104, Some(&icon));
+        let portrait = webp(2);
+        let mut catalog = catalog(1104);
+        catalog.portraits.insert(1104, "1104.webp".to_string());
+        let archive = archive(&catalog, 1104, Some(&icon), Some(&portrait));
         install_archive(&root, &manifest_for(&archive), &archive).unwrap();
 
         assert_eq!(std::fs::read(root.join("icons/1104.webp")).unwrap(), icon);
+        assert_eq!(
+            std::fs::read(root.join("portraits/1104.webp")).unwrap(),
+            portrait
+        );
         assert!(root.join("resource-pack/catalog.json").is_file());
         assert!(!root.join("resource-pack/icons/1104.webp").exists());
         assert!(!root.join("resource-pack.installing").exists());
@@ -515,7 +574,7 @@ mod tests {
         std::fs::write(root.join("resource-pack/catalog.json"), &old_catalog).unwrap();
         std::fs::write(root.join("icons/1104.webp"), &old_icon).unwrap();
 
-        let invalid = archive(&catalog(1203), 1203, None);
+        let invalid = archive(&catalog(1203), 1203, None, None);
         assert!(install_archive(&root, &manifest_for(&invalid), &invalid).is_err());
         assert_eq!(
             std::fs::read(root.join("resource-pack/catalog.json")).unwrap(),
@@ -536,6 +595,8 @@ mod tests {
         assert!(is_valid_icon_path("icons/1104.webp"));
         assert!(!is_valid_icon_path("icons/../1104.webp"));
         assert!(!is_valid_icon_path("other/1104.webp"));
+        assert!(is_valid_portrait_path("portraits/1104.webp"));
+        assert!(!is_valid_portrait_path("portraits/../1104.webp"));
     }
 
     #[tokio::test]

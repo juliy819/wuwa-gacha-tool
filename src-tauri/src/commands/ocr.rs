@@ -582,6 +582,16 @@ pub async fn recognize_gacha_screenshots(
     if !executable.is_file() {
         return Err("OCR 组件可执行文件不存在，请修复组件".to_string());
     }
+    let resource_catalog = crate::resource_pack::load_catalog(&state.asset_cache_dir)?
+        .ok_or_else(|| "本地资源包尚未安装，请联网重启应用后再进行截图识别".to_string())?;
+    if resource_catalog.portraits.is_empty() {
+        log::warn!(
+            target: "app::ocr",
+            "event=resource_pack_has_no_portraits version={}",
+            resource_catalog.version
+        );
+    }
+    let resource_pack_dir = state.asset_cache_dir.clone();
     // Sidecar startup loads ONNX Runtime and the full local template catalog
     // before it can emit its first per-image progress event. Tell the UI what
     // this initial, unavoidable phase is instead of leaving an empty bar.
@@ -622,6 +632,7 @@ pub async fn recognize_gacha_screenshots(
         command
             .arg("--request")
             .arg(&request_path)
+            .env("WUWA_OCR_RESOURCE_PACK", &resource_pack_dir)
             .current_dir(executable.parent().unwrap_or(&root))
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
