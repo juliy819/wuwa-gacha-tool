@@ -474,7 +474,6 @@ export default function RecordsPage() {
   }, [activePoolType, visiblePoolTypes]);
 
   const effectiveScope: RecordScope = viewMode === 'table' ? scope : 'five';
-  const gridItemsPerPage = gridColumns * GRID_ROWS_PER_PAGE;
 
   const activePoolCurrentPity = useMemo(() => {
     if (activePoolType === 'all') return null;
@@ -484,6 +483,9 @@ export default function RecordsPage() {
     if (stats.currentPity === 0) return null;
     return stats.currentPity;
   }, [activePoolType, poolStats]);
+
+  // 宫格模式下，如果有垫抽卡片，需要预留一个位置，保证最后一行能排满
+  const gridItemsPerPage = gridColumns * GRID_ROWS_PER_PAGE - (activePoolCurrentPity !== null ? 1 : 0);
 
   const effectiveItemsPerPage = viewMode === 'grid' ? gridItemsPerPage : itemsPerPage;
 
