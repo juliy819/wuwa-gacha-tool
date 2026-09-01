@@ -50,6 +50,14 @@ pub struct InsertMockGachaRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct InsertMockFillerRequest {
+    pub player_id: String,
+    pub card_pool_type: String,
+    pub count: i32,
+    pub time: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UpdateMockGachaRequest {
     id: i64,
     card_pool_type: String,
@@ -73,6 +81,111 @@ pub async fn insert_mock_gacha(
     request: InsertMockGachaRequest,
 ) -> Result<Vec<GachaRecord>, String> {
     insert_mock_gacha_inner(&state, request).await
+}
+
+#[tauri::command]
+pub async fn insert_mock_fillers(
+    state: State<'_, AppState>,
+    request: InsertMockFillerRequest,
+) -> Result<Vec<GachaRecord>, String> {
+    if !(1..=80).contains(&request.count) {
+        return Err("补充记录必须为 1 到 80 抽".to_string());
+    }
+    let time = parse_gacha_time(&request.time)?
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    let resources = crate::assets::get_gacha_resources(&state).await?;
+    let three: Vec<_> = resources.iter().filter(|r| r.quality_level == 3).collect();
+    let four: Vec<_> = resources.iter().filter(|r| r.quality_level == 4).collect();
+    if three.is_empty() || four.is_empty() {
+        return Err("资源目录缺少三星或四星物品".to_string());
+    }
+    let (before, after) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.mock_filler_boundaries(&request.player_id, &request.card_pool_type, &time)?
+    };
+    let mut rng = rand::thread_rng();
+    let mut fillers = build_filler_resources(
+        &three,
+        &four,
+        request.count as usize,
+        before,
+        after,
+        &mut rng,
+    )?;
+    if request.count > 10 {
+        fillers[0] = (*four
+            .choose(&mut rng)
+            .ok_or_else(|| "无法随机选择四星物品".to_string())?)
+        .clone();
+    }
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.insert_mock_fillers(&request.player_id, &request.card_pool_type, &time, &fillers)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompletePoolBoundaryRequest {
+    pub player_id: String,
+    pub card_pool_type: String,
+    pub target_pulls: i32,
+}
+
+#[tauri::command]
+pub async fn complete_pool_boundary(
+    state: State<'_, AppState>,
+    request: CompletePoolBoundaryRequest,
+) -> Result<Vec<GachaRecord>, String> {
+    let resources = crate::assets::get_gacha_resources(&state).await?;
+    let three_stars: Vec<&GachaResource> =
+        resources.iter().filter(|r| r.quality_level == 3).collect();
+    let four_stars: Vec<&GachaResource> =
+        resources.iter().filter(|r| r.quality_level == 4).collect();
+    if three_stars.is_empty() || four_stars.is_empty() {
+        return Err("资源目录缺少三星或四星物品，无法自动补足记录".to_string());
+    }
+    let (visible_pulls, streak_before) = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let records = db.get_all_records(Some(&request.player_id))?;
+        let mut pool: Vec<_> = records
+            .iter()
+            .filter(|r| r.card_pool_type == request.card_pool_type)
+            .collect();
+        pool.sort_by(|a, b| a.time.cmp(&b.time).then_with(|| b.id.cmp(&a.id)));
+        let first = pool
+            .iter()
+            .position(|r| r.quality_level == 5)
+            .ok_or_else(|| "该卡池没有可补足的五星记录".to_string())?;
+        if pool[first].is_mock {
+            return Err("首个五星已经是模拟记录，无需重复补足".to_string());
+        }
+        let streak = pool[..first]
+            .iter()
+            .rev()
+            .take_while(|r| r.quality_level == 3)
+            .count();
+        (first as i32 + 1, streak)
+    };
+    if request.target_pulls <= visible_pulls {
+        return Err(format!("目标抽数必须大于当前可见的 {visible_pulls} 抽"));
+    }
+    let mut rng = rand::thread_rng();
+    let fillers = build_filler_resources(
+        &three_stars,
+        &four_stars,
+        (request.target_pulls - visible_pulls) as usize,
+        0,
+        streak_before,
+        &mut rng,
+    )?;
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let inserted = db.complete_first_five_star_prefix(
+        &request.player_id,
+        &request.card_pool_type,
+        request.target_pulls,
+        &fillers,
+    )?;
+    db.set_pool_boundary_confirmed(&request.player_id, &request.card_pool_type, true)?;
+    Ok(inserted)
 }
 
 pub(crate) async fn insert_mock_gacha_inner(
@@ -885,6 +998,7 @@ pub struct PoolBoundaryStatus {
     first_five_star_name: String,
     first_five_star_time: String,
     visible_pulls: i32,
+    original_visible_pulls: i32,
     confirmed: bool,
 }
 
@@ -996,12 +1110,17 @@ pub fn get_pool_boundary_statuses(
             continue;
         };
         let first_five = pool_records[first_five_index];
+        let original_visible_pulls = pool_records[..=first_five_index]
+            .iter()
+            .filter(|record| !record.is_mock)
+            .count() as i32;
         boundaries.push(PoolBoundaryStatus {
             pool_type: pool_type.to_string(),
             pool_name: get_display_pool_name(pool_type).to_string(),
             first_five_star_name: first_five.name.clone(),
             first_five_star_time: first_five.time.clone(),
             visible_pulls: first_five_index as i32 + 1,
+            original_visible_pulls,
             confirmed: confirmed.contains(*pool_type),
         });
     }

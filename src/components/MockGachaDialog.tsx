@@ -13,6 +13,7 @@ type SubmitValue = {
   resource_id: number;
   time: string;
   pulls: number;
+  quality_level: number;
 };
 
 type Props = {
@@ -112,6 +113,7 @@ export default function MockGachaDialog({
   const [poolType, setPoolType] = useState(initialPoolType);
   const [resourceId, setResourceId] = useState(0);
   const [pulls, setPulls] = useState('50');
+  const [insertQuality, setInsertQuality] = useState<3 | 5>(5);
   const [date, setDate] = useState(initialTime.date);
   const [hour, setHour] = useState(initialTime.hour);
   const [minute, setMinute] = useState(initialTime.minute);
@@ -130,6 +132,7 @@ export default function MockGachaDialog({
     setPoolType(record?.card_pool_type ?? initialPoolType);
     setResourceId(record?.resource_id ?? 0);
     setPulls('50');
+    setInsertQuality(5);
     const nextTime = toTimeParts(record?.time);
     setDate(nextTime.date);
     setHour(nextTime.hour);
@@ -222,7 +225,7 @@ export default function MockGachaDialog({
     pulls.trim() !== ''
     && Number.isInteger(numericPulls)
     && numericPulls >= 1
-    && numericPulls <= hardPity
+    && numericPulls <= (insertQuality === 5 ? hardPity : hardPity - 1)
   );
   const calendarDays = useMemo(() => {
     const year = calendarMonth.getFullYear();
@@ -258,6 +261,7 @@ export default function MockGachaDialog({
       card_pool_type: poolType,
       resource_id: resourceId,
       pulls: numericPulls,
+      quality_level: insertQuality,
       time: `${date} ${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:${second.padStart(2, '0')}`,
     });
     void playUiFeedback(editing ? 'data-rebuilt' : 'record-inserted');
@@ -285,13 +289,16 @@ export default function MockGachaDialog({
       >
         <header className="flex items-center justify-between border-b border-white/[0.06] px-5 py-4">
           <div>
-            <h2 id="mock-gacha-dialog-title" className="text-sm font-semibold text-tide">{editing ? '编辑模拟记录' : '插入五星记录'}</h2>
-            <p className="mt-1 text-xs text-wave">{editing ? '仅修改当前模拟记录' : '自动补足目标抽数缺少的记录'}</p>
+            <h2 id="mock-gacha-dialog-title" className="text-sm font-semibold text-tide">{editing ? '编辑模拟记录' : '插入记录'}</h2>
+            <p className="mt-1 text-xs text-wave">{editing ? '仅修改当前模拟记录' : insertQuality === 5 ? '插入五星并自动补足目标抽数' : '在指定时间点批量插入模拟记录'}</p>
           </div>
           <ResonanceCloseButton onClick={onClose} disabled={submitting} />
         </header>
 
         <div className="grid gap-4 px-5 py-5 sm:grid-cols-2">
+          {!editing && <div className="sm:col-span-2 flex rounded-md border border-white/[0.08] bg-white/[0.02] p-0.5" role="group" aria-label="记录星级">
+            {([[5, '五星记录'], [3, '普通记录']] as const).map(([quality, label]) => <button key={quality} type="button" onClick={() => setInsertQuality(quality)} className={`h-8 flex-1 rounded text-xs ${insertQuality === quality ? 'bg-white/[0.10] text-tide' : 'text-wave hover:text-tide'}`}>{label}</button>)}
+          </div>}
           <label className={`grid gap-1.5 text-xs text-wave ${poolOpen ? 'relative z-30' : 'relative'}`}>
             卡池
             <button
@@ -323,7 +330,7 @@ export default function MockGachaDialog({
             )}
           </label>
 
-          <label className={`grid gap-1.5 text-xs text-wave ${resourceOpen ? 'relative z-30' : 'relative'}`}>
+          {(editing || insertQuality === 5) && <label className={`grid gap-1.5 text-xs text-wave ${resourceOpen ? 'relative z-30' : 'relative'}`}>
             {record?.quality_level ? `${record.quality_level} 星物品` : '五星角色 / 武器'}
             <div className="relative min-w-0">
               <input
@@ -361,15 +368,15 @@ export default function MockGachaDialog({
                 ))}
               </div>
             )}
-          </label>
+          </label>}
 
           {!editing && (
             <label className="grid gap-1.5 text-xs text-wave">
-              五星抽数
+              {insertQuality === 5 ? '五星抽数' : '补充抽数'}
               <input
                 type="number"
                 min={1}
-                max={hardPity}
+                max={insertQuality === 5 ? hardPity : hardPity - 1}
                 step={1}
                 value={pulls}
                 onChange={(event) => setPulls(event.target.value)}
@@ -519,7 +526,7 @@ export default function MockGachaDialog({
 
         <footer className="flex items-center justify-end gap-2 border-t border-white/[0.06] bg-transparent px-5 py-4">
           <button type="button" onClick={onClose} disabled={submitting} className="px-4 py-2 text-sm text-wave hover:text-tide disabled:opacity-40">取消</button>
-          <button type="submit" disabled={submitting || loadingResources || resourceId === 0 || !pullsValid || !timeValid} className="tide-btn flex min-w-[108px] items-center justify-center gap-2 px-4 py-2 text-sm">
+          <button type="submit" disabled={submitting || loadingResources || (insertQuality === 5 && resourceId === 0) || !pullsValid || !timeValid} className="tide-btn flex min-w-[108px] items-center justify-center gap-2 px-4 py-2 text-sm">
             {submitting ? <LoaderCircle size={14} className="animate-spin" /> : editing ? <ResonanceIcon kind="save" size={15} /> : <ResonanceIcon kind="add" size={15} />}
             {editing ? '保存修改' : '确认插入'}
           </button>

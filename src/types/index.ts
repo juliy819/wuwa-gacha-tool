@@ -357,6 +357,7 @@ export interface PoolBoundaryStatus {
   first_five_star_name: string;
   first_five_star_time: string;
   visible_pulls: number;
+  original_visible_pulls: number;
   confirmed: boolean;
 }
 

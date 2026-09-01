@@ -87,6 +87,7 @@ export default function SettingsPage() {
   const boundaryHighlightTimerRef = useRef<number | null>(null);
   const boundaryHighlightFadeTimerRef = useRef<number | null>(null);
   const [boundarySaving, setBoundarySaving] = useState(false);
+  const [completionPulls, setCompletionPulls] = useState('');
   const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
   const availableUpdate = useUpdateStore((state) => state.availableUpdate);
   const checkingUpdate = useUpdateStore((state) => state.checking);
@@ -185,6 +186,10 @@ export default function SettingsPage() {
 
   const handleBoundaryConfirmation = async () => {
     if (!boundaryPlayerId || !boundaryConfirmation) return;
+    if (!boundaryConfirmation.confirmed && completionPulls.trim() !== '') {
+      await handleBoundaryCompletion();
+      return;
+    }
     setBoundarySaving(true);
     const confirmed = !boundaryConfirmation.confirmed;
     try {
@@ -192,6 +197,7 @@ export default function SettingsPage() {
       await Promise.all([
         refreshBoundaryStatuses(boundaryPlayerId),
         fetchSummaries(),
+        useGachaStore.getState().fetchRecords(),
         useGachaStore.getState().fetchStats(boundaryPlayerId),
       ]);
       addToast('success', confirmed ? '已将该卡池现存记录确认为完整起点' : '已恢复首段历史边界提示');
@@ -545,6 +551,31 @@ export default function SettingsPage() {
       await gachaApi.openLogDirectory();
     } catch (error) {
       addToast('error', `打开日志目录失败: ${String(error)}`);
+    }
+  };
+
+  const handleBoundaryCompletion = async () => {
+    if (!boundaryPlayerId || !boundaryConfirmation) return;
+    const target = Number(completionPulls);
+    if (!Number.isInteger(target) || target < 1 || target > (boundaryConfirmation.pool_type === '5' ? 50 : 80)) {
+      addToast('error', '请输入有效的目标抽数');
+      return;
+    }
+    setBoundarySaving(true);
+    try {
+      const inserted = await gachaApi.completePoolBoundary(boundaryPlayerId, boundaryConfirmation.pool_type, target);
+      await Promise.all([
+        refreshBoundaryStatuses(boundaryPlayerId),
+        fetchSummaries(),
+        useGachaStore.getState().fetchRecords(),
+        useGachaStore.getState().fetchStats(boundaryPlayerId),
+      ]);
+      addToast('success', `已补足 ${inserted.length} 条模拟三星/四星记录，目标区间为 ${target} 抽`);
+      setBoundaryConfirmation(null);
+    } catch (error) {
+      addToast('error', String(error));
+    } finally {
+      setBoundarySaving(false);
     }
   };
 
@@ -1102,7 +1133,7 @@ export default function SettingsPage() {
                         </div>
                         <motion.button
                           key={`${boundary.pool_type}-${isBoundaryHighlightTarget ? 'highlight' : 'normal'}`}
-                          onClick={() => setBoundaryConfirmation(boundary)}
+                          onClick={() => { setCompletionPulls(''); setBoundaryConfirmation(boundary); }}
                           animate={isBoundaryHighlightTarget ? (fadingBoundaryHighlight ? {
                             borderColor: 'rgba(255,255,255,0)',
                             backgroundColor: 'rgba(0,0,0,0)',
@@ -1152,7 +1183,7 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-4 p-5 text-xs leading-5 text-wave">
               {boundaryConfirmation.confirmed ? (
-                <p>撤销后，首页和记录页会重新将首个五星显示为 <span className="text-[#c9ab78]">≥{boundaryConfirmation.visible_pulls} 抽</span>，记录页恢复边界提示，并从完整区间、平均值和概率分布中排除。原始记录不会改变。</p>
+                <p>撤销后，首页和记录页会重新将首个五星显示为 <span className="text-[#c9ab78]">≥{boundaryConfirmation.original_visible_pulls} 抽</span>，记录页恢复边界提示，并从完整区间、平均值和概率分布中排除。原始记录不会改变。</p>
               ) : (
                 <>
                   <p>仅当你确定该卡池开放以来的记录已经完整覆盖，且首条记录之前不存在垫抽时再确认。</p>
@@ -1160,13 +1191,22 @@ export default function SettingsPage() {
                     确认后，首个五星将按 {boundaryConfirmation.visible_pulls} 抽纳入首页和分析统计；首页、记录页不再显示 ≥，记录页也不再显示该卡池的边界提示。
                   </div>
                   <p>以后导入更早记录时，本次确认会自动失效并恢复边界提示。</p>
+                  <div className="rounded-md border border-[#8fc8be]/15 bg-[#8fc8be]/[0.04] px-3 py-3">
+                    <p className="text-[#b8d8d1]">如果你知道首个五星的实际抽数，可补足缺失的三星和四星记录。</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <label className="text-[11px] text-wave" htmlFor="boundary-target-pulls">实际抽数</label>
+                      <input id="boundary-target-pulls" value={completionPulls} placeholder="如 59" onChange={(event) => setCompletionPulls(event.target.value.replace(/\D/g, '').slice(0, 2))} className="glass-input h-8 w-20 px-2 text-xs tabular-nums text-tide" inputMode="numeric" />
+                      <button onClick={handleBoundaryCompletion} disabled={boundarySaving} className="tide-btn h-8 px-3 text-xs disabled:opacity-40">补足缺失记录</button>
+                    </div>
+                    <p className="mt-2 text-[10px] text-wave">现有可见 {boundaryConfirmation.visible_pulls} 抽，将新增目标抽数与可见抽数之差；原始五星记录不会修改。</p>
+                  </div>
                 </>
               )}
               <div className="flex justify-end gap-2 pt-1">
                 <button onClick={() => setBoundaryConfirmation(null)} disabled={boundarySaving} className="px-4 py-2 text-sm text-wave hover:text-tide">取消</button>
                 <button onClick={handleBoundaryConfirmation} disabled={boundarySaving} className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40">
                   {boundarySaving && <LoaderCircle size={12} className="animate-spin" />}
-                  {boundaryConfirmation.confirmed ? '确认撤销' : '确认完整起点'}
+                  {boundaryConfirmation.confirmed ? '确认撤销' : completionPulls.trim() !== '' ? '确认并补足' : '确认完整起点'}
                 </button>
               </div>
             </div>

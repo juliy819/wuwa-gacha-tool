@@ -329,7 +329,7 @@ export default function RecordsPage() {
     ]);
   };
 
-  const submitMockRecord = async (value: { card_pool_type: string; resource_id: number; time: string; pulls: number }) => {
+  const submitMockRecord = async (value: { card_pool_type: string; resource_id: number; time: string; pulls: number; quality_level: number }) => {
     if (!activePlayerId) return;
     setMutating(true);
     try {
@@ -341,12 +341,20 @@ export default function RecordsPage() {
           time: value.time,
         });
         addToast('success', '模拟记录已更新');
-      } else {
+      } else if (value.quality_level === 5) {
         const inserted = await gachaApi.insertMockGacha({
           player_id: activePlayerId,
           card_pool_type: value.card_pool_type,
           resource_id: value.resource_id,
           pulls: value.pulls,
+          time: value.time,
+        });
+        addToast('success', `已插入 ${inserted.length} 条模拟记录`);
+      } else {
+        const inserted = await gachaApi.insertMockFillers({
+          player_id: activePlayerId,
+          card_pool_type: value.card_pool_type,
+          count: value.pulls,
           time: value.time,
         });
         addToast('success', `已插入 ${inserted.length} 条模拟记录`);
@@ -810,8 +818,8 @@ export default function RecordsPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={openInsertDialog} className="tide-btn core-action-btn core-action-btn-insert flex h-9 items-center gap-2 px-3 text-xs" title="插入五星记录">
-              <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-insert"><ResonanceIcon kind="add" size={14} /></ResonanceActionIcon>插入五星
+            <button onClick={openInsertDialog} className="tide-btn core-action-btn core-action-btn-insert flex h-9 items-center gap-2 px-3 text-xs" title="插入记录">
+              <ResonanceActionIcon size="sm" tone="gold" className="core-action-icon core-action-icon-insert"><ResonanceIcon kind="add" size={14} /></ResonanceActionIcon>插入记录
             </button>
             <div className="flex items-center gap-0.5 rounded-lg border border-white/[0.06] bg-white/[0.03] p-0.5" aria-label="记录布局">
               {([
@@ -1434,9 +1442,9 @@ export default function RecordsPage() {
         <div className="flex items-start gap-3 p-5">
           <div className="mt-0.5 shrink-0 rounded-md bg-[#d8bd84]/10 p-2 text-[#d8bd84]"><ResonanceIcon kind="info" size={19} /></div>
           <div className="min-w-0">
-            <h2 id="missing-player-dialog-title" className="text-base font-medium text-tide">暂时无法插入五星</h2>
+            <h2 id="missing-player-dialog-title" className="text-base font-medium text-tide">暂时无法插入记录</h2>
             <p className="mt-1.5 text-xs leading-5 text-wave">
-              单条插入需要当前玩家 UID，用于读取该玩家、该卡池已有记录并计算补足抽数。当前还没有可用的玩家 UID。
+              插入记录需要当前玩家 UID，用于读取该玩家、该卡池已有记录并校验补足规则。当前还没有可用的玩家 UID。
             </p>
             <p className="mt-2 text-xs leading-5 text-wave">
               你可以前往批量手动导入，直接输入 UID 后添加五星记录，无需先完成游戏同步或其它初始化。

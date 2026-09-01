@@ -673,6 +673,212 @@ impl Database {
             .collect())
     }
 
+    /// Completes the visible prefix before an existing (usually official) first five-star.
+    /// The five-star itself is never modified; generated rows are explicitly mock records.
+    pub fn complete_first_five_star_prefix(
+        &self,
+        player_id: &str,
+        pool_type: &str,
+        target_pulls: i32,
+        fillers: &[GachaResource],
+    ) -> Result<Vec<GachaRecord>, String> {
+        let hard_pity = hard_pity_for_pool(pool_type);
+        if !(1..=hard_pity).contains(&target_pulls) {
+            return Err(format!("抽数必须在 1 到 {hard_pity} 之间"));
+        }
+        let (first_time, visible_pulls, first_is_mock): (String, i32, i32) = self
+            .conn
+            .query_row(
+                "SELECT time,
+                        (SELECT COUNT(*) FROM gacha_records p
+                         WHERE p.player_id = r.player_id AND p.card_pool_type = r.card_pool_type
+                           AND (p.time < r.time OR (p.time = r.time AND p.id >= r.id))),
+                        is_mock
+                 FROM gacha_records r
+                 WHERE r.player_id = ?1 AND r.card_pool_type = ?2 AND r.quality_level = 5
+                 ORDER BY r.time ASC, r.id DESC LIMIT 1",
+                params![player_id, pool_type],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(|_| "该卡池没有可补足的五星记录".to_string())?;
+        if first_is_mock != 0 {
+            return Err("首个五星已经是模拟记录，无需重复补足".to_string());
+        }
+        if target_pulls <= visible_pulls {
+            return Err(format!("目标抽数必须大于当前可见的 {visible_pulls} 抽"));
+        }
+        if fillers.len() as i32 != target_pulls - visible_pulls {
+            return Err("补足记录数量不正确".to_string());
+        }
+        let streak_before = self.consecutive_three_stars(
+            player_id,
+            pool_type,
+            &first_time,
+            "time < ?3 ORDER BY time DESC, id ASC",
+        )?;
+        // These rows are inserted before the existing prefix. The existing
+        // three-star streak is therefore the following boundary, not the
+        // preceding one.
+        validate_filler_guarantee(fillers, 0, streak_before)?;
+        for filler in fillers {
+            validate_resource_for_pool(pool_type, filler)?;
+            if !matches!(filler.quality_level, 3 | 4) {
+                return Err("补足记录只能使用三星或四星资源".to_string());
+            }
+        }
+        let batch_id = format!(
+            "mock-prefix-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        );
+        let filler_time = chrono::NaiveDateTime::parse_from_str(&first_time, "%Y-%m-%d %H:%M:%S")
+            .map_err(|e| e.to_string())?
+            .checked_sub_signed(chrono::Duration::seconds(1))
+            .ok_or_else(|| "记录时间过早，无法生成补足记录".to_string())?
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        let mut ids = Vec::with_capacity(fillers.len());
+        for (index, filler) in fillers.iter().enumerate() {
+            ids.push(insert_mock_row(
+                &tx,
+                player_id,
+                pool_type,
+                filler,
+                &filler_time,
+                &batch_id,
+                index as i64,
+            )?);
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        let all = self.get_all_records(Some(player_id))?;
+        Ok(all
+            .into_iter()
+            .filter(|record| record.id.is_some_and(|id| ids.contains(&id)))
+            .collect())
+    }
+
+    pub fn insert_mock_fillers(
+        &self,
+        player_id: &str,
+        pool_type: &str,
+        time: &str,
+        fillers: &[GachaResource],
+    ) -> Result<Vec<GachaRecord>, String> {
+        let remaining_capacity = self.mock_filler_capacity(player_id, pool_type, time)?;
+        if fillers.len() > remaining_capacity {
+            return Err(format!(
+                "该时间点所在五星区间最多还能补充 {remaining_capacity} 抽"
+            ));
+        }
+        let before = self.consecutive_three_stars(
+            player_id,
+            pool_type,
+            time,
+            "time <= ?3 ORDER BY time DESC, id ASC",
+        )?;
+        let after = self.consecutive_three_stars(
+            player_id,
+            pool_type,
+            time,
+            "time > ?3 ORDER BY time ASC, id DESC",
+        )?;
+        validate_filler_guarantee(fillers, before, after)?;
+        for filler in fillers {
+            if !matches!(filler.quality_level, 3 | 4) {
+                return Err("补充记录只能使用三星或四星资源".to_string());
+            }
+            validate_resource_for_pool(pool_type, filler)?;
+        }
+        let batch_id = format!(
+            "mock-fillers-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| e.to_string())?
+                .as_nanos()
+        );
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        let mut ids = Vec::with_capacity(fillers.len());
+        for (index, filler) in fillers.iter().enumerate() {
+            ids.push(insert_mock_row(
+                &tx,
+                player_id,
+                pool_type,
+                filler,
+                time,
+                &batch_id,
+                index as i64,
+            )?);
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        let all = self.get_all_records(Some(player_id))?;
+        Ok(all
+            .into_iter()
+            .filter(|r| r.id.is_some_and(|id| ids.contains(&id)))
+            .collect())
+    }
+
+    pub fn mock_filler_boundaries(
+        &self,
+        player_id: &str,
+        pool_type: &str,
+        time: &str,
+    ) -> Result<(usize, usize), String> {
+        Ok((
+            self.consecutive_three_stars(
+                player_id,
+                pool_type,
+                time,
+                "time <= ?3 ORDER BY time DESC, id ASC",
+            )?,
+            self.consecutive_three_stars(
+                player_id,
+                pool_type,
+                time,
+                "time > ?3 ORDER BY time ASC, id DESC",
+            )?,
+        ))
+    }
+
+    pub fn mock_filler_capacity(
+        &self,
+        player_id: &str,
+        pool_type: &str,
+        time: &str,
+    ) -> Result<usize, String> {
+        let mut records: Vec<_> = self
+            .get_all_records(Some(player_id))?
+            .into_iter()
+            .filter(|record| record.card_pool_type == pool_type)
+            .collect();
+        records.sort_by(|left, right| {
+            left.time
+                .cmp(&right.time)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        let insertion_index = records.partition_point(|record| record.time.as_str() <= time);
+        let before = records[..insertion_index]
+            .iter()
+            .rev()
+            .take_while(|record| record.quality_level != 5)
+            .count();
+        let after = records[insertion_index..]
+            .iter()
+            .take_while(|record| record.quality_level != 5)
+            .count();
+        Ok((hard_pity_for_pool(pool_type) as usize)
+            .saturating_sub(1)
+            .saturating_sub(before + after))
+    }
+
     /// Updates an editable mock row and moves both filler segments with a mock five-star.
     pub fn update_mock_record(&self, request: &MockUpdateRequest) -> Result<(), String> {
         validate_resource_for_pool(&request.card_pool_type, &request.resource)?;
@@ -1171,6 +1377,16 @@ impl Database {
         confirmed: bool,
     ) -> Result<(), String> {
         if !confirmed {
+            // Undoing a boundary created by prefix completion also removes
+            // that completion batch, while leaving official rows untouched.
+            self.conn
+                .execute(
+                    "DELETE FROM gacha_records
+                     WHERE player_id = ?1 AND card_pool_type = ?2 AND is_mock = 1
+                       AND quality_level != 5 AND mock_batch_id LIKE 'mock-prefix-%'",
+                    params![player_id, pool_type],
+                )
+                .map_err(|e| e.to_string())?;
             self.conn.execute(
                 "DELETE FROM pool_history_boundaries WHERE player_id = ?1 AND card_pool_type = ?2",
                 params![player_id, pool_type],
@@ -1996,6 +2212,71 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn completes_partial_first_five_star_without_replacing_official_record() {
+        let db = test_database();
+        let mut records = Vec::new();
+        for index in 0..7 {
+            records.push(record(
+                "1",
+                200 + index,
+                &format!("2025-01-01 00:00:0{index}"),
+            ));
+        }
+        let mut encore = record("1", 1503, "2025-01-01 00:00:07");
+        encore.quality_level = 5;
+        encore.resource_type = "role".to_string();
+        encore.name = "安可".to_string();
+        records.push(encore);
+        db.merge_records(&records).unwrap();
+
+        let fillers: Vec<_> = (0..51)
+            .map(|index| {
+                resource(
+                    300 + index,
+                    "补足武器",
+                    if index % 10 == 9 || index == 50 { 4 } else { 3 },
+                    "weapon",
+                )
+            })
+            .collect();
+        let inserted = db
+            .complete_first_five_star_prefix("10001", "1", 59, &fillers)
+            .unwrap();
+
+        assert_eq!(inserted.len(), 51);
+        assert!(inserted
+            .iter()
+            .all(|record| record.is_mock && record.quality_level < 5));
+        let all = db.get_all_records(Some("10001")).unwrap();
+        let encore = all.iter().find(|record| record.name == "安可").unwrap();
+        assert!(!encore.is_mock);
+        assert_eq!(all.len(), 59);
+    }
+
+    #[test]
+    fn ordinary_mock_rows_cannot_exceed_the_pool_hard_pity_segment() {
+        let db = test_database();
+        let existing: Vec<_> = (0..70)
+            .map(|index| record("1", 500 + index, &format!("2025-01-01 00:00:{index:02}")))
+            .collect();
+        db.merge_records(&existing).unwrap();
+
+        assert_eq!(
+            db.mock_filler_capacity("10001", "1", "2025-01-02 00:00:00")
+                .unwrap(),
+            9
+        );
+        let fillers: Vec<_> = (0..10)
+            .map(|index| resource(700 + index, "四星武器", 4, "weapon"))
+            .collect();
+        assert_eq!(
+            db.insert_mock_fillers("10001", "1", "2025-01-02 00:00:00", &fillers)
+                .unwrap_err(),
+            "该时间点所在五星区间最多还能补充 9 抽"
+        );
     }
 
     #[test]

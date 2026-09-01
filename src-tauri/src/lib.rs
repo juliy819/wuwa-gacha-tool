@@ -98,6 +98,8 @@ pub fn run() {
             commands::gacha::get_resource_portrait,
             commands::gacha::get_gacha_resources,
             commands::gacha::insert_mock_gacha,
+            commands::gacha::insert_mock_fillers,
+            commands::gacha::complete_pool_boundary,
             commands::gacha::update_mock_gacha,
             commands::gacha::delete_mock_gacha,
             commands::ocr::recognize_gacha_screenshots,

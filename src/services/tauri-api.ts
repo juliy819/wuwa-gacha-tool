@@ -51,6 +51,11 @@ export const gachaApi = {
   insertMockGacha: (request: InsertMockGachaRequest): Promise<GachaRecord[]> => {
     return invoke('insert_mock_gacha', { request });
   },
+  insertMockFillers: (request: { player_id: string; card_pool_type: string; count: number; time: string }): Promise<GachaRecord[]> => invoke('insert_mock_fillers', { request }),
+
+  completePoolBoundary: (playerId: string, poolType: string, targetPulls: number): Promise<GachaRecord[]> => {
+    return invoke('complete_pool_boundary', { request: { player_id: playerId, card_pool_type: poolType, target_pulls: targetPulls } });
+  },
 
   updateMockGacha: (request: UpdateMockGachaRequest): Promise<void> => {
     return invoke('update_mock_gacha', { request });
