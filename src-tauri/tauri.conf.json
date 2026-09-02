@@ -1,6 +1,6 @@
 {
   "productName": "Wuwa Gacha Tool",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "identifier": "com.wuwa.gachatool",
   "build": {
     "frontendDist": "../dist",
