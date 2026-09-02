@@ -2,11 +2,17 @@
 
 一款面向《鸣潮》玩家的本地抽卡记录管理与分析工具，用于同步唤取历史、追踪各卡池垫抽、复盘五星获取成本，并通过理论对照与条件概率帮助理解当前抽卡表现。
 
-当前源码版本 **v0.5.0** · 作者 Juliy
+作者 Juliy
 
 ![Wuwa Gacha Tool](docs/screenshots/banner.png)
 
 > 所有示例截图均已对 UID 等私人信息进行脱敏处理。
+
+## 相关仓库
+
+- [OCR Runtime](https://github.com/juliy819/wuwa-gacha-tool-ocr-runtime)：独立 OCR 组件、模型与五星头像模板
+- [Resources](https://github.com/juliy819/wuwa-gacha-tool-resources)：角色、武器目录和图片资源包
+- [Android 客户端](https://github.com/juliy819/wuwa-gacha-tool-android)：面向 Android 的抽卡记录展示与导入客户端
 
 ---
 
