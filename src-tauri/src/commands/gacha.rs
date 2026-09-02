@@ -624,50 +624,120 @@ fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, S
     content.hash(&mut hasher);
     let file_hash = format!("{:016x}", hasher.finish());
 
-    let parsed: HashMap<String, serde_json::Value> =
+    let root: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| format!("解析 JSON 失败: {}", e))?;
-
-    let player_id = parsed
-        .get("uid")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "JSON 中未找到 uid 字段".to_string())?
-        .to_string();
-
     let name_to_id = build_pool_name_to_id();
     let mut all_records: Vec<GachaRecord> = Vec::new();
-
-    for (pool_type_key, cards_value) in &parsed {
-        if pool_type_key == "uid" {
-            continue;
-        }
-
-        let cards: Vec<ImportedCardInfo> = serde_json::from_value(cards_value.clone())
-            .map_err(|e| format!("解析卡池 {} 数据失败: {}", pool_type_key, e))?;
-
-        for imported in cards {
-            let card = imported.card;
-            let actual_pool_type = name_to_id
-                .get(&card.card_pool_type)
-                .cloned()
-                .unwrap_or_else(|| pool_type_key.clone());
-            let actual_pool_name = get_display_pool_name(&actual_pool_type).to_string();
-            let mut record =
-                GachaRecord::from_api(&card, &player_id, &actual_pool_name, &actual_pool_type);
-            record.is_mock = imported.is_mock;
-            record.mock_batch_id = if imported.is_mock {
-                imported.mock_batch_id
-            } else {
-                None
-            };
-            all_records.push(record);
-        }
-    }
+    let player_id =
+        if root.get("info").and_then(|v| v.get("uid")).is_some()
+            && root
+                .get("list")
+                .and_then(serde_json::Value::as_array)
+                .is_some()
+        {
+            // WaveTools / WWGF export: info.uid plus a flat list whose fields are
+            // strings (gacha_id is a zero-padded official pool type).
+            let uid = json_string(root["info"].get("uid").unwrap())?;
+            for (index, value) in root["list"].as_array().unwrap().iter().enumerate() {
+                let object = value
+                    .as_object()
+                    .ok_or_else(|| format!("WaveTools list 第 {} 条不是对象", index + 1))?;
+                let pool_id =
+                    json_string(object.get("gacha_id").ok_or_else(|| {
+                        format!("WaveTools list 第 {} 条缺少 gacha_id", index + 1)
+                    })?)?;
+                let pool_type = pool_id.parse::<u16>().ok().map(|id| id.to_string());
+                let pool_type = pool_type
+                    .filter(|id| POOL_TYPES.iter().any(|(_, known)| known == id))
+                    .ok_or_else(|| format!("WaveTools 包含未知的 gacha_id '{pool_id}'"))?;
+                let card =
+                    ApiCardInfo {
+                        card_pool_type: object
+                            .get("gacha_type")
+                            .map(json_string)
+                            .transpose()?
+                            .unwrap_or_else(|| pool_type_to_api_name(&pool_type).to_string()),
+                        resource_id: json_i64(object.get("item_id").ok_or_else(|| {
+                            format!("WaveTools list 第 {} 条缺少 item_id", index + 1)
+                        })?)?,
+                        quality_level: json_i64(object.get("rank_type").ok_or_else(|| {
+                            format!("WaveTools list 第 {} 条缺少 rank_type", index + 1)
+                        })?)? as i32,
+                        resource_type: object
+                            .get("item_type")
+                            .map(json_string)
+                            .transpose()?
+                            .unwrap_or_default(),
+                        name: json_string(object.get("name").ok_or_else(|| {
+                            format!("WaveTools list 第 {} 条缺少 name", index + 1)
+                        })?)?,
+                        count: json_i64(object.get("count").ok_or_else(|| {
+                            format!("WaveTools list 第 {} 条缺少 count", index + 1)
+                        })?)? as i32,
+                        time: json_string(object.get("time").ok_or_else(|| {
+                            format!("WaveTools list 第 {} 条缺少 time", index + 1)
+                        })?)?,
+                    };
+                let pool_name = get_display_pool_name(&pool_type).to_string();
+                all_records.push(GachaRecord::from_api(&card, &uid, &pool_name, &pool_type));
+            }
+            uid
+        } else {
+            // Native export format: { uid, "1": [...], "2": [...] }.
+            let parsed: HashMap<String, serde_json::Value> =
+                serde_json::from_value(root).map_err(|e| format!("解析 JSON 根结构失败: {}", e))?;
+            let uid = parsed
+                .get("uid")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "JSON 中未找到 uid 字段".to_string())?
+                .to_string();
+            for (pool_type_key, cards_value) in &parsed {
+                if pool_type_key == "uid" {
+                    continue;
+                }
+                let cards: Vec<ImportedCardInfo> = serde_json::from_value(cards_value.clone())
+                    .map_err(|e| format!("解析卡池 {} 数据失败: {}", pool_type_key, e))?;
+                for imported in cards {
+                    let card = imported.card;
+                    let actual_pool_type = name_to_id
+                        .get(&card.card_pool_type)
+                        .cloned()
+                        .unwrap_or_else(|| pool_type_key.clone());
+                    let actual_pool_name = get_display_pool_name(&actual_pool_type).to_string();
+                    let mut record =
+                        GachaRecord::from_api(&card, &uid, &actual_pool_name, &actual_pool_type);
+                    record.is_mock = imported.is_mock;
+                    record.mock_batch_id = if imported.is_mock {
+                        imported.mock_batch_id
+                    } else {
+                        None
+                    };
+                    all_records.push(record);
+                }
+            }
+            uid
+        };
 
     if all_records.is_empty() {
         return Err("JSON 文件中没有有效的抽卡记录".to_string());
     }
 
     Ok((player_id, all_records, file_hash))
+}
+
+fn json_string(value: &serde_json::Value) -> Result<String, String> {
+    value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| value.as_i64().map(|n| n.to_string()))
+        .ok_or_else(|| "JSON 字段必须是字符串或整数".to_string())
+}
+
+fn json_i64(value: &serde_json::Value) -> Result<i64, String> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        .ok_or_else(|| "JSON 数字字段格式无效".to_string())
 }
 
 fn ensure_preview_matches_file(
@@ -1398,6 +1468,46 @@ mod tests {
         .unwrap();
         assert!(mock.is_mock);
         assert_eq!(mock.mock_batch_id.as_deref(), Some("mock-export-batch"));
+    }
+
+    #[test]
+    fn parses_wavetools_flat_export_with_string_fields() {
+        let path = std::env::temp_dir().join(format!(
+            "wuwa-gacha-wavetools-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(
+            &path,
+            r#"{"info":{"uid":"10001","export_app":"WaveTools"},"list":[{"gacha_id":"0001","gacha_type":"角色精准调谐","item_id":"1104","count":"1","time":"2026-01-01 00:00:00","name":"鉴心","item_type":"角色","rank_type":"5","id":"1"}]}"#,
+        )
+        .unwrap();
+        let (_, records, _) = parse_gacha_json_file(path.to_str().unwrap()).unwrap();
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].card_pool_type, "1");
+        assert_eq!(records[0].resource_id, 1104);
+        assert_eq!(records[0].quality_level, 5);
+        assert!(!records[0].is_mock);
+    }
+
+    #[test]
+    fn rejects_unknown_wavetools_pool_instead_of_dropping_it() {
+        let path = std::env::temp_dir().join(format!(
+            "wuwa-gacha-wavetools-invalid-{}.json",
+            std::process::id()
+        ));
+        std::fs::write(
+            &path,
+            r#"{"info":{"uid":"10001"},"list":[{"gacha_id":"9999","item_id":"1","count":"1","time":"2026-01-01 00:00:00","name":"x","rank_type":"3"}]}"#,
+        )
+        .unwrap();
+        let result = parse_gacha_json_file(path.to_str().unwrap());
+        std::fs::remove_file(path).unwrap();
+        assert!(result.unwrap_err().contains("未知的 gacha_id"));
     }
 
     #[test]

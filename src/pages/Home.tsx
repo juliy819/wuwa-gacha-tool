@@ -514,7 +514,39 @@ export default function Home() {
                         选择文件
                       </button>
                     </div>
-                    <p className="text-xs text-wave">JSON 格式需与游戏抽卡接口的原始返回一致</p>
+                    <div className="space-y-1 text-xs leading-5 text-wave">
+                      <p>
+                        支持本工具导出的 JSON、游戏抽卡接口原始返回，以及
+                        <a
+                          href="https://github.com/JamXi233/WaveTools"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mx-1 text-[#9bc8c0] underline decoration-[#9bc8c0]/45 underline-offset-2 hover:text-tide"
+                        >
+                          WaveTools
+                        </a>
+                        导出文件。
+                      </p>
+                      <p>
+                        <a
+                          href="https://github.com/juliy819/wuwa-gacha-tool/blob/main/docs/examples/uid_999999999_mock_2026-07-31.json"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#9bc8c0] underline decoration-[#9bc8c0]/45 underline-offset-2 hover:text-tide"
+                        >
+                          查看 JSON 示例
+                        </a>
+                        <span className="mx-1 text-wave/50">·</span>
+                        <a
+                          href="https://github.com/JamXi233/WaveTools"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#9bc8c0] underline decoration-[#9bc8c0]/45 underline-offset-2 hover:text-tide"
+                        >
+                          WaveTools GitHub
+                        </a>
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
