@@ -900,6 +900,18 @@ export default function SettingsPage() {
                   >
                     <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>GitHub 仓库
                   </button>
+                  <button
+                    onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool-android')}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                  >
+                    <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>Android 仓库
+                  </button>
+                  <button
+                    onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool/wiki/0.-%E9%A6%96%E9%A1%B5%E5%AF%BC%E8%88%AA')}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                  >
+                    <ResonanceActionIcon size="sm"><ResonanceIcon kind="external" size={14} /></ResonanceActionIcon>使用 Wiki
+                  </button>
                 </div>
               </section>
             </div>
@@ -915,6 +927,13 @@ export default function SettingsPage() {
                   <div>
                     <div className="flex items-center gap-2 text-sm font-medium text-tide"><ResonanceActionIcon tone="gold"><ResonanceIcon kind="sync" size={15} /></ResonanceActionIcon>数据与同步</div>
                     <p className="mt-1 text-xs leading-5 text-wave">按 UID 管理抽卡记录并与 OneDrive 双向合并，不上传数据库文件；当前版本不会同步删除操作。</p>
+                    <button
+                      type="button"
+                      onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool-android/releases')}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs text-[#c9ab78] transition-colors hover:text-[#e0c58f]"
+                    >
+                      <ResonanceIcon kind="external" size={13} />下载 Android 客户端
+                    </button>
                   </div>
                   {oneDriveStatus?.connected ? (
                     <button type="button" onClick={() => void handleOneDriveDisconnect()} disabled={oneDriveBusy || syncingUid !== null} className="shrink-0 text-xs text-wave hover:text-tide disabled:opacity-40">断开连接</button>
@@ -947,7 +966,7 @@ export default function SettingsPage() {
 
               </div>
 
-              <div className="mt-4 flex items-center gap-2 border-t border-white/[0.07] pt-4 text-xs text-wave">
+              <div className="mt-4 flex items-center gap-2 pt-4 text-xs text-wave">
                 <ResonanceIcon kind="database" size={13} />
                 <span>数据概览</span>
                 <span className="text-tide-dim">{pools.length} 个 UID · {totalRecords.toLocaleString()} 条记录</span>
