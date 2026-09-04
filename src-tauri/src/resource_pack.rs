@@ -174,7 +174,9 @@ async fn refresh_inner(
 }
 
 pub(crate) fn load_catalog(asset_dir: &Path) -> Result<Option<AssetCatalog>, String> {
-    let path = asset_dir.join("resource-pack").join("catalog.json");
+    let path = asset_dir
+        .join(crate::paths::RESOURCE_PACK_DIR_NAME)
+        .join(crate::paths::CATALOG_FILENAME);
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -195,7 +197,7 @@ fn install_archive(
     archive: &[u8],
 ) -> Result<(), String> {
     std::fs::create_dir_all(asset_dir).map_err(|error| format!("创建素材目录失败: {error}"))?;
-    let staging = asset_dir.join("resource-pack.installing");
+    let staging = asset_dir.join(crate::paths::RESOURCE_PACK_STAGING_DIR_NAME);
     if staging.exists() {
         std::fs::remove_dir_all(&staging)
             .map_err(|error| format!("清理资源包临时目录失败: {error}"))?;
@@ -205,7 +207,7 @@ fn install_archive(
 
     let result = (|| {
         extract_archive(archive, &staging)?;
-        let catalog_path = staging.join("catalog.json");
+        let catalog_path = staging.join(crate::paths::CATALOG_FILENAME);
         let catalog_bytes = std::fs::read(&catalog_path)
             .map_err(|error| format!("资源包缺少 catalog.json: {error}"))?;
         if catalog_bytes.is_empty() || catalog_bytes.len() as u64 > MAX_CATALOG_BYTES {
@@ -215,35 +217,39 @@ fn install_archive(
             .map_err(|error| format!("资源包 catalog.json 无效: {error}"))?;
         validate_staged_pack(&catalog, &staging)?;
 
-        let icons_dir = asset_dir.join("icons");
+        let icons_dir = asset_dir.join(crate::paths::ICONS_DIR_NAME);
         std::fs::create_dir_all(&icons_dir)
             .map_err(|error| format!("创建统一图片目录失败: {error}"))?;
         for resource_id in catalog.icons.keys() {
-            let bytes = std::fs::read(staging.join("icons").join(format!("{resource_id}.webp")))
+            let bytes = std::fs::read(
+                staging
+                    .join(crate::paths::ICONS_DIR_NAME)
+                    .join(format!("{resource_id}.webp")),
+            )
                 .map_err(|error| format!("读取资源包图片 {resource_id} 失败: {error}"))?;
             atomic_write_replace(&icons_dir.join(format!("{resource_id}.webp")), &bytes)?;
         }
         cleanup_legacy_icons(&icons_dir, catalog.icons.keys().copied())?;
-        let portraits_dir = asset_dir.join("portraits");
+        let portraits_dir = asset_dir.join(crate::paths::PORTRAITS_DIR_NAME);
         std::fs::create_dir_all(&portraits_dir)
             .map_err(|error| format!("创建角色立绘目录失败: {error}"))?;
         for resource_id in catalog.portraits.keys() {
             let bytes = std::fs::read(
                 staging
-                    .join("portraits")
+                    .join(crate::paths::PORTRAITS_DIR_NAME)
                     .join(format!("{resource_id}.webp")),
             )
             .map_err(|error| format!("读取资源包立绘 {resource_id} 失败: {error}"))?;
             atomic_write_replace(&portraits_dir.join(format!("{resource_id}.webp")), &bytes)?;
         }
 
-        let metadata_dir = asset_dir.join("resource-pack");
+        let metadata_dir = asset_dir.join(crate::paths::RESOURCE_PACK_DIR_NAME);
         std::fs::create_dir_all(&metadata_dir)
             .map_err(|error| format!("创建资源包状态目录失败: {error}"))?;
-        atomic_write_replace(&metadata_dir.join("catalog.json"), &catalog_bytes)?;
+        atomic_write_replace(&metadata_dir.join(crate::paths::CATALOG_FILENAME), &catalog_bytes)?;
         let manifest_bytes =
             serde_json::to_vec_pretty(manifest).map_err(|error| error.to_string())?;
-        atomic_write_replace(&metadata_dir.join("manifest.json"), &manifest_bytes)
+        atomic_write_replace(&metadata_dir.join(crate::paths::MANIFEST_FILENAME), &manifest_bytes)
     })();
 
     let _ = std::fs::remove_dir_all(&staging);
@@ -299,12 +305,14 @@ fn extract_archive(archive: &[u8], output_dir: &Path) -> Result<(), String> {
             .enclosed_name()
             .ok_or_else(|| "资源包包含不安全路径".to_string())?
             .to_path_buf();
-        let relative = enclosed.strip_prefix("resource-pack").unwrap_or(&enclosed);
+        let relative = enclosed
+            .strip_prefix(crate::paths::RESOURCE_PACK_DIR_NAME)
+            .unwrap_or(&enclosed);
         let relative_text = relative.to_string_lossy().replace('\\', "/");
         if relative_text.is_empty() || entry.is_dir() {
             continue;
         }
-        let is_catalog = relative_text == "catalog.json";
+        let is_catalog = relative_text == crate::paths::CATALOG_FILENAME;
         let is_icon = is_valid_icon_path(&relative_text);
         let is_portrait = is_valid_portrait_path(&relative_text);
         if !is_catalog && !is_icon && !is_portrait {
@@ -343,7 +351,9 @@ fn extract_archive(archive: &[u8], output_dir: &Path) -> Result<(), String> {
 fn validate_staged_pack(catalog: &AssetCatalog, dir: &Path) -> Result<(), String> {
     validate_catalog_shape(catalog)?;
     for resource_id in catalog.icons.keys() {
-        let path = dir.join("icons").join(format!("{resource_id}.webp"));
+        let path = dir
+            .join(crate::paths::ICONS_DIR_NAME)
+            .join(format!("{resource_id}.webp"));
         let bytes = std::fs::read(&path)
             .map_err(|_| format!("资源包缺少 catalog 声明的图片 {resource_id}"))?;
         if bytes.len() as u64 > MAX_ICON_BYTES || !is_webp(&bytes) {
@@ -351,7 +361,9 @@ fn validate_staged_pack(catalog: &AssetCatalog, dir: &Path) -> Result<(), String
         }
     }
     for resource_id in catalog.portraits.keys() {
-        let path = dir.join("portraits").join(format!("{resource_id}.webp"));
+        let path = dir
+            .join(crate::paths::PORTRAITS_DIR_NAME)
+            .join(format!("{resource_id}.webp"));
         let bytes = std::fs::read(&path)
             .map_err(|_| format!("资源包缺少 catalog 声明的立绘 {resource_id}"))?;
         if bytes.len() as u64 > MAX_PORTRAIT_BYTES || !is_webp(&bytes) {
@@ -531,7 +543,12 @@ fn update_progress(
 }
 
 fn load_installed_manifest(asset_dir: &Path) -> Option<ResourceManifest> {
-    let bytes = std::fs::read(asset_dir.join("resource-pack").join("manifest.json")).ok()?;
+    let bytes = std::fs::read(
+        asset_dir
+            .join(crate::paths::RESOURCE_PACK_DIR_NAME)
+            .join(crate::paths::MANIFEST_FILENAME),
+    )
+    .ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
@@ -568,7 +585,8 @@ fn atomic_write_replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn is_valid_icon_path(path: &str) -> bool {
-    let Some(name) = path.strip_prefix("icons/") else {
+    let prefix = format!("{}/", crate::paths::ICONS_DIR_NAME);
+    let Some(name) = path.strip_prefix(&prefix) else {
         return false;
     };
     let Some(id) = name.strip_suffix(".webp") else {
@@ -578,7 +596,8 @@ fn is_valid_icon_path(path: &str) -> bool {
 }
 
 fn is_valid_portrait_path(path: &str) -> bool {
-    let Some(name) = path.strip_prefix("portraits/") else {
+    let prefix = format!("{}/", crate::paths::PORTRAITS_DIR_NAME);
+    let Some(name) = path.strip_prefix(&prefix) else {
         return false;
     };
     !name.contains('/')
@@ -663,18 +682,39 @@ mod tests {
         {
             let mut zip = zip::ZipWriter::new(&mut output);
             let options = zip::write::SimpleFileOptions::default();
-            zip.start_file("resource-pack/catalog.json", options)
-                .unwrap();
+            zip.start_file(
+                format!(
+                    "{}/{}",
+                    crate::paths::RESOURCE_PACK_DIR_NAME,
+                    crate::paths::CATALOG_FILENAME
+                ),
+                options,
+            )
+            .unwrap();
             zip.write_all(&serde_json::to_vec(catalog).unwrap())
                 .unwrap();
             if let Some(icon) = icon {
-                zip.start_file(format!("resource-pack/icons/{icon_id}.webp"), options)
-                    .unwrap();
+                zip.start_file(
+                    format!(
+                        "{}/{}/{icon_id}.webp",
+                        crate::paths::RESOURCE_PACK_DIR_NAME,
+                        crate::paths::ICONS_DIR_NAME
+                    ),
+                    options,
+                )
+                .unwrap();
                 zip.write_all(icon).unwrap();
             }
             if let Some(portrait) = portrait {
-                zip.start_file(format!("resource-pack/portraits/{icon_id}.webp"), options)
-                    .unwrap();
+                zip.start_file(
+                    format!(
+                        "{}/{}/{icon_id}.webp",
+                        crate::paths::RESOURCE_PACK_DIR_NAME,
+                        crate::paths::PORTRAITS_DIR_NAME
+                    ),
+                    options,
+                )
+                .unwrap();
                 zip.write_all(portrait).unwrap();
             }
             zip.finish().unwrap();
@@ -701,14 +741,24 @@ mod tests {
         let archive = archive(&catalog, 1104, Some(&icon), Some(&portrait));
         install_archive(&root, &manifest_for(&archive), &archive).unwrap();
 
-        assert_eq!(std::fs::read(root.join("icons/1104.webp")).unwrap(), icon);
         assert_eq!(
-            std::fs::read(root.join("portraits/1104.webp")).unwrap(),
+            std::fs::read(root.join(crate::paths::ICONS_DIR_NAME).join("1104.webp")).unwrap(),
+            icon
+        );
+        assert_eq!(
+            std::fs::read(root.join(crate::paths::PORTRAITS_DIR_NAME).join("1104.webp")).unwrap(),
             portrait
         );
-        assert!(root.join("resource-pack/catalog.json").is_file());
-        assert!(!root.join("resource-pack/icons/1104.webp").exists());
-        assert!(!root.join("resource-pack.installing").exists());
+        assert!(root
+            .join(crate::paths::RESOURCE_PACK_DIR_NAME)
+            .join(crate::paths::CATALOG_FILENAME)
+            .is_file());
+        assert!(!root
+            .join(crate::paths::RESOURCE_PACK_DIR_NAME)
+            .join(crate::paths::ICONS_DIR_NAME)
+            .join("1104.webp")
+            .exists());
+        assert!(!root.join(crate::paths::RESOURCE_PACK_STAGING_DIR_NAME).exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -731,21 +781,35 @@ mod tests {
     #[test]
     fn invalid_new_pack_keeps_existing_catalog_and_icon() {
         let root = test_dir("preserve");
-        std::fs::create_dir_all(root.join("resource-pack")).unwrap();
-        std::fs::create_dir_all(root.join("icons")).unwrap();
+        std::fs::create_dir_all(root.join(crate::paths::RESOURCE_PACK_DIR_NAME)).unwrap();
+        std::fs::create_dir_all(root.join(crate::paths::ICONS_DIR_NAME)).unwrap();
         let old_catalog = serde_json::to_vec(&catalog(1104)).unwrap();
         let old_icon = webp(1);
-        std::fs::write(root.join("resource-pack/catalog.json"), &old_catalog).unwrap();
-        std::fs::write(root.join("icons/1104.webp"), &old_icon).unwrap();
+        std::fs::write(
+            root.join(crate::paths::RESOURCE_PACK_DIR_NAME)
+                .join(crate::paths::CATALOG_FILENAME),
+            &old_catalog,
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(crate::paths::ICONS_DIR_NAME)
+                .join("1104.webp"),
+            &old_icon,
+        )
+        .unwrap();
 
         let invalid = archive(&catalog(1203), 1203, None, None);
         assert!(install_archive(&root, &manifest_for(&invalid), &invalid).is_err());
         assert_eq!(
-            std::fs::read(root.join("resource-pack/catalog.json")).unwrap(),
+            std::fs::read(
+                root.join(crate::paths::RESOURCE_PACK_DIR_NAME)
+                    .join(crate::paths::CATALOG_FILENAME)
+            )
+            .unwrap(),
             old_catalog
         );
         assert_eq!(
-            std::fs::read(root.join("icons/1104.webp")).unwrap(),
+            std::fs::read(root.join(crate::paths::ICONS_DIR_NAME).join("1104.webp")).unwrap(),
             old_icon
         );
         std::fs::remove_dir_all(root).unwrap();
@@ -777,7 +841,9 @@ mod tests {
         assert!(catalog.resources.len() >= 100);
         assert!(catalog.icons.len() >= 100);
         assert_eq!(
-            std::fs::read_dir(root.join("icons")).unwrap().count(),
+            std::fs::read_dir(root.join(crate::paths::ICONS_DIR_NAME))
+                .unwrap()
+                .count(),
             catalog.icons.len()
         );
 
@@ -799,7 +865,9 @@ mod tests {
         .is_err());
         assert!(load_catalog(&root).unwrap().is_some());
         assert_eq!(
-            std::fs::read_dir(root.join("icons")).unwrap().count(),
+            std::fs::read_dir(root.join(crate::paths::ICONS_DIR_NAME))
+                .unwrap()
+                .count(),
             catalog.icons.len()
         );
         std::fs::remove_dir_all(root).unwrap();

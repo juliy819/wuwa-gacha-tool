@@ -1563,14 +1563,16 @@ impl Database {
         Ok(())
     }
 
+    pub fn backup_dir(&self) -> Option<PathBuf> {
+        let db_path = self.path.as_ref()?;
+        let parent = db_path.parent()?;
+        Some(parent.join(crate::paths::BACKUP_DIR_NAME))
+    }
+
     fn create_backup(&self) -> Result<Option<String>, String> {
-        let Some(db_path) = &self.path else {
+        let Some(backup_dir) = self.backup_dir() else {
             return Ok(None);
         };
-        let app_data_dir = db_path
-            .parent()
-            .ok_or_else(|| "无法确定数据库备份目录".to_string())?;
-        let backup_dir = app_data_dir.join("backups");
         std::fs::create_dir_all(&backup_dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2436,7 +2438,7 @@ mod tests {
             .as_nanos();
         let test_dir = std::env::temp_dir().join(format!("wuwa-gacha-inference-test-{unique}"));
         std::fs::create_dir_all(&test_dir).unwrap();
-        let db_path = test_dir.join("gacha.db");
+        let db_path = test_dir.join(crate::paths::LEGACY_DB_FILENAME);
         let db = Database::new(&db_path).unwrap();
         let real = record("1", 101, "2026-01-01 12:00:00");
         let mock = record("1", 102, "2026-07-01 12:00:00");
@@ -2582,7 +2584,7 @@ mod tests {
             .as_nanos();
         let test_dir = std::env::temp_dir().join(format!("wuwa-gacha-backup-test-{unique}"));
         std::fs::create_dir_all(&test_dir).unwrap();
-        let db_path = test_dir.join("gacha.db");
+        let db_path = test_dir.join(crate::paths::LEGACY_DB_FILENAME);
         let db = Database::new(&db_path).unwrap();
         db.merge_records(&[record("1", 101, "2026-01-01 12:00:00")])
             .unwrap();

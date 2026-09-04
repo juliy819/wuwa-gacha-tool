@@ -13,7 +13,6 @@ const AUTH_BASE: &str = "https://login.microsoftonline.com/consumers/oauth2/v2.0
 const DRIVE_BASE: &str = "https://graph.microsoft.com/v1.0/me/drive";
 const SYNC_ROOT_NAME: &str = "Wuwa Gacha Tool";
 pub const MAX_SYNC_PAYLOAD_BYTES: usize = 256 * 1024 * 1024;
-pub const SYNC_DATABASE_NAME: &str = "gacha-data.db";
 
 #[derive(Default)]
 pub struct OneDriveState {
@@ -354,7 +353,8 @@ pub async fn download_snapshot(
     token: &str,
     folder_id: &str,
 ) -> Result<Option<(String, Vec<u8>)>, String> {
-    let path = format!("{DRIVE_BASE}/items/{folder_id}:/{SYNC_DATABASE_NAME}:");
+    let db_name = crate::paths::MAIN_DB_FILENAME;
+    let path = format!("{DRIVE_BASE}/items/{folder_id}:/{db_name}:");
     let metadata = client
         .get(&path)
         .bearer_auth(token)
@@ -400,9 +400,10 @@ pub async fn upload_snapshot(
     if body.len() > MAX_SYNC_PAYLOAD_BYTES {
         return Err("同步数据超过大小限制".to_string());
     }
+    let db_name = crate::paths::MAIN_DB_FILENAME;
     let mut request = client
         .put(format!(
-            "{DRIVE_BASE}/items/{folder_id}:/{SYNC_DATABASE_NAME}:/content"
+            "{DRIVE_BASE}/items/{folder_id}:/{db_name}:/content"
         ))
         .bearer_auth(token)
         .header(reqwest::header::CONTENT_TYPE, "application/vnd.sqlite3")

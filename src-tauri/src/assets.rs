@@ -98,7 +98,7 @@ pub async fn get_resource_portrait(state: &AppState, resource_id: i64) -> Result
         return Err("无效的资源 ID".to_string());
     }
     let started = Instant::now();
-    let dir = state.asset_cache_dir.join("portraits");
+    let dir = state.asset_cache_dir.join(crate::paths::PORTRAITS_DIR_NAME);
     let cache = dir.join(format!("{resource_id}.webp"));
     if let Some(bytes) = read_local_asset(&dir, resource_id, MAX_PORTRAIT_BYTES)? {
         return Ok(to_data_url(&bytes));
@@ -127,7 +127,7 @@ async fn get_resource_icon_inner(state: &AppState, resource_id: i64) -> Result<S
         return Err("无效的资源 ID".to_string());
     }
 
-    let icon_cache_dir = state.asset_cache_dir.join("icons");
+    let icon_cache_dir = state.asset_cache_dir.join(crate::paths::ICONS_DIR_NAME);
     let cache_path = icon_cache_dir.join(format!("{resource_id}.webp"));
 
     // 资源包与 nanoka 单图下载统一写入这个目录，运行时无需关心图片来源。

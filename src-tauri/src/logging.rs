@@ -1,9 +1,10 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use crate::AppState;
 use log::LevelFilter;
 use regex::Regex;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Manager, Runtime, State};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 
 const MAX_LOG_FILE_BYTES: u128 = 5 * 1024 * 1024;
@@ -103,12 +104,11 @@ pub fn open_log_directory(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn open_backup_directory(app: AppHandle) -> Result<String, String> {
-    let backup_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("无法定位应用数据目录: {error}"))?
-        .join("backups");
+pub fn open_backup_directory(state: State<'_, AppState>) -> Result<String, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let backup_dir = db
+        .backup_dir()
+        .ok_or_else(|| "数据库路径未初始化".to_string())?;
     std::fs::create_dir_all(&backup_dir).map_err(|error| {
         log::error!(target: "app::logging", "event=create_backup_dir_failed error={error}");
         format!("无法创建备份目录: {error}")

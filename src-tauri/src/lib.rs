@@ -4,6 +4,7 @@ mod db;
 mod gacha;
 mod logging;
 mod onedrive;
+mod paths;
 mod resource_pack;
 mod sync;
 
@@ -43,12 +44,12 @@ pub fn run() {
 
             let app_data_dir = dirs::data_local_dir()
                 .ok_or_else(|| "Failed to get app data dir".to_string())?
-                .join("wuwa-gacha-tool");
+                .join(paths::APP_DATA_DIR_NAME);
             std::fs::create_dir_all(&app_data_dir)?;
 
-            let legacy_path = app_data_dir.join("gacha.db");
-            let db_path = app_data_dir.join("gacha-data.db");
-            let state_path = app_data_dir.join("app-state.db");
+            let legacy_path = app_data_dir.join(paths::LEGACY_DB_FILENAME);
+            let db_path = app_data_dir.join(paths::MAIN_DB_FILENAME);
+            let state_path = app_data_dir.join(paths::STATE_DB_FILENAME);
             db::Database::migrate_legacy_files(&legacy_path, &db_path, &state_path)
                 .map_err(|error| format!("Failed to migrate database: {error}"))?;
             let database_started = Instant::now();
@@ -67,7 +68,7 @@ pub fn run() {
             app.manage(AppState {
                 db: Mutex::new(database),
                 http,
-                asset_cache_dir: app_data_dir.join("assets"),
+                asset_cache_dir: app_data_dir.join(paths::ASSETS_DIR_NAME),
                 asset_catalog_refresh: tokio::sync::Mutex::new(()),
                 resource_pack_refresh: tokio::sync::Mutex::new(()),
                 resource_pack_last_error: Mutex::new(None),

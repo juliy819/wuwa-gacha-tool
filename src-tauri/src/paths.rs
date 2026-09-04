@@ -1,0 +1,12 @@
+pub const APP_DATA_DIR_NAME: &str = "wuwa-gacha-tool";
+pub const MAIN_DB_FILENAME: &str = "gacha-data.db";
+pub const STATE_DB_FILENAME: &str = "app-state.db";
+pub const LEGACY_DB_FILENAME: &str = "gacha.db";
+pub const BACKUP_DIR_NAME: &str = "backups";
+pub const ASSETS_DIR_NAME: &str = "assets";
+pub const PORTRAITS_DIR_NAME: &str = "portraits";
+pub const ICONS_DIR_NAME: &str = "icons";
+pub const RESOURCE_PACK_DIR_NAME: &str = "resource-pack";
+pub const RESOURCE_PACK_STAGING_DIR_NAME: &str = "resource-pack.installing";
+pub const CATALOG_FILENAME: &str = "catalog.json";
+pub const MANIFEST_FILENAME: &str = "manifest.json";
