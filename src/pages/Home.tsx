@@ -84,7 +84,7 @@ export default function Home() {
       if (!status.connected || cancelled) { if (!cancelled) setCloudSyncStatus('idle', '未连接 OneDrive'); return; }
       setCloudSyncStatus('checking', '正在同步云端');
       try {
-        const result = await gachaApi.syncOneDriveDatabase(activePlayerId ?? '');
+        const result = await gachaApi.syncOneDriveDatabase('');
         if (!cancelled) {
           await Promise.all([fetchPools(), fetchSummaries()]);
           const syncedPlayerId = useGachaStore.getState().activePlayerId;
@@ -100,7 +100,7 @@ export default function Home() {
       }
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [activePlayerId, addToast, fetchHomeOverview, fetchPools, fetchSummaries, initialized, setCloudSyncStatus]);
+  }, [addToast, fetchHomeOverview, fetchPools, fetchSummaries, initialized, setCloudSyncStatus]);
 
   const confirmedBoundaryPools = useMemo(
     () => new Set(confirmedBoundaryPoolTypes),
