@@ -25,7 +25,7 @@ import { useUiFeedback } from '../hooks/useUiFeedback';
 import { playUiFeedback } from '../lib/uiFeedback';
 import { gachaApi } from '../services/tauri-api';
 import { useGachaStore } from '../store/useGachaStore';
-import { displayPath, displaySensitiveText, displayUid, shareSafeFileToken } from '../lib/shareMode';
+import { displayPath, displaySensitiveText, displayUid, SHARE_MODE, shareSafeFileToken } from '../lib/shareMode';
 import {
   getSyncFreshness,
   daysSince,
@@ -33,7 +33,7 @@ import {
   SYNC_DANGER_DAYS,
   type SyncFreshness,
 } from '../lib/utils';
-import type { GameDirValidation, PoolBoundaryStatus, RecordSummary, ResourcePackStatus } from '../types';
+import type { GameDirValidation, OneDriveDeviceLogin, OneDriveStatus, OneDriveSyncResult, PoolBoundaryStatus, RecordSummary, ResourcePackStatus } from '../types';
 
 type DeleteTarget = { playerId: string | null };
 type ExportTarget = { playerId: string; earliestDate: string; latestDate: string };
@@ -97,6 +97,12 @@ export default function SettingsPage() {
   const [appVersion, setAppVersion] = useState('');
   const [resourcePack, setResourcePack] = useState<ResourcePackStatus | null>(null);
   const [resourcePackBusy, setResourcePackBusy] = useState(false);
+  const [oneDriveStatus, setOneDriveStatus] = useState<OneDriveStatus | null>(null);
+  const [oneDriveLogin, setOneDriveLogin] = useState<OneDriveDeviceLogin | null>(null);
+  const [oneDriveBusy, setOneDriveBusy] = useState(false);
+  const [syncingUid, setSyncingUid] = useState<string | null>(null);
+  const [oneDriveResult, setOneDriveResult] = useState<Record<string, OneDriveSyncResult>>({});
+  const cloudSyncStatus = useGachaStore((state) => state.cloudSyncStatus);
   const { enabled: soundEnabled, setEnabled: setSoundEnabled } = useUiFeedback();
 
   useEffect(() => {
@@ -118,6 +124,40 @@ export default function SettingsPage() {
       if (timer !== null) window.clearTimeout(timer);
     };
   }, []);
+
+  useEffect(() => {
+    gachaApi.getOneDriveStatus().then(setOneDriveStatus).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!oneDriveLogin || oneDriveStatus?.connected) return;
+    let cancelled = false;
+    const interval = window.setInterval(async () => {
+      try {
+        const result = await gachaApi.pollOneDriveLogin();
+        if (cancelled) return;
+        if (result.connected) {
+          window.clearInterval(interval);
+          setOneDriveLogin(null);
+          setOneDriveStatus({ configured: true, connected: true, login_pending: false });
+          addToast('success', 'OneDrive 已连接');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        window.clearInterval(interval);
+        setOneDriveLogin(null);
+        setOneDriveStatus((current) => current ? { ...current, login_pending: false } : current);
+        addToast('error', String(error));
+      }
+    }, Math.max(1000, oneDriveLogin.interval_seconds * 1000));
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      // Leaving the settings page or dismissing the dialog must also clear
+      // the native device-code session, otherwise it survives as a ghost wait.
+      void gachaApi.cancelOneDriveLogin().catch(() => {});
+    };
+  }, [addToast, oneDriveLogin, oneDriveStatus?.connected]);
 
   useEffect(() => {
     if (!settings) fetchSettings();
@@ -200,6 +240,7 @@ export default function SettingsPage() {
         useGachaStore.getState().fetchRecords(),
         useGachaStore.getState().fetchStats(boundaryPlayerId),
       ]);
+      useGachaStore.getState().scheduleCloudSync();
       addToast('success', confirmed ? '已将该卡池现存记录确认为完整起点' : '已恢复首段历史边界提示');
       setBoundaryConfirmation(null);
     } catch (error) {
@@ -364,9 +405,9 @@ export default function SettingsPage() {
 
   const staleCardTip = (freshness: SyncFreshness, daysAgo: number) => {
     if (freshness === 'danger') {
-      return `距上次同步已 ${daysAgo} 天（超过 ${SYNC_DANGER_DAYS} 天阈值）。官方链接通常只保留近 6 个月，这段时间可能已存在数据遗漏（若期间未抽卡则不会丢数据）。`;
+      return `距上次记录更新已 ${daysAgo} 天（超过 ${SYNC_DANGER_DAYS} 天阈值）。官方链接通常只保留近 6 个月，这段时间可能已存在数据遗漏（若期间未抽卡则不会丢数据）。`;
     }
-    return `距上次同步已 ${daysAgo} 天（超过 ${SYNC_WARN_DAYS} 天阈值）。建议尽快同步以免丢失 6 个月临界区的缺口。`;
+    return `距上次记录更新已 ${daysAgo} 天（超过 ${SYNC_WARN_DAYS} 天阈值）。建议尽快更新记录，以免丢失 6 个月临界区的缺口。`;
   };
 
   const handleSelectFolder = async () => {
@@ -609,6 +650,71 @@ export default function SettingsPage() {
       ? '检查更新'
       : '下载资源包';
 
+  const handleOneDriveLogin = async () => {
+    setOneDriveBusy(true);
+    try {
+      const login = await gachaApi.startOneDriveLogin();
+      setOneDriveLogin(login);
+      setOneDriveStatus({ configured: true, connected: false, login_pending: true });
+      try { await navigator.clipboard.writeText(login.user_code); addToast('success', '设备码已自动复制'); } catch { addToast('info', '设备码已生成，请手动复制'); }
+      await openUrl(login.verification_uri);
+    } catch (error) {
+      addToast('error', String(error));
+    } finally {
+      setOneDriveBusy(false);
+    }
+  };
+
+  const handleCancelOneDriveLogin = async () => {
+    try { await gachaApi.cancelOneDriveLogin(); } catch { /* app may be closing */ }
+    setOneDriveLogin(null);
+    setOneDriveStatus((current) => current ? { ...current, login_pending: false } : current);
+  };
+
+  const handleOneDriveDisconnect = async () => {
+    setOneDriveBusy(true);
+    try {
+      await gachaApi.disconnectOneDrive();
+      setOneDriveLogin(null);
+      setOneDriveStatus((current) => ({ configured: current?.configured ?? false, connected: false, login_pending: false }));
+      addToast('success', '已断开 OneDrive');
+    } catch (error) {
+      addToast('error', String(error));
+    } finally {
+      setOneDriveBusy(false);
+    }
+  };
+
+  const handleOneDriveSync = async (playerId: string) => {
+    setSyncingUid(playerId);
+    useGachaStore.getState().setCloudSyncStatus('checking', '正在同步云端');
+    try {
+      const result = await gachaApi.syncOneDriveDatabase(playerId);
+      setOneDriveResult((current) => ({ ...current, [playerId]: result }));
+      await Promise.all([fetchSummaries(), useGachaStore.getState().fetchRecords(), useGachaStore.getState().fetchStats(playerId)]);
+      addToast('success', `UID ${displayUid(playerId)} 同步完成，新增 ${result.added_count} 条`);
+      useGachaStore.getState().setCloudSyncStatus(result.added_count > 0 ? 'updated' : 'current', result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新');
+    } catch (error) {
+      const message = String(error);
+      if (message.includes('首次连接') || message.includes('都已发生变化')) {
+        const keepLocal = window.confirm('本机和云端数据都已变化。确定使用本机数据覆盖云端吗？\n\n点击“取消”可继续选择使用云端数据。');
+        let strategy: 'local' | 'remote' | undefined = keepLocal ? 'local' : undefined;
+        if (!keepLocal && window.confirm('是否使用云端数据覆盖本机？')) strategy = 'remote';
+        if (strategy) {
+          try {
+            const result = await gachaApi.syncOneDriveDatabase(playerId, strategy);
+            setOneDriveResult((current) => ({ ...current, [playerId]: result }));
+            await Promise.all([fetchSummaries(), useGachaStore.getState().fetchRecords(), useGachaStore.getState().fetchStats(playerId)]);
+            useGachaStore.getState().scheduleCloudSync();
+            addToast('success', strategy === 'local' ? '已使用本机数据覆盖云端' : '已使用云端数据覆盖本机');
+          } catch (retryError) { addToast('error', String(retryError)); }
+        } else addToast('info', '已取消同步，数据未改变');
+      } else { addToast('error', message); useGachaStore.getState().setCloudSyncStatus('error', '云端同步失败'); }
+    } finally {
+      setSyncingUid(null);
+    }
+  };
+
   return (
     <PageTransition>
       <div className="page-scroll h-full overflow-y-auto overflow-x-hidden">
@@ -780,7 +886,7 @@ export default function SettingsPage() {
                     {checkingUpdate ? '检查中' : '检查更新'}
                   </button>
                 </div>
-                <p className="mt-2 leading-5">数据仅保存在本机，不会上传到服务器。</p>
+                <p className="mt-2 leading-5">数据默认保存在本机；启用 OneDrive 后，会同步到你自己根目录下的 `Wuwa Gacha Tool` 文件夹。</p>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
                   <button
                     onClick={handleOpenLogDirectory}
@@ -794,6 +900,18 @@ export default function SettingsPage() {
                   >
                     <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>GitHub 仓库
                   </button>
+                  <button
+                    onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool-android')}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                  >
+                    <ResonanceActionIcon size="sm"><ResonanceIcon kind="repository" size={14} /></ResonanceActionIcon>Android 仓库
+                  </button>
+                  <button
+                    onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool/wiki/0.-%E9%A6%96%E9%A1%B5%E5%AF%BC%E8%88%AA')}
+                    className="flex items-center gap-1.5 text-wave transition-colors hover:text-tide"
+                  >
+                    <ResonanceActionIcon size="sm"><ResonanceIcon kind="external" size={14} /></ResonanceActionIcon>使用 Wiki
+                  </button>
                 </div>
               </section>
             </div>
@@ -804,16 +922,54 @@ export default function SettingsPage() {
               transition={{ delay: 0.05 }}
               className="resonance-panel settings-panel settings-control-panel settings-data-panel p-5"
             >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-medium text-tide"><ResonanceActionIcon tone="gold"><ResonanceIcon kind="database" size={15} /></ResonanceActionIcon>本地数据</div>
-                  <p className="mt-1 text-xs text-wave">{pools.length} 位玩家 · {totalRecords.toLocaleString()} 条记录</p>
+              <div className="mb-5 border-b border-white/[0.07] pb-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-tide"><ResonanceActionIcon tone="gold"><ResonanceIcon kind="sync" size={15} /></ResonanceActionIcon>数据与同步</div>
+                    <p className="mt-1 text-xs leading-5 text-wave">按 UID 管理抽卡记录并与 OneDrive 双向合并，不上传数据库文件；当前版本不会同步删除操作。</p>
+                    <button
+                      type="button"
+                      onClick={() => void openUrl('https://github.com/juliy819/wuwa-gacha-tool-android/releases')}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs text-[#c9ab78] transition-colors hover:text-[#e0c58f]"
+                    >
+                      <ResonanceIcon kind="external" size={13} />下载 Android 客户端
+                    </button>
+                  </div>
+                  {oneDriveStatus?.connected ? (
+                    <button type="button" onClick={() => void handleOneDriveDisconnect()} disabled={oneDriveBusy || syncingUid !== null} className="shrink-0 text-xs text-wave hover:text-tide disabled:opacity-40">断开连接</button>
+                  ) : (
+                    <button type="button" onClick={() => void handleOneDriveLogin()} disabled={oneDriveBusy || !oneDriveStatus?.configured} className="tide-btn flex shrink-0 items-center gap-2 px-3 py-2 text-xs disabled:opacity-40">
+                      {oneDriveBusy ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="cloud" size={13} />}
+                      连接 OneDrive
+                    </button>
+                  )}
                 </div>
-                <div className="settings-data-readout" aria-label={`本地共 ${totalRecords.toLocaleString()} 条记录`}>
-                  <span className="settings-data-readout-value">{totalRecords.toLocaleString()}</span>
-                  <span className="settings-data-readout-label">条记录</span>
-                  <span className="settings-data-readout-orbit" aria-hidden="true" />
-                </div>
+
+                {oneDriveStatus && !oneDriveStatus.configured && (
+                  <div className="mt-3 flex items-start gap-2 rounded-md border border-[#c99a68]/15 bg-[#c99a68]/[0.05] px-3 py-2.5 text-[11px] leading-5 text-[#d9bd9a]">
+                    <ResonanceIcon kind="warning" size={13} className="mt-0.5 shrink-0" />当前构建未配置 OneDrive Client ID，云同步暂不可用。
+                  </div>
+                )}
+
+                {oneDriveLogin && (
+                  <div className="mt-3 rounded-md border border-[#c9ab78]/20 bg-[#c9ab78]/[0.06] px-3 py-3">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="text-[11px] text-wave">浏览器中输入验证码</div>
+                        <div className="mt-1 flex items-center gap-2"><div className="font-mono text-lg font-semibold tracking-[0.18em] text-[#d8bd84]">{SHARE_MODE ? '**** ****' : oneDriveLogin.user_code}</div><button type="button" onClick={() => void navigator.clipboard.writeText(oneDriveLogin.user_code).then(() => addToast('success', '设备码已复制')).catch(() => addToast('error', '复制失败'))} className="rounded-md px-2 py-1 text-[11px] text-[#c9ab78] hover:bg-[#c9ab78]/10">复制</button></div>
+                      </div>
+                      <button type="button" onClick={() => void openUrl(oneDriveLogin.verification_uri)} className="flex items-center gap-1.5 text-xs text-[#c9ab78] hover:text-[#e0c58f]"><ResonanceIcon kind="external" size={13} />打开登录页</button>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-wave"><span className="flex items-center gap-2"><LoaderCircle size={11} className="animate-spin" />正在等待 Microsoft 登录确认</span><button type="button" onClick={() => void handleCancelOneDriveLogin()} className="text-[#d99a9a] hover:text-[#f0b0aa]">取消等待</button></div>
+                  </div>
+                )}
+
+              </div>
+
+              <div className="mt-4 flex items-center gap-2 pt-4 text-xs text-wave">
+                <ResonanceIcon kind="database" size={13} />
+                <span>数据概览</span>
+                <span className="text-tide-dim">{pools.length} 个 UID · {totalRecords.toLocaleString()} 条记录</span>
               </div>
 
               <div
@@ -833,7 +989,7 @@ export default function SettingsPage() {
                   <ResonanceIcon kind="warning" size={14} className="mt-0.5 shrink-0" />
                 )}
                 <span>
-                  官方抽卡链接仅保留近约 6 个月。建议至少每半年同步一次，超期缺口无法自动补回。
+                  官方抽卡链接仅保留近约 6 个月。建议至少每半年更新一次记录，超期缺口无法自动补回。
                   {anyDanger && (
                     <span className="ml-2 text-[#d84848]">（检测到超过 {SYNC_DANGER_DAYS} 天未同步，可能已存在数据遗漏）</span>
                   )}
@@ -889,7 +1045,7 @@ export default function SettingsPage() {
                                 border: 'border-[#c99a68]/20',
                                 bg: 'bg-[#c99a68]/[0.04]',
                                 badge: 'border-[#c99a68]/25 bg-[#c99a68]/[0.08] text-[#d09960]',
-                                label: '久未同步',
+                                label: '久未更新',
                                 icon: 'text-[#d9bd9a]',
                               }
                             : null;
@@ -928,12 +1084,26 @@ export default function SettingsPage() {
                                       className={palette ? palette.icon : 'text-[#c9ab78]'}
                                     />
                                     <span className={palette ? palette.icon : ''}>
-                                      最近同步 {summary.last_imported_at.slice(0, 10)}
+                                      最近记录更新 {summary.last_imported_at.slice(0, 10)}
                                       {summary.is_inferred && (
                                         <span className="ml-1.5 inline-flex items-center gap-1 rounded border border-[#c9ab78]/25 bg-[#c9ab78]/[0.08] px-1.5 py-px text-[10px] text-[#c9ab78]" title="升级前已导入数据，同步时间由记录范围推断">
                                           <ResonanceIcon kind="info" size={10} /> 推断
                                         </span>
                                       )}
+                                    </span>
+                                  </div>
+                                )}
+                                {oneDriveStatus?.connected && (
+                                  <div className="flex items-center gap-1.5">
+                                    <ResonanceIcon kind="sync" size={12} className="text-[#8fc8be]" />
+                                    <span className="text-[#8fc8be]">
+                                      {cloudSyncStatus.state === 'checking'
+                                        ? '正在同步云端'
+                                        : cloudSyncStatus.state === 'updated' || cloudSyncStatus.state === 'current'
+                                          ? cloudSyncStatus.message
+                                          : oneDriveResult[playerId]
+                                            ? '云端已同步（整库）'
+                                            : 'OneDrive 已连接'}
                                     </span>
                                   </div>
                                 )}
@@ -951,6 +1121,11 @@ export default function SettingsPage() {
                               历史起点
                             </button>
                             <button onClick={() => openExportDialog(playerId, summary)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-white/[0.05] hover:text-tide" title={`导出 UID ${displayUid(playerId)} 的数据`}><ResonanceActionIcon size="sm"><ResonanceIcon kind="download" size={14} /></ResonanceActionIcon></button>
+                            {oneDriveStatus?.connected && (
+                              <button type="button" onClick={() => void handleOneDriveSync(playerId)} disabled={syncingUid !== null || oneDriveBusy} className="flex h-8 w-8 items-center justify-center rounded-md text-[#c9ab78] hover:bg-[#c9ab78]/10 disabled:opacity-40" title={syncingUid === playerId ? '同步中' : '同步此 UID'}>
+                                {syncingUid === playerId ? <LoaderCircle size={13} className="animate-spin" /> : <ResonanceIcon kind="sync" size={14} />}
+                              </button>
+                            )}
                             <button onClick={() => openDeleteDialog(playerId)} className="flex h-8 w-8 items-center justify-center rounded-md text-wave hover:bg-[#d84848]/10 hover:text-[#d99a9a]" title={`删除 UID ${displayUid(playerId)} 的记录`}><ResonanceActionIcon size="sm" tone="danger"><ResonanceIcon kind="delete" size={14} /></ResonanceActionIcon></button>
                           </div>
                         </div>
@@ -1058,7 +1233,7 @@ export default function SettingsPage() {
                   )}
                   {targetMeta.hasImport && (
                     <div className="col-span-2">
-                      <div className="text-xs text-wave">最近同步</div>
+                      <div className="text-xs text-wave">最近记录更新</div>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5 text-tide">
                         <ResonanceIcon kind="sync" size={12} className="text-[#c9ab78]" />
                         <span className="tabular-nums">{targetMeta.lastImportedAt}</span>

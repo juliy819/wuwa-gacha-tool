@@ -26,12 +26,15 @@ export default function Home() {
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
   const addToast = useGachaStore((state) => state.addToast);
   const fetchHomeOverview = useGachaStore((state) => state.fetchHomeOverview);
+  const fetchPools = useGachaStore((state) => state.fetchPools);
+  const fetchSummaries = useGachaStore((state) => state.fetchSummaries);
   const importJson = useGachaStore((state) => state.importJson);
   const initialized = useGachaStore((state) => state.initialized);
   const records = useGachaStore((state) => state.records);
   const recordsLoaded = useGachaStore((state) => state.recordsLoaded);
   const recordsPlayerId = useGachaStore((state) => state.recordsPlayerId);
   const scanGacha = useGachaStore((state) => state.scanGacha);
+  const setCloudSyncStatus = useGachaStore((state) => state.setCloudSyncStatus);
   const scanGachaByUrl = useGachaStore((state) => state.scanGachaByUrl);
   const scanning = useGachaStore((state) => state.scanning);
   const settings = useGachaStore((state) => state.settings);
@@ -54,6 +57,7 @@ export default function Home() {
   const confirmedBoundaryPoolTypes = useGachaStore((state) => state.confirmedBoundaryPoolTypes);
   const confirmedBoundaryPlayerId = useGachaStore((state) => state.confirmedBoundaryPlayerId);
   const scanContentRef = useRef<HTMLDivElement>(null);
+  const startupSyncStartedRef = useRef(false);
   const [scanContentHeight, setScanContentHeight] = useState<number | null>(null);
 
   useLayoutEffect(() => {
@@ -71,6 +75,32 @@ export default function Home() {
     if (statsPlayerId === activePlayerId && recordsLoaded && recordsPlayerId === activePlayerId && confirmedBoundaryPlayerId === activePlayerId) return;
     fetchHomeOverview(activePlayerId);
   }, [activePlayerId, confirmedBoundaryPlayerId, fetchHomeOverview, recordsLoaded, recordsPlayerId, statsPlayerId]);
+
+  useEffect(() => {
+    if (!initialized || startupSyncStartedRef.current) return;
+    startupSyncStartedRef.current = true;
+    let cancelled = false;
+    void gachaApi.getOneDriveStatus().then(async (status) => {
+      if (!status.connected || cancelled) { if (!cancelled) setCloudSyncStatus('idle', '未连接 OneDrive'); return; }
+      setCloudSyncStatus('checking', '正在同步云端');
+      try {
+        const result = await gachaApi.syncOneDriveDatabase(activePlayerId ?? '');
+        if (!cancelled) {
+          await Promise.all([fetchPools(), fetchSummaries()]);
+          const syncedPlayerId = useGachaStore.getState().activePlayerId;
+          if (syncedPlayerId) await fetchHomeOverview(syncedPlayerId);
+          if (result.added_count > 0) {
+            addToast('success', `已从 OneDrive 更新 ${result.added_count} 条记录`);
+          }
+          setCloudSyncStatus(result.added_count > 0 ? 'updated' : 'current', result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新');
+        }
+      } catch {
+        if (!cancelled) setCloudSyncStatus('error', '云端同步失败');
+        // Startup remains usable offline; explicit sync exposes actionable errors.
+      }
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [activePlayerId, addToast, fetchHomeOverview, fetchPools, fetchSummaries, initialized, setCloudSyncStatus]);
 
   const confirmedBoundaryPools = useMemo(
     () => new Set(confirmedBoundaryPoolTypes),

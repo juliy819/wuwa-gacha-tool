@@ -425,3 +425,61 @@ export const POOL_GROUPS = [
 ] as const;
 
 export type PoolGroup = typeof POOL_GROUPS[number];
+
+export interface CloudSyncRecord {
+  pool: string;
+  time: string;
+  resource_id: number;
+  quality: number;
+  resource_type: 'role' | 'weapon';
+  count: number;
+  occurrence_no: number;
+  order_in_timestamp: number;
+  pool_name: string;
+  name: string;
+  off_rate: boolean;
+  is_mock: boolean;
+  mock_batch_id: string | null;
+}
+
+export interface CloudSyncEnvelope {
+  schema_version: 1;
+  uid: string;
+  records: CloudSyncRecord[];
+  updated_at: string;
+}
+
+export interface CloudSyncApplyResult {
+  payload: CloudSyncEnvelope;
+  imported_count: number;
+  added_count: number;
+  duplicate_count: number;
+  total_count: number;
+}
+
+export interface OneDriveStatus {
+  configured: boolean;
+  connected: boolean;
+  login_pending: boolean;
+}
+
+export interface OneDriveDeviceLogin {
+  user_code: string;
+  verification_uri: string;
+  expires_at: string;
+  interval_seconds: number;
+}
+
+export interface OneDriveLoginPollStatus {
+  connected: boolean;
+  pending: boolean;
+}
+
+export interface OneDriveSyncResult {
+  added_count: number;
+  duplicate_count: number;
+  total_count: number;
+  uploaded_count: number;
+  conflict_retries: number;
+  updated_at: string;
+}

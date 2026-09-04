@@ -518,6 +518,7 @@ export default function OcrImportPage() {
       })).reverse();
       const result = await gachaApi.importOcrGachaRows(requests, allowDateOverlap);
       addToast('success', `已导入 ${result.five_star_count} 条五星，共写入 ${result.inserted_record_count} 条模拟记录`);
+      useGachaStore.getState().scheduleCloudSync();
       setConfirming(false);
       setRows([]);
       setUseRecognizedDates(false);

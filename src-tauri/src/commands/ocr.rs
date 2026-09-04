@@ -943,7 +943,10 @@ mod tests {
         let result: OcrScreenshotResult = serde_json::from_str(payload).unwrap();
         assert_eq!(result.rows.len(), 1);
         assert_eq!(result.rows[0].resource_type, "role");
-        assert_eq!(result.rows[0].recognized_date.as_deref(), Some("2025-08-20"));
+        assert_eq!(
+            result.rows[0].recognized_date.as_deref(),
+            Some("2025-08-20")
+        );
         assert_eq!(result.rows[0].alternatives.len(), 1);
         assert_eq!(result.images[0].date_rows, 1);
     }

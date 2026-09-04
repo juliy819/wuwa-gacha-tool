@@ -77,6 +77,7 @@ pub struct MockUpdateRequest {
 
 pub struct Database {
     conn: Connection,
+    config_conn: Connection,
     path: Option<PathBuf>,
 }
 
@@ -95,10 +96,111 @@ pub struct CachedJson {
 }
 
 impl Database {
+    pub fn migrate_legacy_files(old: &Path, data: &Path, state: &Path) -> Result<(), String> {
+        if !old.exists() {
+            return Ok(());
+        }
+        let source = Connection::open(old).map_err(|e| format!("打开旧数据库失败: {e}"))?;
+        let config = Connection::open(state).map_err(|e| e.to_string())?;
+        config.execute_batch(
+            "CREATE TABLE IF NOT EXISTS game_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, game_dir TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS nanoka_cache (cache_key TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS cloud_sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, completed_at TEXT NOT NULL);"
+        ).map_err(|e| e.to_string())?;
+        let completed: bool = config
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name='legacy_split_completed')",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if completed {
+            return Ok(());
+        }
+        let target = Connection::open(data).map_err(|e| format!("创建共享数据库失败: {e}"))?;
+        target
+            .execute(
+                "ATTACH DATABASE ?1 AS legacy",
+                [old.to_string_lossy().as_ref()],
+            )
+            .map_err(|e| format!("读取旧数据库失败: {e}"))?;
+        target.execute_batch("CREATE TABLE IF NOT EXISTS gacha_records (id INTEGER PRIMARY KEY AUTOINCREMENT, player_id TEXT NOT NULL, card_pool_type TEXT NOT NULL, card_pool_name TEXT NOT NULL, resource_id INTEGER NOT NULL, quality_level INTEGER NOT NULL, resource_type TEXT NOT NULL, name TEXT NOT NULL, count INTEGER NOT NULL, time TEXT NOT NULL, is_off_rate INTEGER NOT NULL DEFAULT 0, occurrence_no INTEGER NOT NULL DEFAULT 0, order_in_timestamp INTEGER NOT NULL DEFAULT 0, is_mock INTEGER NOT NULL DEFAULT 0, mock_batch_id TEXT); CREATE TABLE IF NOT EXISTS player_import_info (player_id TEXT PRIMARY KEY, last_imported_at TEXT, is_inferred INTEGER NOT NULL DEFAULT 0); CREATE TABLE IF NOT EXISTS pool_history_boundaries (player_id TEXT NOT NULL, card_pool_type TEXT NOT NULL, earliest_time TEXT NOT NULL, earliest_time_count INTEGER NOT NULL, confirmed_at TEXT NOT NULL, PRIMARY KEY(player_id,card_pool_type)); CREATE TABLE IF NOT EXISTS gacha_data_meta(schema_version INTEGER NOT NULL PRIMARY KEY); INSERT OR IGNORE INTO gacha_data_meta VALUES(1); CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT); INSERT OR REPLACE INTO room_master_table(id, identity_hash) VALUES(42, '94d67eb52215544ef95cb0eb69b7ae8a');").map_err(|e| e.to_string())?;
+        for table in [
+            "gacha_records",
+            "player_import_info",
+            "pool_history_boundaries",
+        ] {
+            let exists: bool = source
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+            if !exists {
+                continue;
+            }
+            let sql = match table {
+                "gacha_records" => "INSERT OR IGNORE INTO gacha_records SELECT id,player_id,card_pool_type,card_pool_name,resource_id,quality_level,resource_type,name,count,time,is_off_rate,occurrence_no,order_in_timestamp,is_mock,mock_batch_id FROM legacy.gacha_records",
+                "player_import_info" => "INSERT OR IGNORE INTO player_import_info SELECT player_id,last_imported_at,is_inferred FROM legacy.player_import_info",
+                _ => "INSERT OR IGNORE INTO pool_history_boundaries SELECT player_id,card_pool_type,earliest_time,earliest_time_count,confirmed_at FROM legacy.pool_history_boundaries",
+            };
+            target
+                .execute(sql, [])
+                .map_err(|e| format!("迁移 {table} 失败: {e}"))?;
+        }
+        config
+            .execute(
+                "ATTACH DATABASE ?1 AS legacy",
+                [old.to_string_lossy().as_ref()],
+            )
+            .map_err(|e| format!("读取旧设备配置失败: {e}"))?;
+        for table in ["game_settings", "nanoka_cache"] {
+            let exists: bool = source
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+            if !exists {
+                continue;
+            }
+            let current_count: i64 = config
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .map_err(|e| e.to_string())?;
+            if current_count > 0 {
+                continue;
+            }
+            let sql = if table == "game_settings" {
+                "INSERT OR IGNORE INTO game_settings SELECT id,game_dir FROM legacy.game_settings"
+            } else {
+                "INSERT OR IGNORE INTO nanoka_cache SELECT cache_key,json,updated_at FROM legacy.nanoka_cache"
+            };
+            config
+                .execute(sql, [])
+                .map_err(|e| format!("迁移 {table} 失败: {e}"))?;
+        }
+        config.execute(
+            "INSERT INTO app_migrations(name, completed_at) VALUES('legacy_split_completed', ?1)",
+            [current_datetime()],
+        ).map_err(|e| format!("记录数据库迁移状态失败: {e}"))?;
+        Ok(())
+    }
+
     pub fn new(path: &Path) -> Result<Self, String> {
+        Self::new_with_state(path, path)
+    }
+
+    pub fn new_with_state(path: &Path, state_path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| e.to_string())?;
+        let config_conn = Connection::open(state_path).map_err(|e| e.to_string())?;
         let db = Self {
             conn,
+            config_conn,
             path: Some(path.to_path_buf()),
         };
         db.init_tables()?;
@@ -128,17 +230,6 @@ impl Database {
                     mock_batch_id TEXT
                 );
 
-                CREATE TABLE IF NOT EXISTS game_settings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    game_dir TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS nanoka_cache (
-                    cache_key TEXT PRIMARY KEY,
-                    json TEXT NOT NULL,
-                    updated_at INTEGER NOT NULL
-                );
-
                 CREATE TABLE IF NOT EXISTS player_import_info (
                     player_id TEXT PRIMARY KEY,
                     last_imported_at TEXT,
@@ -154,9 +245,28 @@ impl Database {
                     PRIMARY KEY (player_id, card_pool_type)
                 );
 
+                CREATE TABLE IF NOT EXISTS gacha_data_meta (
+                    schema_version INTEGER NOT NULL PRIMARY KEY
+                );
+                INSERT INTO gacha_data_meta(schema_version)
+                SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM gacha_data_meta);
+
+                CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY, identity_hash TEXT);
+                INSERT OR REPLACE INTO room_master_table(id, identity_hash)
+                VALUES(42, '94d67eb52215544ef95cb0eb69b7ae8a');
+
                 ",
             )
             .map_err(|e| e.to_string())?;
+        self.conn
+            .pragma_update(None, "user_version", 1i64)
+            .map_err(|e| e.to_string())?;
+        self.config_conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS game_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, game_dir TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS nanoka_cache (cache_key TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS cloud_sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, completed_at TEXT NOT NULL);"
+        ).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -356,18 +466,24 @@ impl Database {
 
     /// 增量合并抽卡记录。同池同秒允许出现多条完全相同的记录。
     pub fn merge_records(&self, records: &[GachaRecord]) -> Result<MergeStats, String> {
-        self.merge_records_transactionally(records, true)
+        self.merge_records_transactionally(records, true, false)
+    }
+
+    /// Applies a validated sync snapshot and makes its same-second order authoritative.
+    pub fn merge_sync_records(&self, records: &[GachaRecord]) -> Result<MergeStats, String> {
+        self.merge_records_transactionally(records, true, true)
     }
 
     /// 使用正式合并逻辑计算结果，但回滚所有写入。
     pub fn preview_merge_records(&self, records: &[GachaRecord]) -> Result<MergeStats, String> {
-        self.merge_records_transactionally(records, false)
+        self.merge_records_transactionally(records, false, false)
     }
 
     fn merge_records_transactionally(
         &self,
         records: &[GachaRecord],
         commit: bool,
+        apply_source_order: bool,
     ) -> Result<MergeStats, String> {
         if records.is_empty() {
             return Ok(MergeStats {
@@ -449,18 +565,34 @@ impl Database {
 
             if let Some(existing_id) = existing_id {
                 // 名称和歪率属于展示/派生信息，可随当前规则刷新。
-                tx.execute(
-                    "UPDATE gacha_records
+                if apply_source_order {
+                    tx.execute(
+                        "UPDATE gacha_records
+                     SET card_pool_name = ?1, name = ?2, is_off_rate = ?3, order_in_timestamp = ?6
+                     WHERE id = ?4 AND is_mock = ?5",
+                        params![
+                            record.card_pool_name,
+                            record.name,
+                            record.is_off_rate as i32,
+                            existing_id,
+                            record.is_mock as i32,
+                            current_order,
+                        ],
+                    )
+                } else {
+                    tx.execute(
+                        "UPDATE gacha_records
                      SET card_pool_name = ?1, name = ?2, is_off_rate = ?3
                      WHERE id = ?4 AND is_mock = ?5",
-                    params![
-                        record.card_pool_name,
-                        record.name,
-                        record.is_off_rate as i32,
-                        existing_id,
-                        record.is_mock as i32,
-                    ],
-                )
+                        params![
+                            record.card_pool_name,
+                            record.name,
+                            record.is_off_rate as i32,
+                            existing_id,
+                            record.is_mock as i32,
+                        ],
+                    )
+                }
                 .map_err(|e| e.to_string())?;
             } else {
                 let next_occurrence_no: i64 = tx
@@ -1444,12 +1576,135 @@ impl Database {
             .duration_since(UNIX_EPOCH)
             .map_err(|e| format!("生成备份时间戳失败: {e}"))?
             .as_millis();
-        let backup_path = backup_dir.join(format!("gacha-before-delete-{timestamp}.db"));
+        let backup_path = backup_dir.join(format!("gacha-data-before-delete-{timestamp}.db"));
         let backup_path_text = backup_path.to_string_lossy().into_owned();
         self.conn
             .execute("VACUUM main INTO ?1", params![backup_path_text])
             .map_err(|e| format!("删除前备份失败，未清空任何数据: {e}"))?;
         Ok(Some(backup_path.to_string_lossy().into_owned()))
+    }
+
+    pub fn create_sync_snapshot(&self, target: &Path) -> Result<(), String> {
+        if target.exists() {
+            std::fs::remove_file(target).map_err(|e| e.to_string())?;
+        }
+        self.conn
+            .execute("VACUUM main INTO ?1", [target.to_string_lossy().as_ref()])
+            .map_err(|e| format!("创建同步快照失败: {e}"))?;
+        Ok(())
+    }
+
+    pub fn apply_sync_snapshot(&self, source: &Path) -> Result<(), String> {
+        let remote = Connection::open(source).map_err(|e| format!("打开云端数据库失败: {e}"))?;
+        let integrity: String = remote
+            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+            .map_err(|e| format!("校验云端数据库失败: {e}"))?;
+        if integrity != "ok" {
+            return Err("云端数据库完整性校验失败".to_string());
+        }
+        let version: i64 = remote
+            .query_row(
+                "SELECT schema_version FROM gacha_data_meta LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| "云端数据库版本无效或过旧".to_string())?;
+        if version != 1 {
+            return Err(format!("暂不支持云端数据库版本 {version}"));
+        }
+        const MAX_ROWS: i64 = 2_000_000;
+        for table in [
+            "gacha_records",
+            "player_import_info",
+            "pool_history_boundaries",
+        ] {
+            let exists: bool = remote
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap_or(false);
+            if !exists {
+                return Err(format!("云端数据库缺少必要数据表 {table}"));
+            }
+            let count: i64 = remote
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .map_err(|e| format!("读取云端数据表 {table} 失败: {e}"))?;
+            if count > MAX_ROWS {
+                return Err(format!("云端数据表 {table} 超过安全行数限制"));
+            }
+        }
+        let expected = [
+            ("gacha_records", "id,player_id,card_pool_type,card_pool_name,resource_id,quality_level,resource_type,name,count,time,is_off_rate,occurrence_no,order_in_timestamp,is_mock,mock_batch_id"),
+            ("player_import_info", "player_id,last_imported_at,is_inferred"),
+            ("pool_history_boundaries", "player_id,card_pool_type,earliest_time,earliest_time_count,confirmed_at"),
+        ];
+        for (table, columns) in expected {
+            let actual: Vec<String> = remote
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .and_then(|mut s| s.query_map([], |r| r.get::<_, String>(1)).and_then(Iterator::collect))
+                .map_err(|e| format!("读取云端表结构失败: {e}"))?;
+            let required: Vec<&str> = columns.split(',').collect();
+            if actual != required.iter().map(|v| v.to_string()).collect::<Vec<_>>() {
+                return Err(format!("云端数据表 {table} 字段不兼容"));
+            }
+        }
+        drop(remote);
+        self.conn
+            .execute(
+                "ATTACH DATABASE ?1 AS cloud",
+                [source.to_string_lossy().as_ref()],
+            )
+            .map_err(|e| e.to_string())?;
+        let result = self.conn.execute_batch(
+            "BEGIN IMMEDIATE;
+             DELETE FROM gacha_records;
+             INSERT INTO gacha_records SELECT * FROM cloud.gacha_records;
+             DELETE FROM player_import_info;
+             INSERT INTO player_import_info SELECT * FROM cloud.player_import_info;
+             DELETE FROM pool_history_boundaries;
+             INSERT INTO pool_history_boundaries SELECT * FROM cloud.pool_history_boundaries;
+             COMMIT;",
+        );
+        if result.is_err() {
+            let _ = self.conn.execute_batch("ROLLBACK;");
+        }
+        let _ = self.conn.execute_batch("DETACH DATABASE cloud;");
+        result.map_err(|e| format!("应用云端数据库失败，本地数据未改变: {e}"))
+    }
+
+    pub fn record_count(&self) -> Result<usize, String> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM gacha_records", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(|value| value as usize)
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn cloud_sync_baseline(&self) -> Result<(Option<String>, Option<String>), String> {
+        let read = |key: &str| {
+            self.config_conn
+                .query_row(
+                    "SELECT value FROM cloud_sync_state WHERE key=?1",
+                    [key],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|e| e.to_string())
+        };
+        Ok((read("etag")?, read("snapshot_sha256")?))
+    }
+
+    pub fn save_cloud_sync_baseline(&self, etag: &str, hash: &str) -> Result<(), String> {
+        let tx = self
+            .config_conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        tx.execute("INSERT INTO cloud_sync_state(key,value) VALUES('etag',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [etag]).map_err(|e| e.to_string())?;
+        tx.execute("INSERT INTO cloud_sync_state(key,value) VALUES('snapshot_sha256',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [hash]).map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
     }
 
     /// 删除前创建完整数据库备份，再清空指定玩家或全部记录。
@@ -1541,10 +1796,10 @@ impl Database {
 
     /// 保存游戏设置
     pub fn save_settings(&self, settings: &GameSettings) -> Result<(), String> {
-        self.conn
+        self.config_conn
             .execute("DELETE FROM game_settings", [])
             .map_err(|e| e.to_string())?;
-        self.conn
+        self.config_conn
             .execute(
                 "INSERT INTO game_settings (game_dir) VALUES (?1)",
                 params![settings.game_dir],
@@ -1556,7 +1811,7 @@ impl Database {
     /// 获取游戏设置
     pub fn get_settings(&self) -> Result<GameSettings, String> {
         let mut stmt = self
-            .conn
+            .config_conn
             .prepare("SELECT game_dir FROM game_settings LIMIT 1")
             .map_err(|e| e.to_string())?;
         let settings = stmt
@@ -1570,7 +1825,7 @@ impl Database {
     }
 
     pub fn get_nanoka_cache(&self, cache_key: &str) -> Result<Option<CachedJson>, String> {
-        match self.conn.query_row(
+        match self.config_conn.query_row(
             "SELECT json, updated_at FROM nanoka_cache WHERE cache_key = ?1",
             params![cache_key],
             |row| {
@@ -1588,7 +1843,7 @@ impl Database {
 
     pub fn get_latest_nanoka_cache(&self, prefix: &str) -> Result<Option<CachedJson>, String> {
         let pattern = format!("{prefix}%");
-        match self.conn.query_row(
+        match self.config_conn.query_row(
             "SELECT json, updated_at FROM nanoka_cache WHERE cache_key LIKE ?1 ORDER BY updated_at DESC LIMIT 1",
             params![pattern],
             |row| {
@@ -1610,7 +1865,7 @@ impl Database {
         json: &str,
         updated_at: i64,
     ) -> Result<(), String> {
-        self.conn
+        self.config_conn
             .execute(
                 "INSERT INTO nanoka_cache (cache_key, json, updated_at) VALUES (?1, ?2, ?3)\
                  ON CONFLICT(cache_key) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at",
@@ -1851,6 +2106,7 @@ mod tests {
     fn test_database() -> Database {
         let db = Database {
             conn: Connection::open_in_memory().unwrap(),
+            config_conn: Connection::open_in_memory().unwrap(),
             path: None,
         };
         db.init_tables().unwrap();
@@ -2113,6 +2369,23 @@ mod tests {
         assert_eq!(result.added_count, 1);
         assert_eq!(result.duplicate_count, 2);
         assert_eq!(db.get_all_records(Some("10001")).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn sync_merge_applies_authoritative_same_second_order() {
+        let db = test_database();
+        let first = record("1", 101, "2026-06-01 12:00:00");
+        let second = record("1", 102, "2026-06-01 12:00:00");
+        db.merge_records(&[first.clone(), second.clone()]).unwrap();
+        db.merge_sync_records(&[second, first]).unwrap();
+        let stored = db.get_all_records(Some("10001")).unwrap();
+        assert_eq!(
+            stored
+                .iter()
+                .map(|record| record.resource_id)
+                .collect::<Vec<_>>(),
+            vec![102, 101]
+        );
     }
 
     #[test]

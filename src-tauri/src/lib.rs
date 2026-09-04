@@ -3,7 +3,9 @@ mod commands;
 mod db;
 mod gacha;
 mod logging;
+mod onedrive;
 mod resource_pack;
+mod sync;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -20,6 +22,7 @@ pub struct AppState {
     pub resource_pack_last_error: Mutex<Option<String>>,
     pub resource_pack_progress: Mutex<resource_pack::ResourcePackProgress>,
     pub app_data_dir: PathBuf,
+    pub onedrive: tokio::sync::Mutex<onedrive::OneDriveState>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,9 +46,13 @@ pub fn run() {
                 .join("wuwa-gacha-tool");
             std::fs::create_dir_all(&app_data_dir)?;
 
-            let db_path = app_data_dir.join("gacha.db");
+            let legacy_path = app_data_dir.join("gacha.db");
+            let db_path = app_data_dir.join("gacha-data.db");
+            let state_path = app_data_dir.join("app-state.db");
+            db::Database::migrate_legacy_files(&legacy_path, &db_path, &state_path)
+                .map_err(|error| format!("Failed to migrate database: {error}"))?;
             let database_started = Instant::now();
-            let database = db::Database::new(&db_path)
+            let database = db::Database::new_with_state(&db_path, &state_path)
                 .map_err(|error| format!("Failed to initialize database: {error}"))?;
             log::info!(
                 target: "app::performance",
@@ -66,6 +73,7 @@ pub fn run() {
                 resource_pack_last_error: Mutex::new(None),
                 resource_pack_progress: Mutex::new(resource_pack::ResourcePackProgress::default()),
                 app_data_dir,
+                onedrive: tokio::sync::Mutex::new(onedrive::OneDriveState::default()),
             });
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -94,6 +102,15 @@ pub fn run() {
             logging::open_backup_directory,
             commands::cloud_gacha::open_cloud_gacha_window,
             commands::cloud_gacha::close_cloud_gacha_window,
+            commands::sync::prepare_sync_payload,
+            commands::sync::apply_cloud_sync_payload,
+            commands::onedrive::get_onedrive_status,
+            commands::onedrive::start_onedrive_login,
+            commands::onedrive::poll_onedrive_login,
+            commands::onedrive::cancel_onedrive_login,
+            commands::onedrive::disconnect_onedrive,
+            commands::onedrive::sync_onedrive_uid,
+            commands::onedrive::sync_onedrive_database,
             commands::gacha::get_resource_icon,
             commands::gacha::get_resource_portrait,
             commands::gacha::get_gacha_resources,

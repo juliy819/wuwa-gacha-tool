@@ -327,6 +327,7 @@ export default function RecordsPage() {
       activePlayerId ? fetchStats(activePlayerId) : Promise.resolve(),
       fetchSummaries(),
     ]);
+    useGachaStore.getState().scheduleCloudSync();
   };
 
   const submitMockRecord = async (value: { card_pool_type: string; resource_id: number; time: string; pulls: number; quality_level: number }) => {

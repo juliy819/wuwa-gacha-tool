@@ -22,6 +22,7 @@ interface GachaStore {
   confirmedBoundaryPlayerId: string | null;
   analyticsRevision: number;
   initialized: boolean;
+  cloudSyncStatus: { state: 'idle' | 'checking' | 'updated' | 'current' | 'error'; message: string; updatedAt: number | null };
 
   fetchRecords: () => Promise<void>;
   fetchStats: (playerId?: string) => Promise<void>;
@@ -39,11 +40,26 @@ interface GachaStore {
   addToast: (type: ToastMessage['type'], message: string) => void;
   removeToast: (id: string) => void;
   dismissImportSummary: () => void;
+  scheduleCloudSync: () => void;
+  setCloudSyncStatus: (state: GachaStore['cloudSyncStatus']['state'], message: string) => void;
 }
 
 let recordsRequestId = 0;
 let statsRequestId = 0;
 let homeOverviewRequestId = 0;
+let cloudSyncTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleCloudSync() {
+  if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(() => {
+    cloudSyncTimer = null;
+    useGachaStore.getState().setCloudSyncStatus('checking', '正在同步云端');
+    void gachaApi.getOneDriveStatus()
+      .then((status) => status.connected ? gachaApi.syncOneDriveDatabase() : null)
+      .then((result) => result ? useGachaStore.getState().setCloudSyncStatus(result.added_count > 0 ? 'updated' : 'current', result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新') : useGachaStore.getState().setCloudSyncStatus('idle', '未连接 OneDrive'))
+      .catch(() => useGachaStore.getState().setCloudSyncStatus('error', '云端同步失败'));
+  }, 1500);
+}
 
 export const useGachaStore = create<GachaStore>((set, get) => ({
   records: [],
@@ -64,6 +80,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   confirmedBoundaryPlayerId: null,
   analyticsRevision: 0,
   initialized: false,
+  cloudSyncStatus: { state: 'idle', message: '未同步', updatedAt: null },
 
   fetchRecords: async () => {
     const requestId = ++recordsRequestId;
@@ -183,6 +200,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       if (playerId) {
         await get().fetchStats(playerId);
       }
+      scheduleCloudSync();
 
       void playUiFeedback('scan-complete');
     } catch (e) {
@@ -214,6 +232,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       if (playerId) {
         await get().fetchStats(playerId);
       }
+      scheduleCloudSync();
 
       void playUiFeedback('scan-complete');
     } catch (e) {
@@ -245,6 +264,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
       if (playerId) {
         await get().fetchStats(playerId);
       }
+      scheduleCloudSync();
 
       void playUiFeedback('data-rebuilt');
     } catch (e) {
@@ -274,6 +294,7 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
         get().addToast('info', `删除前备份已保存：${result.backup_path}`);
       }
       await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
+      scheduleCloudSync();
       return result;
     } catch (e) {
       get().addToast('error', `清空记录失败: ${String(e)}`);
@@ -311,4 +332,6 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   },
 
   dismissImportSummary: () => set({ lastImportSummary: null }),
+  scheduleCloudSync: () => scheduleCloudSync(),
+  setCloudSyncStatus: (state, message) => set({ cloudSyncStatus: { state, message, updatedAt: Date.now() } }),
 }));
