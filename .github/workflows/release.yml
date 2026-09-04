@@ -149,27 +149,22 @@ jobs:
             local START_TAG="$1"
             local END_TAG="$2"
             local RELEASE_DATE="$3"
-            local RANGE="${START_TAG:+$START_TAG..$END_TAG}"
+            # commit 列表从 stdin 读入，调用方决定 range（避免 tag 不存在的问题）
+            local COMMITS
+            COMMITS=$(cat)
 
             local FEAT FIX PERF DOCS MAINTENANCE OTHER
-            FEAT=$(git log --pretty=format:'%s' --no-merges ${RANGE} \
-              | grep -E '^feat(\([^)]*\))?!?:' \
-              | sed 's/^/- ✨ /' || true)
-            FIX=$(git log --pretty=format:'%s' --no-merges ${RANGE} \
-              | grep -E '^fix(\([^)]*\))?!?:' \
-              | sed 's/^/- 🐛 /' || true)
-            PERF=$(git log --pretty=format:'%s' --no-merges ${RANGE} \
-              | grep -E '^perf(\([^)]*\))?!?:' \
-              | sed 's/^/- ⚡ /' || true)
-            DOCS=$(git log --pretty=format:'%s' --no-merges ${RANGE} \
-              | grep -E '^docs(\([^)]*\))?!?:' \
-              | sed 's/^/- 📚 /' || true)
-            MAINTENANCE=$(git log --pretty=format:'%s' --no-merges ${RANGE} \
+            FEAT=$(echo "$COMMITS" | grep -E '^feat(\([^)]*\))?!?:' | sed 's/^/- ✨ /' || true)
+            FIX=$(echo "$COMMITS" | grep -E '^fix(\([^)]*\))?!?:' | sed 's/^/- 🐛 /' || true)
+            PERF=$(echo "$COMMITS" | grep -E '^perf(\([^)]*\))?!?:' | sed 's/^/- ⚡ /' || true)
+            DOCS=$(echo "$COMMITS" | grep -E '^docs(\([^)]*\))?!?:' | sed 's/^/- 📚 /' || true)
+            MAINTENANCE=$(echo "$COMMITS" \
               | grep -E '^(refactor|chore|ci)(\([^)]*\))?!?:' \
               | grep -vE '^chore\(release\): bump version' \
               | sed 's/^/- 🔧 /' || true)
-            OTHER=$(git log --pretty=format:'%s' --no-merges ${RANGE} \
+            OTHER=$(echo "$COMMITS" \
               | grep -vE '^(feat|fix|perf|refactor|docs|ci|chore)(\([^)]*\))?!?:' \
+              | grep -v '^$' \
               | sed 's/^/- 📝 /' || true)
 
             {
@@ -239,70 +234,83 @@ jobs:
           }
 
           # 1. 生成当前版本的 release-notes.md（给 GitHub Release body 用）
+          # 注意：TAG 可能还没创建（workflow_dispatch 触发时 tag 还没打），
+          # 所以 git log 终点用 HEAD，显示和链接里仍用 TAG 名
           PREV_TAG=$(git tag --sort=-version:refname \
             | grep -v "^${TAG}$" \
             | head -1 \
             || echo "")
-          generate_notes "$PREV_TAG" "$TAG" "$DATE" > release-notes.md
+          if [ -n "$PREV_TAG" ]; then
+            generate_notes "$PREV_TAG" "$TAG" "$DATE" < <(git log --pretty=format:'%s' --no-merges "${PREV_TAG}..HEAD") > release-notes.md
+          else
+            generate_notes "" "$TAG" "$DATE" < <(git log --pretty=format:'%s' --no-merges HEAD) > release-notes.md
+          fi
           echo "Generated changelog for ${TAG}:"
           cat release-notes.md
 
           # 2. 生成 release-history.json（给 latest.json 用，含最近 N 个版本）
           # 收集最近 HISTORY_LIMIT 个已发布 tag（从高到低排序）
           mapfile -t ALL_TAGS < <(git tag --sort=-version:refname)
-          # 构造要输出的版本列表：当前 TAG 放第一个，再跟上比它旧的版本
-          VERSION_TAGS=()
-          # 如果当前 TAG 已经存在于 tag 列表（push tag 触发），跳过重复
+          # 过滤出已发布的正式版本 tag（vX.Y.Z 格式）
+          RELEASED_TAGS=()
           for t in "${ALL_TAGS[@]}"; do
+            if [[ "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              RELEASED_TAGS+=("$t")
+            fi
+          done
+
+          # 构造历史版本列表：
+          # - 第一个版本是当前发布版本（用 TAG 标记，但 git range 用 HEAD，因为 tag 还没打）
+          # - 后续版本是已发布的旧 tag
+          HISTORY_TAGS=("$TAG")
+          for t in "${RELEASED_TAGS[@]}"; do
             if [ "$t" = "$TAG" ]; then
               continue
             fi
-            VERSION_TAGS+=("$t")
+            HISTORY_TAGS+=("$t")
+            if [ "${#HISTORY_TAGS[@]}" -ge "$HISTORY_LIMIT" ]; then
+              break
+            fi
           done
-          # 把当前 TAG 插到最前面
-          VERSION_TAGS=("$TAG" "${VERSION_TAGS[@]}")
-          # 只取前 HISTORY_LIMIT 个
-          VERSION_TAGS=("${VERSION_TAGS[@]:0:$HISTORY_LIMIT}")
 
           echo ""
-          echo "=== History versions (${#VERSION_TAGS[@]}): ${VERSION_TAGS[*]} ==="
+          echo "=== History versions (${#HISTORY_TAGS[@]}): ${HISTORY_TAGS[*]} ==="
 
-          # 用 node 生成 JSON，避免 bash 处理转义的麻烦
-          export VERSION_TAGS_JSON=$(printf '%s\n' "${VERSION_TAGS[@]}" | sed 's/"/\\"/g')
-          export REPO
-          node -e '
+          # 把 tag 列表传给 node
+          HISTORY_TAGS_JSON=$(printf '%s\n' "${HISTORY_TAGS[@]}")
+          export HISTORY_TAGS_JSON REPO DATE
+
+          # 写 node 脚本到文件再执行，避免 node -e 与 bash 引号嵌套出问题
+          # 用 .cjs 后缀，因为 package.json 是 "type": "module"
+          cat > gen-history.cjs <<'NODEEOF'
             const { execSync } = require("child_process");
-            const tags = process.env.VERSION_TAGS_JSON.trim().split("\n").filter(Boolean);
+            const fs = require("fs");
+
+            const tags = process.env.HISTORY_TAGS_JSON.trim().split("\n").filter(Boolean);
             const repo = process.env.REPO;
+            const today = process.env.DATE;
 
-            const history = [];
-            for (let i = 0; i < tags.length; i++) {
-              const curTag = tags[i];
-              const nextTag = tags[i + 1] || "";
-              // 用 git log 拿该版本的发布日期（取 tag 指向的 commit 的日期）
-              let date;
+            function safeExec(cmd) {
               try {
-                date = execSync(`git log -1 --format=%cd --date=short ${curTag}`, { encoding: "utf8" }).trim();
+                return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "ignore"] }).trim();
               } catch {
-                date = new Date().toISOString().slice(0, 10);
+                return "";
               }
+            }
 
-              const range = nextTag ? `${nextTag}..${curTag}` : curTag;
-              let notes;
-              try {
-                notes = execSync(
-                  `bash -c 'generate_notes() { :; }; source /dev/stdin <<"GENEOF"\n' +
-                  // 这里直接用 shell 调 generate_notes 太麻烦，改用纯 node 生成 notes
-                  `GENEOF`, { encoding: "utf8" }
-                );
-              } catch {
-                notes = "";
-              }
+            function getTagDate(tag, idx) {
+              if (idx === 0) return today; // 当前版本用今天
+              const out = safeExec(`git log -1 --format=%cd --date=short "${tag}"`);
+              return out || today;
+            }
 
-              // 用 git log 直接生成分类
-              const commits = execSync(`git log --pretty=format:"%s" --no-merges ${range}`, { encoding: "utf8" })
-                .split("\n").filter(Boolean);
+            function getCommits(range) {
+              const out = safeExec(`git log --pretty=format:"%s" --no-merges "${range}"`);
+              if (!out) return [];
+              return out.split("\n").filter(Boolean);
+            }
 
+            function buildNotes(tag, commits, date, prevTag) {
               const feat = commits.filter(c => /^feat(\([^)]*\))?!?:/.test(c)).map(c => `- ✨ ${c}`).join("\n");
               const fix = commits.filter(c => /^fix(\([^)]*\))?!?:/.test(c)).map(c => `- 🐛 ${c}`).join("\n");
               const perf = commits.filter(c => /^perf(\([^)]*\))?!?:/.test(c)).map(c => `- ⚡ ${c}`).join("\n");
@@ -315,10 +323,10 @@ jobs:
                 .filter(c => !/^(feat|fix|perf|refactor|docs|ci|chore)(\([^)]*\))?!?:/.test(c))
                 .map(c => `- 📝 ${c}`).join("\n");
 
-              let body = `## 📦 ${curTag}\n\n`;
+              let body = `## 📦 ${tag}\n\n`;
               body += `> 🗓️ **Release Date:** ${date}\n`;
-              if (nextTag) {
-                body += `> 🔀 **Diff:** [\`${nextTag}...${curTag}\`](https://github.com/${repo}/compare/${nextTag}...${curTag})\n`;
+              if (prevTag) {
+                body += `> 🔀 **Diff:** [\`${prevTag}...${tag}\`](https://github.com/${repo}/compare/${prevTag}...${tag})\n`;
               }
               body += "\n---\n\n";
 
@@ -337,16 +345,35 @@ jobs:
               body += "> ⬇️ **下载文件见下方 Assets 区域**（Windows / Linux 安装包）\n\n";
               body += "<sub>🤖 Auto-generated by GitHub Actions</sub>";
 
+              return body;
+            }
+
+            const history = [];
+            for (let i = 0; i < tags.length; i++) {
+              const curTag = tags[i];
+              const nextTag = tags[i + 1] || "";
+              const date = getTagDate(curTag, i);
+
+              // 第一个版本（当前发布版本）用 HEAD 作为终点，因为 tag 还没创建
+              // 后续版本用 tag 名
+              const endRef = i === 0 ? "HEAD" : curTag;
+              const range = nextTag ? `${nextTag}..${endRef}` : endRef;
+
+              const commits = getCommits(range);
+              const notes = buildNotes(curTag, commits, date, nextTag);
+
               history.push({
                 version: curTag.replace(/^v/, ""),
-                notes: body,
+                notes,
               });
             }
 
-            require("fs").writeFileSync("release-history.json", JSON.stringify(history, null, 2));
+            fs.writeFileSync("release-history.json", JSON.stringify(history, null, 2));
             console.log(`Generated release-history.json with ${history.length} versions`);
             console.log(JSON.stringify(history.map(h => h.version), null, 2));
-          '
+          NODEEOF
+
+          node gen-history.cjs
 
       - name: Upload changelog
         uses: actions/upload-artifact@v4
