@@ -34,6 +34,7 @@ chrono = "0.4"
 rand = "0.8"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+keyring = { version = "3", features = ["windows-native"] }
 
 [features]
 default = ["custom-protocol"]

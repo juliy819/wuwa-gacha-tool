@@ -15,6 +15,7 @@ export default function StatusBar() {
   const [appVersion, setAppVersion] = useState('');
   const summaries = useGachaStore((state) => state.summaries);
   const activePlayerId = useGachaStore((state) => state.activePlayerId);
+  const cloudSyncStatus = useGachaStore((state) => state.cloudSyncStatus);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
@@ -137,6 +138,9 @@ export default function StatusBar() {
         )}
       </div>
       <div className="flex items-center gap-4">
+        <span className={cloudSyncStatus.state === 'error' ? 'text-[#d99a9a]' : cloudSyncStatus.state === 'updated' ? 'text-[#8fc8be]' : 'text-wave'} title={cloudSyncStatus.updatedAt ? new Date(cloudSyncStatus.updatedAt).toLocaleString() : undefined}>
+          <ResonanceIcon kind="sync" size={12} className="mr-1 inline-block" />{cloudSyncStatus.message}
+        </span>
         <span className="flex items-center gap-1.5">
           <div className="status-ready-dot h-1.5 w-1.5 rounded-full bg-[#7ab88a]" />
           就绪

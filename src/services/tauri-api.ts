@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CharacterPullInsight, ClearRecordsResult, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest, ResourcePackStatus } from '../types';
+import type { CharacterPullInsight, ClearRecordsResult, CloudSyncApplyResult, CloudSyncEnvelope, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, OneDriveDeviceLogin, OneDriveLoginPollStatus, OneDriveStatus, OneDriveSyncResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest, ResourcePackStatus } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -13,6 +13,22 @@ export const gachaApi = {
   getResourceIcon: (resourceId: number): Promise<string> => {
     return invoke('get_resource_icon', { resourceId });
   },
+
+  prepareSyncPayload: (playerId: string): Promise<CloudSyncEnvelope> => {
+    return invoke('prepare_sync_payload', { playerId });
+  },
+
+  applyCloudSyncPayload: (playerId: string, cloudPayload: string): Promise<CloudSyncApplyResult> => {
+    return invoke('apply_cloud_sync_payload', { playerId, cloudPayload });
+  },
+  getOneDriveStatus: (): Promise<OneDriveStatus> => invoke('get_onedrive_status'),
+  startOneDriveLogin: (): Promise<OneDriveDeviceLogin> => invoke('start_onedrive_login'),
+  pollOneDriveLogin: (): Promise<OneDriveLoginPollStatus> => invoke('poll_onedrive_login'),
+  cancelOneDriveLogin: (): Promise<void> => invoke('cancel_onedrive_login'),
+  disconnectOneDrive: (): Promise<void> => invoke('disconnect_onedrive'),
+  syncOneDriveDatabase: (playerId = '', strategy?: 'local' | 'remote'): Promise<OneDriveSyncResult> => invoke('sync_onedrive_database', { playerId, strategy }),
+  /** @deprecated use syncOneDriveDatabase; retained for callers from older UI modules. */
+  syncOneDriveUid: (playerId: string): Promise<OneDriveSyncResult> => invoke('sync_onedrive_database', { playerId }),
   getResourcePortrait: (resourceId: number): Promise<string> => {
     return invoke('get_resource_portrait', { resourceId });
   },
