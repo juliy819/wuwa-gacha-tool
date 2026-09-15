@@ -134,7 +134,8 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const settings = useGachaStore((state) => state.settings);
   const fetchSettings = useGachaStore((state) => state.fetchSettings);
-  const saveGameDir = useGachaStore((state) => state.saveGameDir);
+  const addLogPath = useGachaStore((state) => state.addLogPath);
+  const removeLogPath = useGachaStore((state) => state.removeLogPath);
   const clearRecords = useGachaStore((state) => state.clearRecords);
   const pools = useGachaStore((state) => state.pools);
   const addToast = useGachaStore((state) => state.addToast);
@@ -143,6 +144,7 @@ export default function SettingsPage() {
   const [gameDirInput, setGameDirInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [selectingGamePath, setSelectingGamePath] = useState(false);
+  const [removingPathId, setRemovingPathId] = useState<number | null>(null);
   const [validating, setValidating] = useState(false);
   const [validation, setValidation] = useState<GameDirValidation | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(pools.length > 0 && storeSummaries.length === 0);
@@ -258,10 +260,6 @@ export default function SettingsPage() {
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
-
-  useEffect(() => {
-    if (settings) setGameDirInput(settings.log_path);
-  }, [settings]);
 
   useEffect(() => {
     if (pools.length === 0) {
@@ -426,15 +424,12 @@ export default function SettingsPage() {
     [summaries],
   );
   const totalRecords = summaries.reduce((sum, summary) => sum + summary.record_count, 0);
-  const savedPath = settings?.log_path.trim() ?? '';
-  const isDirty = gameDirInput.trim() !== savedPath;
-  const directoryState = !gameDirInput.trim()
-      ? { label: '未配置日志', tone: 'idle' }
-    : validating
-      ? { label: '校验中', tone: 'checking' }
-      : validation?.valid
-        ? { label: '日志可用', tone: 'ready' }
-        : { label: '需要检查', tone: 'error' };
+  const logPaths = settings?.log_paths ?? [];
+  const activePath = settings?.log_path.trim() ?? '';
+  const canAddPath = Boolean(gameDirInput.trim()) && Boolean(validation?.valid);
+  const directoryState = logPaths.length > 0
+    ? { label: `已配置 ${logPaths.length} 个日志`, tone: 'ready' }
+    : { label: '未配置日志', tone: 'idle' };
 
   const selectedSummary = deleteTarget?.playerId ? summaryByPlayer.get(deleteTarget.playerId) : null;
   const expectedConfirmation = deleteTarget?.playerId ? displayUid(deleteTarget.playerId) : '清空全部数据';
@@ -547,15 +542,28 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSave = async () => {
-    if (!isDirty || !validation?.valid) return;
+  const handleAddPath = async () => {
+    if (!canAddPath) return;
     setSaving(true);
     try {
-      await saveGameDir(gameDirInput.trim());
+      await addLogPath(gameDirInput.trim());
+      setGameDirInput('');
+      setValidation(null);
     } catch {
       // Store 已显示失败提示。
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRemovePath = async (id: number) => {
+    setRemovingPathId(id);
+    try {
+      await removeLogPath(id);
+    } catch {
+      // Store 已显示失败提示。
+    } finally {
+      setRemovingPathId(null);
     }
   };
 
@@ -873,10 +881,48 @@ export default function SettingsPage() {
                     <span>{directoryState.label}</span>
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-wave">请选择游戏根目录下的 <span className="font-mono text-[11px]">Client\Saved\Logs\Client.log</span> 文件，软件会保存日志文件路径</p>
+                <p className="mt-1 text-xs text-wave">可添加多个版本游戏根目录下的 <span className="font-mono text-[11px]">Client\Saved\Logs\Client.log</span>；扫描时自动使用最近修改的一个</p>
 
-                <label className="mt-5 block">
-                  <span className="mb-2 block text-xs text-wave">Client.log 文件路径</span>
+                <ul className="mt-4 space-y-2">
+                  {logPaths.length === 0 ? (
+                    <li className="rounded-lg border border-white/[0.06] px-3 py-2 text-[11px] text-wave">尚未添加任何日志路径</li>
+                  ) : logPaths.map((entry) => (
+                    <li key={entry.id} className="flex items-center gap-2 rounded-lg border border-white/[0.08] px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-mono text-[11px] text-tide">{displayPath(entry.path)}</span>
+                          {entry.path === activePath && (
+                            <span className="shrink-0 rounded bg-[#c9ab78]/15 px-1.5 py-0.5 text-[10px] text-[#c9ab78]">扫描使用</span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-wave">
+                          {entry.exists ? (
+                            <>
+                              <ResonanceIcon kind="success" size={11} />
+                              <span>存在{entry.modified_at ? ` · 修改于 ${new Date(entry.modified_at).toLocaleString()}` : ''}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ResonanceIcon kind="error" size={11} />
+                              <span>文件不存在</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePath(entry.id)}
+                        disabled={removingPathId === entry.id}
+                        className="glass-input shrink-0 px-2 py-1 text-[11px] text-wave hover:text-tide disabled:opacity-50"
+                      >
+                        {removingPathId === entry.id ? <LoaderCircle size={12} className="animate-spin" /> : '移除'}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+
+                <label className="mt-4 block">
+                  <span className="mb-2 block text-xs text-wave">添加 Client.log 路径</span>
                   <div className="flex gap-2">
                     <ShareMaskedInput
                       type="text"
@@ -895,7 +941,7 @@ export default function SettingsPage() {
 
                 <div className="mt-2 min-h-5">
                   {!gameDirInput.trim() ? (
-                    <div className="flex items-center gap-2 text-[11px] text-wave"><ResonanceIcon kind="info" size={13} />尚未设置 Client.log</div>
+                    <div className="flex items-center gap-2 text-[11px] text-wave"><ResonanceIcon kind="info" size={13} />选择日志文件后即可添加到列表</div>
                   ) : validating ? (
                     <div className="flex items-center gap-2 text-[11px] text-wave"><LoaderCircle size={12} className="animate-spin" />正在检查 Client.log</div>
                   ) : validation?.valid ? (
@@ -907,17 +953,15 @@ export default function SettingsPage() {
 
                 <div className="mt-4 flex items-center gap-3">
                   <button
-                    onClick={handleSave}
-                    disabled={saving || validating || !isDirty || !validation?.valid}
+                    onClick={handleAddPath}
+                    disabled={saving || validating || !canAddPath}
                     className="tide-btn flex items-center gap-2 px-4 py-2 text-sm disabled:opacity-40"
                   >
                     <ResonanceActionIcon size="sm" tone="gold">
                       {saving ? <LoaderCircle size={12} className="animate-spin" /> : <ResonanceIcon kind="save" size={14} />}
                     </ResonanceActionIcon>
-                    {saving ? '保存中' : '保存目录'}
+                    {saving ? '添加中' : '添加路径'}
                   </button>
-                  {isDirty && validation?.valid && <span className="text-[11px] text-[#c9ab78]">有未保存的修改</span>}
-                  {!isDirty && savedPath && <span className="text-[11px] text-wave">当前设置已保存</span>}
                 </div>
               </motion.section>
 

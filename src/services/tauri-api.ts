@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { CharacterPullInsight, ClearRecordsResult, CloudSyncApplyResult, CloudSyncEnvelope, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, OneDriveDeviceLogin, OneDriveLoginPollStatus, OneDriveStatus, OneDriveSyncResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest, ResourcePackStatus } from '../types';
+import type { CharacterPullInsight, ClearRecordsResult, CloudSyncApplyResult, CloudSyncEnvelope, DeleteMockResult, GachaImportPreview, GachaImportResult, GachaInsights, GachaRecord, GachaResource, GachaStats, GameDirValidation, GameSettings, HomeOverview, InsertMockGachaRequest, OcrComponentStatus, OcrComponentUpdate, OcrImportResult, OcrScreenshotResult, OneDriveDeviceLogin, OneDriveLoginPollStatus, OneDriveStatus, OneDriveSyncResult, PoolBoundaryStatus, RecordSummary, ResourceAcquisitionInsight, UpdateMockGachaRequest, ResourcePackStatus, LogPathEntry } from '../types';
 
 export const gachaApi = {
   openLogDirectory: (): Promise<string> => {
@@ -174,6 +174,21 @@ export const gachaApi = {
   // 获取游戏目录
   getGameDir: (): Promise<GameSettings> => {
     return invoke('get_game_dir');
+  },
+
+  // 列出已配置的 Client.log 路径
+  listLogPaths: (): Promise<LogPathEntry[]> => {
+    return invoke('list_log_paths');
+  },
+
+  // 追加一条 Client.log 路径
+  addLogPath: (path: string, label?: string): Promise<LogPathEntry[]> => {
+    return invoke('add_log_path', { path, label });
+  },
+
+  // 删除一条 Client.log 路径
+  removeLogPath: (id: number): Promise<LogPathEntry[]> => {
+    return invoke('remove_log_path', { id });
   },
 
   validateGameDir: (gameDir: string): Promise<GameDirValidation> => {

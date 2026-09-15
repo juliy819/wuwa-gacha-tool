@@ -112,7 +112,7 @@ function Test-GachaRecordUrl([string]$Url) {
     $uri = $null
     return [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref]$uri) -and
         $uri.Scheme -eq 'https' -and
-        $uri.Host -eq 'aki-gm-resources.aki-game.com' -and
+        $uri.Host -match '^aki-gm-resources(-oversea)?\.aki-game\.(com|net)$' -and
         $uri.AbsolutePath -eq '/aki/gacha/index.html' -and
         ($uri.Fragment -eq '#/record' -or $uri.Fragment.StartsWith('#/record?'))
 }

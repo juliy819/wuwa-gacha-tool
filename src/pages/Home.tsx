@@ -38,6 +38,7 @@ export default function Home() {
   const scanGachaByUrl = useGachaStore((state) => state.scanGachaByUrl);
   const scanning = useGachaStore((state) => state.scanning);
   const settings = useGachaStore((state) => state.settings);
+  const fetchSettings = useGachaStore((state) => state.fetchSettings);
   const stats = useGachaStore((state) => state.stats);
   const statsPlayerId = useGachaStore((state) => state.statsPlayerId);
   const createRipple = useClickRipple();
@@ -151,6 +152,10 @@ export default function Home() {
     setCloudError('');
     setScanMode('dir');
     setShowScanModal(true);
+    // 打开弹窗时重新解析一次，默认使用最近修改的已配置 Client.log。
+    void fetchSettings()
+      .then(() => setGameDirInput(useGachaStore.getState().settings?.log_path || ''))
+      .catch(() => {});
   };
 
   const handleScanByDir = async () => {

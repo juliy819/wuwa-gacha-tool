@@ -363,9 +363,20 @@ export interface PoolBoundaryStatus {
   confirmed: boolean;
 }
 
+export interface LogPathEntry {
+  id: number;
+  path: string;
+  label: string;
+  exists: boolean;
+  /** 文件最后修改时间（Unix 毫秒），文件不存在时为 0。 */
+  modified_at: number;
+}
+
 export interface GameSettings {
   game_dir: string;
+  /** 当前解析出的路径：已配置路径中存在且最近修改的一条。 */
   log_path: string;
+  log_paths: LogPathEntry[];
 }
 
 export interface GameDirValidation {

@@ -3,7 +3,6 @@ use std::fs;
 use std::path::Path;
 use url::Url;
 
-const GACHA_HOST: &str = "aki-gm-resources.aki-game.com";
 const GACHA_PATH: &str = "/aki/gacha/index.html";
 
 /// 解码 Client.log 文件
@@ -85,13 +84,23 @@ pub fn extract_gacha_url(decoded_log: &str) -> Option<String> {
     latest_url
 }
 
+/// 抽卡链接主机白名单：国服 `aki-game.com`、国际服 `aki-game.net`。
+/// 国际服主机形如 `aki-gm-resources-oversea.aki-game.net`。
+fn is_gacha_host(host: &str) -> bool {
+    let Some(rest) = host.strip_prefix("aki-gm-resources") else {
+        return false;
+    };
+    let rest = rest.strip_prefix("-oversea").unwrap_or(rest);
+    matches!(rest, ".aki-game.com" | ".aki-game.net")
+}
+
 fn is_gacha_record_url(raw_url: &str) -> bool {
     let Ok(url) = Url::parse(raw_url) else {
         return false;
     };
 
     url.scheme() == "https"
-        && url.host_str() == Some(GACHA_HOST)
+        && url.host_str().is_some_and(is_gacha_host)
         && url.path() == GACHA_PATH
         && url
             .fragment()
@@ -195,6 +204,30 @@ more data"#;
     fn rejects_lookalike_host_and_non_record_gacha_page() {
         let log = r#"[2026.08.16-12.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com.example.com/aki/gacha/index.html#/record?player_id=123&record_id=token"}
 [2026.08.16-12.01.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources.aki-game.com/aki/gacha/index.html?player_id=123&record_id=token"}"#;
+
+        assert_eq!(extract_gacha_url(log), None);
+    }
+
+    #[test]
+    fn accepts_oversea_gacha_url() {
+        let log = r#"[2026.09.15-11.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources-oversea.aki-game.net/aki/gacha/index.html#/record?svr_id=server\u0026player_id=716739448\u0026svr_area=global\u0026record_id=token"}"#;
+
+        assert_eq!(
+            extract_gacha_url(log).as_deref(),
+            Some("https://aki-gm-resources-oversea.aki-game.net/aki/gacha/index.html#/record?svr_id=server&player_id=716739448&svr_area=global&record_id=token")
+        );
+    }
+
+    #[test]
+    fn rejects_lookalike_oversea_host() {
+        let log = r#"[2026.09.15-11.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources-oversea.aki-game.net.example.com/aki/gacha/index.html#/record?player_id=123&record_id=token"}"#;
+
+        assert_eq!(extract_gacha_url(log), None);
+    }
+
+    #[test]
+    fn rejects_oversea_announcement_page() {
+        let log = r#"[2026.09.15-12.00.00:000] LogWebView: OpenWebView: sdkJson: {"url":"https://aki-gm-resources-oversea.aki-game.net/aki/announcement/index.html?server_id=test&role_id=123&login_info=encoded"}"#;
 
         assert_eq!(extract_gacha_url(log), None);
     }

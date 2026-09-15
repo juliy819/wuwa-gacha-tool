@@ -20,7 +20,8 @@ use crate::gacha::fetcher::{
 use crate::gacha::parser::{
     character_pull_insights_with_boundaries, resource_acquisition_insights_with_boundaries,
     CharacterPullInsight, ClearRecordsResult, GachaImportResult, GachaInsights, GachaRecord,
-    GachaStats, GameDirValidation, GameSettings, RecordSummary, ResourceAcquisitionInsight,
+    GachaStats, GameDirValidation, GameSettings, LogPathEntry, RecordSummary,
+    ResourceAcquisitionInsight,
 };
 use crate::AppState;
 
@@ -392,10 +393,10 @@ fn build_filler_resources<R: Rng + ?Sized>(
     Ok(fillers)
 }
 
-/// 解码日志文件并提取 URL
+/// 解码日志文件并提取 URL。未指定路径时自动取最近修改的已配置 Client.log。
 #[tauri::command]
-pub fn decode_log(game_dir: String) -> Result<String, String> {
-    let log_path = decoder::get_log_path(&game_dir);
+pub fn decode_log(state: State<'_, AppState>, game_dir: String) -> Result<String, String> {
+    let log_path = resolve_log_path(&state, &game_dir)?;
     let decoded = decoder::decode_client_log(&log_path)?;
     let url = decoder::extract_gacha_url(&decoded)
         .ok_or_else(|| "未找到抽卡链接，请先在游戏中打开抽卡历史记录".to_string())?;
@@ -538,8 +539,8 @@ async fn fetch_gacha_data_from_log(
     state: &State<'_, AppState>,
     game_dir: &str,
 ) -> Result<GachaImportResult, String> {
-    // 解码日志获取 URL
-    let log_path = decoder::get_log_path(game_dir);
+    // 解析出要使用的 Client.log（未指定时取最近修改的已配置路径），再解码获取 URL
+    let log_path = resolve_log_path(state, game_dir)?;
     let decoded = decoder::decode_client_log(&log_path)?;
     let url = decoder::extract_gacha_url(&decoded)
         .ok_or_else(|| "未找到抽卡链接，请先在游戏中打开抽卡历史记录".to_string())?;
@@ -1240,40 +1241,154 @@ pub fn clear_records(
     result
 }
 
-/// 保存游戏目录
-#[tauri::command]
-pub fn save_game_dir(state: State<'_, AppState>, game_dir: String) -> Result<(), String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.save_settings(&GameSettings { game_dir: String::new(), log_path: game_dir })
+/// 探测每条已配置路径的存在性与最后修改时间。
+fn enrich_log_paths(entries: Vec<LogPathEntry>) -> Vec<LogPathEntry> {
+    entries
+        .into_iter()
+        .map(|mut entry| {
+            if let Ok(meta) = std::fs::metadata(entry.path.trim()) {
+                if meta.is_file() {
+                    entry.exists = true;
+                    if let Ok(modified) = meta.modified() {
+                        entry.modified_at = modified
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|dur| dur.as_millis() as i64)
+                            .unwrap_or(0);
+                    }
+                }
+            }
+            entry
+        })
+        .collect()
 }
 
-/// 获取游戏目录
+/// 在已存在的路径中挑选最后修改的一条。
+fn pick_latest_log_path(entries: &[LogPathEntry]) -> Option<String> {
+    entries
+        .iter()
+        .filter(|entry| entry.exists)
+        .max_by_key(|entry| entry.modified_at)
+        .map(|entry| entry.path.clone())
+}
+
+/// 读取已配置路径并附加运行时探测字段。
+fn load_log_paths(state: &State<'_, AppState>) -> Result<Vec<LogPathEntry>, String> {
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    Ok(enrich_log_paths(db.list_log_paths()?))
+}
+
+/// 解析出实际要读取的 Client.log：显式指定则用它，否则取最近修改的已配置路径。
+fn resolve_log_path(state: &State<'_, AppState>, requested: &str) -> Result<String, String> {
+    let requested = requested.trim();
+    if !requested.is_empty() {
+        return Ok(decoder::get_log_path(requested));
+    }
+    let entries = load_log_paths(state)?;
+    pick_latest_log_path(&entries)
+        .ok_or_else(|| "尚未配置可用的 Client.log，请先在设置中添加日志路径".to_string())
+}
+
+/// 将最近修改的路径写入当前设置。
+fn persist_active_log_path(
+    state: &State<'_, AppState>,
+    entries: &[LogPathEntry],
+) -> Result<(), String> {
+    let active = pick_latest_log_path(entries)
+        .or_else(|| entries.first().map(|entry| entry.path.clone()))
+        .unwrap_or_default();
+    let db = state.db.lock().map_err(|e| e.to_string())?;
+    db.save_settings(&GameSettings {
+        game_dir: String::new(),
+        log_path: active,
+        log_paths: Vec::new(),
+    })
+}
+
+/// 列出已配置的 Client.log 路径。
+#[tauri::command]
+pub fn list_log_paths(state: State<'_, AppState>) -> Result<Vec<LogPathEntry>, String> {
+    load_log_paths(&state)
+}
+
+/// 追加一条 Client.log 路径；重复路径自动忽略。
+#[tauri::command]
+pub fn add_log_path(
+    state: State<'_, AppState>,
+    path: String,
+    label: Option<String>,
+) -> Result<Vec<LogPathEntry>, String> {
+    let trimmed = path.trim();
+    let valid = std::path::Path::new(trimmed)
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("Client.log"))
+        && std::path::Path::new(trimmed).is_file();
+    if !valid {
+        return Err("未找到 Client.log，请选择有效的日志文件".to_string());
+    }
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.add_log_path(trimmed, label.unwrap_or_default().trim())?;
+    }
+    let entries = load_log_paths(&state)?;
+    persist_active_log_path(&state, &entries)?;
+    Ok(entries)
+}
+
+/// 删除一条已配置的 Client.log 路径。
+#[tauri::command]
+pub fn remove_log_path(state: State<'_, AppState>, id: i64) -> Result<Vec<LogPathEntry>, String> {
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.remove_log_path(id)?;
+    }
+    let entries = load_log_paths(&state)?;
+    persist_active_log_path(&state, &entries)?;
+    Ok(entries)
+}
+
+/// 保存游戏目录到已配置路径列表。
+#[tauri::command]
+pub fn save_game_dir(state: State<'_, AppState>, game_dir: String) -> Result<(), String> {
+    let trimmed = game_dir.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.add_log_path(trimmed, "")?;
+    }
+    let entries = load_log_paths(&state)?;
+    persist_active_log_path(&state, &entries)?;
+    Ok(())
+}
+
+/// 获取游戏设置：`log_paths` 为全部已配置路径，`log_path` 为其中最近修改的一条。
 #[tauri::command]
 pub fn get_game_dir(state: State<'_, AppState>) -> Result<GameSettings, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let mut settings = db.get_settings()?;
-    if !settings.log_path.trim().is_empty() {
-        if !std::path::Path::new(settings.log_path.trim()).is_file() {
-            settings.log_path.clear();
-            settings.game_dir.clear();
-            db.save_settings(&settings)?;
+    let mut settings = {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        db.get_settings()?
+    };
+    let mut entries = load_log_paths(&state)?;
+
+    // 仅保存过游戏根目录时，按约定推导出 Client.log 并纳入列表。
+    if entries.is_empty() && !settings.game_dir.trim().is_empty() {
+        let derived =
+            std::path::Path::new(settings.game_dir.trim()).join("Client/Saved/Logs/Client.log");
+        if derived.is_file() {
+            let derived_path = derived.to_string_lossy().into_owned();
+            {
+                let db = state.db.lock().map_err(|e| e.to_string())?;
+                db.add_log_path(&derived_path, "")?;
+            }
+            entries = load_log_paths(&state)?;
         }
-        return Ok(settings);
     }
-    if settings.game_dir.trim().is_empty() {
-        return Ok(settings);
-    }
-    let log_path = std::path::Path::new(settings.game_dir.trim()).join("Client/Saved/Logs/Client.log");
-    if log_path.is_file() {
-        let normalized = log_path.to_string_lossy().into_owned();
-        if normalized != settings.game_dir.trim() {
-            settings.log_path = normalized;
-            db.save_settings(&settings)?;
-        }
-    } else {
-        settings.game_dir.clear();
-        db.save_settings(&settings)?;
-    }
+
+    // 扫描默认使用最近修改的一条；没有可用条目时清空，避免沿用失效路径。
+    settings.log_path = pick_latest_log_path(&entries).unwrap_or_default();
+    settings.game_dir = String::new();
+    settings.log_paths = entries;
     Ok(settings)
 }
 
@@ -1314,6 +1429,61 @@ pub fn validate_game_dir(game_dir: String) -> GameDirValidation {
 mod tests {
     use super::*;
     use rand::SeedableRng;
+
+    fn log_entry(id: i64, path: &str, exists: bool, modified_at: i64) -> LogPathEntry {
+        LogPathEntry {
+            id,
+            path: path.to_string(),
+            label: String::new(),
+            exists,
+            modified_at,
+        }
+    }
+
+    #[test]
+    fn picks_the_most_recently_modified_existing_log_path() {
+        let entries = vec![
+            log_entry(1, "C:/a/Client.log", true, 100),
+            log_entry(2, "C:/b/Client.log", true, 300),
+            log_entry(3, "C:/c/Client.log", false, 999),
+        ];
+        assert_eq!(
+            pick_latest_log_path(&entries).as_deref(),
+            Some("C:/b/Client.log")
+        );
+    }
+
+    #[test]
+    fn reports_no_available_log_path_when_none_exists() {
+        let entries = vec![log_entry(1, "C:/a/Client.log", false, 100)];
+        assert_eq!(pick_latest_log_path(&entries), None);
+        assert_eq!(pick_latest_log_path(&[]), None);
+    }
+
+    #[test]
+    fn enrich_marks_only_existing_files_and_reads_their_modified_time() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_dir = std::env::temp_dir().join(format!("wuwa-log-enrich-test-{unique}"));
+        std::fs::create_dir_all(&test_dir).unwrap();
+        let existing = test_dir.join("Client.log");
+        std::fs::write(&existing, b"x").unwrap();
+        let missing = test_dir.join("Missing.log");
+
+        let enriched = enrich_log_paths(vec![
+            log_entry(1, existing.to_string_lossy().as_ref(), false, 0),
+            log_entry(2, missing.to_string_lossy().as_ref(), false, 0),
+        ]);
+
+        assert!(enriched[0].exists);
+        assert!(enriched[0].modified_at > 0);
+        assert!(!enriched[1].exists);
+        assert_eq!(enriched[1].modified_at, 0);
+
+        std::fs::remove_dir_all(test_dir).unwrap();
+    }
 
     fn dated_record(id: i64, time: &str) -> GachaRecord {
         GachaRecord {

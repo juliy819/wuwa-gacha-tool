@@ -1087,10 +1087,27 @@ fn probability_curve(intervals: &[i32]) -> Vec<ProbabilityPoint> {
         .collect()
 }
 
+/// 已配置的一条 Client.log 路径。`exists` / `modified_at` 为运行时探测结果，不落库。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LogPathEntry {
+    pub id: i64,
+    pub path: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub exists: bool,
+    /// 文件最后修改时间（Unix 毫秒），文件不存在时为 0。
+    #[serde(default)]
+    pub modified_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GameSettings {
     pub game_dir: String,
+    /// 当前解析出的 Client.log 路径：已配置路径中存在且最近修改的一条。
     pub log_path: String,
+    #[serde(default)]
+    pub log_paths: Vec<LogPathEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

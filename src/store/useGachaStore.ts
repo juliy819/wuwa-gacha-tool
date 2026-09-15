@@ -30,7 +30,8 @@ interface GachaStore {
   fetchPools: () => Promise<void>;
   fetchSummaries: () => Promise<void>;
   fetchSettings: () => Promise<void>;
-  saveGameDir: (dir: string) => Promise<void>;
+  addLogPath: (path: string, label?: string) => Promise<void>;
+  removeLogPath: (id: number) => Promise<void>;
   scanGacha: (gameDir: string) => Promise<void>;
   scanGachaByUrl: (url: string, source?: 'url' | 'cloud') => Promise<void>;
   importJson: (filePath: string, expectedFileHash?: string) => Promise<void>;
@@ -166,13 +167,24 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
     }
   },
 
-  saveGameDir: async (dir: string) => {
+  addLogPath: async (path: string, label?: string) => {
     try {
-      await gachaApi.saveGameDir(dir);
-      set({ settings: { game_dir: '', log_path: dir } });
-      get().addToast('success', 'Client.log 路径已保存');
+      await gachaApi.addLogPath(path, label);
+      await get().fetchSettings();
+      get().addToast('success', 'Client.log 路径已添加');
     } catch (e) {
-      get().addToast('error', `保存失败: ${String(e)}`);
+      get().addToast('error', `添加失败: ${String(e)}`);
+      throw e;
+    }
+  },
+
+  removeLogPath: async (id: number) => {
+    try {
+      await gachaApi.removeLogPath(id);
+      await get().fetchSettings();
+      get().addToast('success', '已移除该路径');
+    } catch (e) {
+      get().addToast('error', `移除失败: ${String(e)}`);
       throw e;
     }
   },

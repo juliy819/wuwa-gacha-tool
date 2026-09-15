@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::assets::GachaResource;
 use crate::gacha::fetcher::{get_display_pool_name, hard_pity_for_pool, is_limited_char_pool};
-use crate::gacha::parser::{ClearRecordsResult, GachaRecord, GameSettings, RecordSummary};
+use crate::gacha::parser::{
+    ClearRecordsResult, GachaRecord, GameSettings, LogPathEntry, RecordSummary,
+};
 
 const STANDARD_FIVE_STAR_CHAR_IDS: &[i64] = &[1104, 1203, 1301, 1405, 1503];
 type OccurrenceKey = (
@@ -30,6 +32,13 @@ fn current_datetime() -> String {
         .single()
         .unwrap_or_else(|| Local::now());
     local.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+fn now_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|dur| dur.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +182,7 @@ impl Database {
         let config = Connection::open(state).map_err(|e| e.to_string())?;
         config.execute_batch(
             "CREATE TABLE IF NOT EXISTS game_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, game_dir TEXT NOT NULL, log_path TEXT NOT NULL DEFAULT '');
+             CREATE TABLE IF NOT EXISTS game_log_paths (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, label TEXT NOT NULL DEFAULT '', added_at INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS nanoka_cache (cache_key TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS cloud_sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, completed_at TEXT NOT NULL);"
@@ -331,6 +341,7 @@ impl Database {
             .map_err(|e| e.to_string())?;
         self.config_conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS game_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, game_dir TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS game_log_paths (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL UNIQUE, label TEXT NOT NULL DEFAULT '', added_at INTEGER NOT NULL DEFAULT 0);
              CREATE TABLE IF NOT EXISTS nanoka_cache (cache_key TEXT PRIMARY KEY, json TEXT NOT NULL, updated_at INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS cloud_sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, completed_at TEXT NOT NULL);"
@@ -342,6 +353,7 @@ impl Database {
             "ALTER TABLE game_settings ADD COLUMN log_path TEXT NOT NULL DEFAULT ''",
             [],
         );
+        self.seed_log_paths()?;
         Ok(())
     }
 
@@ -1896,10 +1908,82 @@ impl Database {
                 Ok(GameSettings {
                     game_dir: row.get(0)?,
                     log_path: row.get(1)?,
+                    ..Default::default()
                 })
             })
             .unwrap_or_default();
         Ok(settings)
+    }
+
+    /// 列出已配置的所有 Client.log 路径（不含运行时探测字段）。
+    pub fn list_log_paths(&self) -> Result<Vec<LogPathEntry>, String> {
+        let mut stmt = self
+            .config_conn
+            .prepare("SELECT id, path, label FROM game_log_paths ORDER BY id ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(LogPathEntry {
+                    id: row.get(0)?,
+                    path: row.get(1)?,
+                    label: row.get(2)?,
+                    exists: false,
+                    modified_at: 0,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// 追加一条 Client.log 路径；已存在（按 path 去重）时不做任何改动。
+    pub fn add_log_path(&self, path: &str, label: &str) -> Result<(), String> {
+        self.config_conn
+            .execute(
+                "INSERT OR IGNORE INTO game_log_paths (path, label, added_at) VALUES (?1, ?2, ?3)",
+                params![path, label, now_millis()],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// 按 id 删除一条已配置路径。
+    pub fn remove_log_path(&self, id: i64) -> Result<(), String> {
+        self.config_conn
+            .execute("DELETE FROM game_log_paths WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    /// 用现有的单路径设置播种路径列表（幂等，仅首次执行）。
+    fn seed_log_paths(&self) -> Result<(), String> {
+        let seeded: bool = self
+            .config_conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name='log_paths_seeded')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+        if seeded {
+            return Ok(());
+        }
+        self.config_conn
+            .execute(
+                "INSERT OR IGNORE INTO game_log_paths (path, label, added_at)
+                 SELECT TRIM(log_path), '', ?1 FROM game_settings
+                 WHERE TRIM(COALESCE(log_path, '')) <> ''",
+                params![now_millis()],
+            )
+            .map_err(|e| e.to_string())?;
+        self.config_conn
+            .execute(
+                "INSERT OR REPLACE INTO app_migrations (name, completed_at)
+                 VALUES ('log_paths_seeded', datetime('now'))",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     pub fn get_nanoka_cache(&self, cache_key: &str) -> Result<Option<CachedJson>, String> {
@@ -2190,6 +2274,59 @@ mod tests {
         db.init_tables().unwrap();
         db.migrate().unwrap();
         db
+    }
+
+    #[test]
+    fn log_paths_add_deduplicates_and_removes() {
+        let db = test_database();
+        assert!(db.list_log_paths().unwrap().is_empty());
+
+        db.add_log_path("C:/a/Client.log", "国服").unwrap();
+        db.add_log_path("C:/b/Client.log", "").unwrap();
+        db.add_log_path("C:/a/Client.log", "重复路径").unwrap();
+
+        let paths = db.list_log_paths().unwrap();
+        assert_eq!(paths.len(), 2);
+        assert_eq!(paths[0].path, "C:/a/Client.log");
+
+        db.remove_log_path(paths[0].id).unwrap();
+        let remaining = db.list_log_paths().unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].path, "C:/b/Client.log");
+    }
+
+    #[test]
+    fn upgrades_a_single_log_path_into_the_multi_path_list_once() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let test_dir = std::env::temp_dir().join(format!("wuwa-gacha-log-paths-test-{unique}"));
+        std::fs::create_dir_all(&test_dir).unwrap();
+        let db_path = test_dir.join(crate::paths::STATE_DB_FILENAME);
+
+        // 升级前的状态库只保存了一个日志路径。
+        let legacy = Connection::open(&db_path).unwrap();
+        legacy
+            .execute_batch(
+                "CREATE TABLE game_settings (id INTEGER PRIMARY KEY AUTOINCREMENT, game_dir TEXT NOT NULL, log_path TEXT NOT NULL DEFAULT '');
+                 INSERT INTO game_settings (game_dir, log_path) VALUES ('', 'C:/game/Client.log');",
+            )
+            .unwrap();
+        drop(legacy);
+
+        let db = Database::new(&db_path).unwrap();
+        let seeded = db.list_log_paths().unwrap();
+        assert_eq!(seeded.len(), 1);
+        assert_eq!(seeded[0].path, "C:/game/Client.log");
+
+        // 播种只执行一次；删除后的路径不会被重新加回。
+        db.remove_log_path(seeded[0].id).unwrap();
+        db.seed_log_paths().unwrap();
+        assert!(db.list_log_paths().unwrap().is_empty());
+
+        drop(db);
+        std::fs::remove_dir_all(test_dir).unwrap();
     }
 
     #[test]
