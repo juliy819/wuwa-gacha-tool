@@ -173,6 +173,130 @@ fn legacy_table_migration_sql(table: &str, columns: &HashSet<String>) -> String 
     }
 }
 
+/// 云端快照覆盖本机前的预检结果：只用于告知用户会丢掉什么，不修改任何数据。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SyncApplyPreview {
+    pub local_count: usize,
+    pub remote_count: usize,
+    /// 本机存在、而云端快照里没有（或条数更少）的记录数。
+    pub lost_count: usize,
+    pub lost_earliest: Option<String>,
+    pub lost_latest: Option<String>,
+}
+
+/// 覆盖前预检用的比对语句：按“记录身份”聚合后比较条数差，因此同一秒多条
+/// 完全相同记录只少了一部分的情况也能算准；身份口径与 merge_records 一致
+/// （不含 occurrence_no，因为它会随来源顺序重新编号）。
+const SYNC_APPLY_PREVIEW_SQL: &str = "
+    WITH local_counts AS (
+        SELECT player_id, card_pool_type, time, resource_id, quality_level, resource_type,
+               count, is_mock, COALESCE(mock_batch_id, '') AS batch, COUNT(*) AS hits
+        FROM main.gacha_records
+        GROUP BY player_id, card_pool_type, time, resource_id, quality_level, resource_type,
+                 count, is_mock, batch
+    ),
+    remote_counts AS (
+        SELECT player_id, card_pool_type, time, resource_id, quality_level, resource_type,
+               count, is_mock, COALESCE(mock_batch_id, '') AS batch, COUNT(*) AS hits
+        FROM cloud.gacha_records
+        GROUP BY player_id, card_pool_type, time, resource_id, quality_level, resource_type,
+                 count, is_mock, batch
+    )
+    SELECT
+        COALESCE(SUM(MAX(local_counts.hits - COALESCE(remote_counts.hits, 0), 0)), 0),
+        MIN(CASE WHEN local_counts.hits > COALESCE(remote_counts.hits, 0) THEN local_counts.time END),
+        MAX(CASE WHEN local_counts.hits > COALESCE(remote_counts.hits, 0) THEN local_counts.time END),
+        (SELECT COUNT(*) FROM main.gacha_records),
+        (SELECT COUNT(*) FROM cloud.gacha_records)
+    FROM local_counts
+    LEFT JOIN remote_counts
+        ON local_counts.player_id = remote_counts.player_id
+       AND local_counts.card_pool_type = remote_counts.card_pool_type
+       AND local_counts.time = remote_counts.time
+       AND local_counts.resource_id = remote_counts.resource_id
+       AND local_counts.quality_level = remote_counts.quality_level
+       AND local_counts.resource_type = remote_counts.resource_type
+       AND local_counts.count = remote_counts.count
+       AND local_counts.is_mock = remote_counts.is_mock
+       AND local_counts.batch = remote_counts.batch";
+
+/// 校验云端快照的结构兼容性。覆盖与覆盖前预检共用同一套规则，保证预检通过
+/// 就意味着覆盖可以真正执行；返回快照是否带 gacha_data_meta 表。
+fn inspect_sync_snapshot(remote: &Connection) -> Result<bool, String> {
+    let integrity: String = remote
+        .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+        .map_err(|e| format!("校验云端数据库失败: {e}"))?;
+    if integrity != "ok" {
+        return Err("云端数据库完整性校验失败".to_string());
+    }
+    let has_meta_table: bool = remote
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='gacha_data_meta')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+    let version: i64 = if has_meta_table {
+        remote
+            .query_row(
+                "SELECT schema_version FROM gacha_data_meta LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    // 历史兼容：gacha_data_meta 存在但为空时（旧版 Android 快照），
+    // 只要后续表结构校验通过就视为 v1，避免阻断正常同步。
+    // 真正的版本不匹配在表结构校验阶段也会被拦住。
+    if version != 0 && version != 1 {
+        return Err(format!("暂不支持云端数据库版本 {version}"));
+    }
+    const MAX_ROWS: i64 = 2_000_000;
+    for table in [
+        "gacha_records",
+        "player_import_info",
+        "pool_history_boundaries",
+    ] {
+        let exists: bool = remote
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [table],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if !exists {
+            return Err(format!("云端数据库缺少必要数据表 {table}"));
+        }
+        let count: i64 = remote
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .map_err(|e| format!("读取云端数据表 {table} 失败: {e}"))?;
+        if count > MAX_ROWS {
+            return Err(format!("云端数据表 {table} 超过安全行数限制"));
+        }
+    }
+    let expected = [
+        ("gacha_records", "id,player_id,card_pool_type,card_pool_name,resource_id,quality_level,resource_type,name,count,time,is_off_rate,occurrence_no,order_in_timestamp,is_mock,mock_batch_id"),
+        ("player_import_info", "player_id,last_imported_at,is_inferred"),
+        ("pool_history_boundaries", "player_id,card_pool_type,earliest_time,earliest_time_count,confirmed_at"),
+    ];
+    for (table, columns) in expected {
+        let actual: Vec<String> = remote
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .and_then(|mut s| {
+                s.query_map([], |r| r.get::<_, String>(1))
+                    .and_then(Iterator::collect)
+            })
+            .map_err(|e| format!("读取云端表结构失败: {e}"))?;
+        let required: Vec<&str> = columns.split(',').collect();
+        if actual != required.iter().map(|v| v.to_string()).collect::<Vec<_>>() {
+            return Err(format!("云端数据表 {table} 字段不兼容"));
+        }
+    }
+    Ok(has_meta_table)
+}
+
 impl Database {
     pub fn migrate_legacy_files(old: &Path, data: &Path, state: &Path) -> Result<(), String> {
         if !old.exists() {
@@ -1702,74 +1826,7 @@ impl Database {
 
     pub fn apply_sync_snapshot(&self, source: &Path) -> Result<(), String> {
         let remote = Connection::open(source).map_err(|e| format!("打开云端数据库失败: {e}"))?;
-        let integrity: String = remote
-            .query_row("PRAGMA integrity_check", [], |row| row.get(0))
-            .map_err(|e| format!("校验云端数据库失败: {e}"))?;
-        if integrity != "ok" {
-            return Err("云端数据库完整性校验失败".to_string());
-        }
-        let version_exists: bool = remote
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='gacha_data_meta')",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(false);
-        let version: i64 = if version_exists {
-            remote
-                .query_row(
-                    "SELECT schema_version FROM gacha_data_meta LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .unwrap_or(0)
-        } else {
-            0
-        };
-        // 历史兼容：gacha_data_meta 存在但为空时（旧版 Android 快照），
-        // 只要后续表结构校验通过就视为 v1，避免阻断正常同步。
-        // 真正的版本不匹配在表结构校验阶段也会被拦住。
-        if version != 0 && version != 1 {
-            return Err(format!("暂不支持云端数据库版本 {version}"));
-        }
-        const MAX_ROWS: i64 = 2_000_000;
-        for table in [
-            "gacha_records",
-            "player_import_info",
-            "pool_history_boundaries",
-        ] {
-            let exists: bool = remote
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-                    [table],
-                    |r| r.get(0),
-                )
-                .unwrap_or(false);
-            if !exists {
-                return Err(format!("云端数据库缺少必要数据表 {table}"));
-            }
-            let count: i64 = remote
-                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
-                .map_err(|e| format!("读取云端数据表 {table} 失败: {e}"))?;
-            if count > MAX_ROWS {
-                return Err(format!("云端数据表 {table} 超过安全行数限制"));
-            }
-        }
-        let expected = [
-            ("gacha_records", "id,player_id,card_pool_type,card_pool_name,resource_id,quality_level,resource_type,name,count,time,is_off_rate,occurrence_no,order_in_timestamp,is_mock,mock_batch_id"),
-            ("player_import_info", "player_id,last_imported_at,is_inferred"),
-            ("pool_history_boundaries", "player_id,card_pool_type,earliest_time,earliest_time_count,confirmed_at"),
-        ];
-        for (table, columns) in expected {
-            let actual: Vec<String> = remote
-                .prepare(&format!("PRAGMA table_info({table})"))
-                .and_then(|mut s| s.query_map([], |r| r.get::<_, String>(1)).and_then(Iterator::collect))
-                .map_err(|e| format!("读取云端表结构失败: {e}"))?;
-            let required: Vec<&str> = columns.split(',').collect();
-            if actual != required.iter().map(|v| v.to_string()).collect::<Vec<_>>() {
-                return Err(format!("云端数据表 {table} 字段不兼容"));
-            }
-        }
+        let has_meta_table = inspect_sync_snapshot(&remote)?;
         drop(remote);
         self.conn
             .execute(
@@ -1777,7 +1834,18 @@ impl Database {
                 [source.to_string_lossy().as_ref()],
             )
             .map_err(|e| e.to_string())?;
-        let result = self.conn.execute_batch(
+        // 旧快照可能没有 gacha_data_meta 表（Android 侧同样做了这个分支），
+        // 无条件读 cloud.gacha_data_meta 会让整批语句失败并回滚，
+        // 同步会以“数据库版本”以外的难懂报错收场。
+        let meta_statements = if has_meta_table {
+            "DELETE FROM gacha_data_meta;
+             INSERT OR IGNORE INTO gacha_data_meta(schema_version) SELECT schema_version FROM cloud.gacha_data_meta;
+             INSERT OR IGNORE INTO gacha_data_meta(schema_version) VALUES(1);"
+        } else {
+            "DELETE FROM gacha_data_meta;
+             INSERT OR IGNORE INTO gacha_data_meta(schema_version) VALUES(1);"
+        };
+        let result = self.conn.execute_batch(&format!(
             "BEGIN IMMEDIATE;
              DELETE FROM gacha_records;
              INSERT INTO gacha_records SELECT * FROM cloud.gacha_records;
@@ -1785,16 +1853,60 @@ impl Database {
              INSERT INTO player_import_info SELECT * FROM cloud.player_import_info;
              DELETE FROM pool_history_boundaries;
              INSERT INTO pool_history_boundaries SELECT * FROM cloud.pool_history_boundaries;
-             DELETE FROM gacha_data_meta;
-             INSERT OR IGNORE INTO gacha_data_meta(schema_version) SELECT schema_version FROM cloud.gacha_data_meta;
-             INSERT OR IGNORE INTO gacha_data_meta(schema_version) VALUES(1);
-             COMMIT;",
-        );
+             {meta_statements}
+             COMMIT;"
+        ));
         if result.is_err() {
             let _ = self.conn.execute_batch("ROLLBACK;");
         }
         let _ = self.conn.execute_batch("DETACH DATABASE cloud;");
         result.map_err(|e| format!("应用云端数据库失败，本地数据未改变: {e}"))
+    }
+
+    /// 覆盖本机前的整库备份。失败必须中止覆盖，否则一次误覆盖就无法挽回。
+    pub fn create_sync_backup(&self) -> Result<Option<String>, String> {
+        let Some(backup_dir) = self.backup_dir() else {
+            return Ok(None);
+        };
+        std::fs::create_dir_all(&backup_dir).map_err(|e| format!("创建备份目录失败: {e}"))?;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("生成备份时间戳失败: {e}"))?
+            .as_millis();
+        let backup_path = backup_dir.join(format!("gacha-data-before-sync-{timestamp}.db"));
+        let backup_path_text = backup_path.to_string_lossy().into_owned();
+        self.conn
+            .execute("VACUUM main INTO ?1", params![backup_path_text])
+            .map_err(|e| format!("覆盖前备份失败，已中止云同步覆盖: {e}"))?;
+        Ok(Some(backup_path.to_string_lossy().into_owned()))
+    }
+
+    /// 覆盖本机前的预检：本机会丢掉哪些记录、丢的是哪个时间段。
+    /// 只读取与比对，不写入任何数据；结构校验与 apply 共用同一套规则。
+    pub fn preview_sync_apply(&self, source: &Path) -> Result<SyncApplyPreview, String> {
+        let remote = Connection::open(source).map_err(|e| format!("打开云端数据库失败: {e}"))?;
+        inspect_sync_snapshot(&remote)?;
+        drop(remote);
+        self.conn
+            .execute(
+                "ATTACH DATABASE ?1 AS cloud",
+                [source.to_string_lossy().as_ref()],
+            )
+            .map_err(|e| e.to_string())?;
+        let preview = self
+            .conn
+            .query_row(SYNC_APPLY_PREVIEW_SQL, [], |row| {
+                Ok(SyncApplyPreview {
+                    lost_count: row.get::<_, i64>(0)?.max(0) as usize,
+                    lost_earliest: row.get(1)?,
+                    lost_latest: row.get(2)?,
+                    local_count: row.get::<_, i64>(3)?.max(0) as usize,
+                    remote_count: row.get::<_, i64>(4)?.max(0) as usize,
+                })
+            })
+            .map_err(|e| format!("比对云端快照失败，已中止覆盖: {e}"));
+        let _ = self.conn.execute_batch("DETACH DATABASE cloud;");
+        preview
     }
 
     pub fn record_count(&self) -> Result<usize, String> {
@@ -2711,6 +2823,90 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![102, 101]
         );
+    }
+
+    #[test]
+    fn sync_snapshot_hash_tracks_record_content_and_is_stable_otherwise() {
+        use sha2::{Digest, Sha256};
+
+        let dir = std::env::temp_dir().join(format!("wuwa-sync-hash-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Database::new(&dir.join("gacha-data.db")).unwrap();
+        let first = dir.join("snap-first.db");
+        let repeat = dir.join("snap-repeat.db");
+        let second = dir.join("snap-second.db");
+        let hash = |path: &Path| format!("{:x}", Sha256::digest(std::fs::read(path).unwrap()));
+
+        db.merge_records(&[record("1", 101, "2026-01-01 12:00:00")])
+            .unwrap();
+        db.create_sync_snapshot(&first).unwrap();
+        db.create_sync_snapshot(&repeat).unwrap();
+        db.merge_records(&[record("1", 102, "2026-01-02 12:00:00")])
+            .unwrap();
+        db.create_sync_snapshot(&second).unwrap();
+
+        // 同一内容重复生成的快照必须一致，否则同步会把没变的本机判成已变化。
+        assert_eq!(hash(&first), hash(&repeat));
+        // 内容变化必须体现在哈希上：云同步正是靠它判断本机是否需要上传。
+        assert_ne!(hash(&first), hash(&second));
+
+        // 数据库连接必须先释放，否则 Windows 上临时目录会被占用而删不掉。
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sync_apply_preview_reports_records_missing_from_the_cloud_snapshot() {
+        let dir =
+            std::env::temp_dir().join(format!("wuwa-sync-preview-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let local = Database::new(&dir.join("local.db")).unwrap();
+        let remote = Database::new(&dir.join("remote-source.db")).unwrap();
+
+        local
+            .merge_records(&[
+                record("1", 101, "2026-01-01 12:00:00"),
+                record("1", 102, "2026-01-02 12:00:00"),
+                record("1", 103, "2026-01-03 12:00:00"),
+            ])
+            .unwrap();
+        // 云端快照只保留了最早的一条：覆盖本机会丢掉后两条。
+        remote
+            .merge_records(&[record("1", 101, "2026-01-01 12:00:00")])
+            .unwrap();
+        let remote_path = dir.join("remote.db");
+        remote.create_sync_snapshot(&remote_path).unwrap();
+
+        let preview = local.preview_sync_apply(&remote_path).unwrap();
+        assert_eq!(preview.local_count, 3);
+        assert_eq!(preview.remote_count, 1);
+        assert_eq!(preview.lost_count, 2);
+        assert_eq!(
+            preview.lost_earliest.as_deref(),
+            Some("2026-01-02 12:00:00")
+        );
+        assert_eq!(preview.lost_latest.as_deref(), Some("2026-01-03 12:00:00"));
+        // 预检只读：不能改动本机数据。
+        assert_eq!(local.record_count().unwrap(), 3);
+
+        // 覆盖前的整库备份必须真的产出文件，否则覆盖不允许继续。
+        let with_backups = Database::new(&dir.join("with-backups.db")).unwrap();
+        with_backups
+            .merge_records(&[record("1", 101, "2026-01-01 12:00:00")])
+            .unwrap();
+        let backup = with_backups
+            .create_sync_backup()
+            .unwrap()
+            .expect("覆盖前应留下备份");
+        assert!(Path::new(&backup).is_file());
+
+        // 数据库连接必须先释放，否则 Windows 上临时目录会被占用而删不掉。
+        drop(with_backups);
+        drop(remote);
+        drop(local);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

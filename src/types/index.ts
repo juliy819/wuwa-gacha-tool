@@ -498,4 +498,11 @@ export interface OneDriveSyncResult {
   uploaded_count: number;
   conflict_retries: number;
   updated_at: string;
+  /** 本次云端覆盖本机时丢掉的本机记录数（0 表示没有丢）。 */
+  lost_count: number;
+  /** 被丢弃记录的时间范围，用于向用户说明影响。 */
+  lost_earliest: string | null;
+  lost_latest: string | null;
+  /** 覆盖前自动留下的本机整库备份路径。 */
+  backup_path: string | null;
 }

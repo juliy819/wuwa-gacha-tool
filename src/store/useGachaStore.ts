@@ -3,7 +3,8 @@ import { gachaApi } from '../services/tauri-api';
 import { MAX_VISIBLE_TOASTS } from '../lib/toast';
 import { playUiFeedback } from '../lib/uiFeedback';
 import { officialMockOverlapMessage } from '../lib/importConflict';
-import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, HomeOverview, ImportCompletionSummary, RecordSummary, ToastMessage } from '../types';
+import { cloudSyncConflictNotice, cloudSyncOverwriteNotices } from '../lib/cloudSync';
+import type { ClearRecordsResult, GachaRecord, GachaStats, GameSettings, HomeOverview, ImportCompletionSummary, OneDriveSyncResult, RecordSummary, ToastMessage } from '../types';
 
 interface GachaStore {
   records: GachaRecord[];
@@ -47,22 +48,39 @@ interface GachaStore {
   showOfficialImportConflict: (message: string | null) => void;
   scheduleCloudSync: () => void;
   setCloudSyncStatus: (state: GachaStore['cloudSyncStatus']['state'], message: string) => void;
+  /** 会话级的启动云同步：状态一定收敛到终态，不受页面卸载影响。 */
+  syncStartupCloud: () => Promise<void>;
+  /** 云端覆盖本机后的告知：丢弃条数、时间范围、覆盖前备份位置。 */
+  reportCloudSyncOverwrite: (result: OneDriveSyncResult) => void;
+  /** 同步失败的统一收尾：冲突给出可执行指引，其余只体现在状态栏。 */
+  reportCloudSyncFailure: (error: unknown) => void;
 }
 
 let recordsRequestId = 0;
 let statsRequestId = 0;
 let homeOverviewRequestId = 0;
 let cloudSyncTimer: ReturnType<typeof setTimeout> | null = null;
+// 启动云同步在一次应用会话里只跑一次。它现在挂在 store 上而不是首页组件里，
+// 因此切换 tab 不会重启同步，也不会再出现“状态停在正在同步云端”的情况。
+let startupCloudSyncStarted = false;
 
 function scheduleCloudSync() {
   if (cloudSyncTimer) clearTimeout(cloudSyncTimer);
   cloudSyncTimer = setTimeout(() => {
     cloudSyncTimer = null;
-    useGachaStore.getState().setCloudSyncStatus('checking', '正在同步云端');
+    const store = () => useGachaStore.getState();
+    store().setCloudSyncStatus('checking', '正在同步云端');
     void gachaApi.getOneDriveStatus()
       .then((status) => status.connected ? gachaApi.syncOneDriveDatabase() : null)
-      .then((result) => result ? useGachaStore.getState().setCloudSyncStatus(result.added_count > 0 ? 'updated' : 'current', result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新') : useGachaStore.getState().setCloudSyncStatus('idle', '未连接 OneDrive'))
-      .catch(() => useGachaStore.getState().setCloudSyncStatus('error', '云端同步失败'));
+      .then((result) => {
+        if (!result) {
+          store().setCloudSyncStatus('idle', '未连接 OneDrive');
+          return;
+        }
+        store().reportCloudSyncOverwrite(result);
+        store().setCloudSyncStatus(result.added_count > 0 ? 'updated' : 'current', result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新');
+      })
+      .catch((error) => store().reportCloudSyncFailure(error));
   }, 1500);
 }
 
@@ -360,4 +378,50 @@ export const useGachaStore = create<GachaStore>((set, get) => ({
   showOfficialImportConflict: (message) => set({ officialImportConflict: message }),
   scheduleCloudSync: () => scheduleCloudSync(),
   setCloudSyncStatus: (state, message) => set({ cloudSyncStatus: { state, message, updatedAt: Date.now() } }),
+
+  reportCloudSyncOverwrite: (result) => {
+    for (const notice of cloudSyncOverwriteNotices(result)) {
+      get().addToast(notice.type, notice.message);
+    }
+  },
+
+  reportCloudSyncFailure: (error) => {
+    const conflict = cloudSyncConflictNotice(error);
+    if (conflict) get().addToast('info', conflict);
+    get().setCloudSyncStatus('error', conflict ? '云端同步存在冲突' : '云端同步失败');
+  },
+
+  /**
+   * 启动同步以前写在首页组件里，靠组件内的 cancelled 标记丢弃结果：切到别的
+   * tab 会让这次同步的终态永远写不回来，界面就停在“正在同步云端”。现在它
+   * 属于 store，无论页面是否卸载都会写终态；一次会话只跑一次，切 tab 也不再
+   * 重新发起（云端快照下载耗时数秒，重复触发只会放大同步窗口）。
+   */
+  syncStartupCloud: async () => {
+    if (startupCloudSyncStarted) return;
+    startupCloudSyncStarted = true;
+    try {
+      const status = await gachaApi.getOneDriveStatus();
+      if (!status.connected) {
+        get().setCloudSyncStatus('idle', '未连接 OneDrive');
+        return;
+      }
+      get().setCloudSyncStatus('checking', '正在同步云端');
+      const result = await gachaApi.syncOneDriveDatabase('');
+      await Promise.all([get().fetchPools(), get().fetchSummaries().catch(() => {})]);
+      const playerId = get().activePlayerId;
+      if (playerId) await get().fetchHomeOverview(playerId);
+      if (result.added_count > 0) {
+        get().addToast('success', `已从 OneDrive 更新 ${result.added_count} 条记录`);
+      }
+      get().reportCloudSyncOverwrite(result);
+      get().setCloudSyncStatus(
+        result.added_count > 0 ? 'updated' : 'current',
+        result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新'
+      );
+    } catch (error) {
+      // 启动同步失败不打扰用户：离线时应用仍要可用，细节留在状态栏和设置页。
+      get().reportCloudSyncFailure(error);
+    }
+  },
 }));

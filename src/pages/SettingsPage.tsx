@@ -918,6 +918,8 @@ export default function SettingsPage() {
       await Promise.all([fetchSummaries(), useGachaStore.getState().fetchRecords(), useGachaStore.getState().fetchStats(playerId)]);
       useGachaStore.getState().scheduleCloudSync();
       addToast('success', strategy === 'local' ? '已使用本机数据覆盖云端' : '已使用云端数据覆盖本机');
+      // 覆盖本机是整库替换：丢了多少、备份在哪必须让用户看到。
+      useGachaStore.getState().reportCloudSyncOverwrite(result);
       useGachaStore.getState().setCloudSyncStatus('current', '云端已是最新');
     } catch (retryError) {
       addToast('error', String(retryError));
@@ -935,6 +937,8 @@ export default function SettingsPage() {
       setOneDriveResult((current) => ({ ...current, [playerId]: result }));
       await Promise.all([fetchSummaries(), useGachaStore.getState().fetchRecords(), useGachaStore.getState().fetchStats(playerId)]);
       addToast('success', `UID ${displayUid(playerId)} 同步完成，新增 ${result.added_count} 条`);
+      // 覆盖本机是整库替换：丢了多少、备份在哪必须让用户看到。
+      useGachaStore.getState().reportCloudSyncOverwrite(result);
       useGachaStore.getState().setCloudSyncStatus(result.added_count > 0 ? 'updated' : 'current', result.added_count > 0 ? `云端已更新 ${result.added_count} 条` : '云端已是最新');
     } catch (error) {
       const message = String(error);
