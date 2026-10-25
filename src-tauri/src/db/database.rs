@@ -1,6 +1,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::assets::GachaResource;
@@ -897,7 +898,7 @@ impl Database {
             })
         };
 
-        let records = if let Some(pid) = player_id {
+        let records: Vec<GachaRecord> = if let Some(pid) = player_id {
             stmt.query_map(params![pid], map_record)
                 .map_err(|e| e.to_string())?
                 .filter_map(|r| r.ok())
@@ -908,6 +909,8 @@ impl Database {
                 .filter_map(|r| r.ok())
                 .collect()
         };
+
+        warn_once_on_inconsistent_pool_names(&records);
 
         Ok(records)
     }
@@ -2190,6 +2193,45 @@ fn pool_five_star_resource_type(pool_type: &str) -> Option<&'static str> {
         "2" | "4" | "9" | "11" | "13" => Some("weapon"),
         _ => None,
     }
+}
+
+/// 只读诊断：库里保存的卡池名与卡池类型推导出的显示名不一致时，在本进程内告警一次。
+/// 这类不一致会让界面显示一个和真实卡池不符的名字，是“记录出现在错误卡池”的另一条线索。
+fn warn_once_on_inconsistent_pool_names(records: &[GachaRecord]) {
+    static WARNED: AtomicBool = AtomicBool::new(false);
+    if WARNED.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut total = 0usize;
+    let mut samples: Vec<String> = Vec::new();
+    for record in records {
+        let expected = get_display_pool_name(&record.card_pool_type);
+        if record.card_pool_name == expected {
+            continue;
+        }
+        total += 1;
+        if samples.len() < 5 {
+            samples.push(format!(
+                "id={:?} type={} stored={} expected={} {}@{}",
+                record.id,
+                record.card_pool_type,
+                record.card_pool_name,
+                expected,
+                record.name,
+                record.time
+            ));
+        }
+    }
+    if total == 0 {
+        return;
+    }
+    WARNED.store(true, Ordering::Relaxed);
+    log::warn!(
+        target: "app::data",
+        "event=pool_name_inconsistent rows={} samples={:?}",
+        total,
+        samples
+    );
 }
 
 fn validate_resource_for_pool(pool_type: &str, resource: &GachaResource) -> Result<(), String> {

@@ -1,5 +1,5 @@
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
@@ -356,6 +356,123 @@ fn masked_player_id(player_id: &str) -> String {
     format!("***{suffix}")
 }
 
+/// 一次卡池请求响应的观测统计。仅用于诊断日志，不参与任何业务判断。
+#[derive(Debug, Default)]
+struct PoolResponseSummary {
+    rows: usize,
+    role_rows: usize,
+    weapon_rows: usize,
+    unknown_type_rows: usize,
+    /// 解析后的池类型 → 行数（响应池名命中映射时按名字解析，否则回退为请求的池类型）
+    resolved: BTreeMap<String, usize>,
+    /// 未命中硬编码池名表的原始响应池名 → 行数
+    unmapped_names: BTreeMap<String, usize>,
+    earliest: Option<String>,
+    latest: Option<String>,
+    sample: Vec<String>,
+}
+
+/// 统计一次响应里每一行的池归属，用于观察“响应池名是否命中映射”。
+fn summarize_pool_response(
+    name_to_id: &HashMap<String, String>,
+    requested_pool: &str,
+    cards: &[ApiCardInfo],
+) -> PoolResponseSummary {
+    let mut summary = PoolResponseSummary {
+        rows: cards.len(),
+        ..Default::default()
+    };
+    for card in cards {
+        match card.resource_type.as_str() {
+            "角色" | "role" => summary.role_rows += 1,
+            "武器" | "weapon" => summary.weapon_rows += 1,
+            _ => summary.unknown_type_rows += 1,
+        }
+        match name_to_id.get(&card.card_pool_type) {
+            Some(resolved) => {
+                *summary.resolved.entry(resolved.clone()).or_insert(0) += 1;
+            }
+            None => {
+                *summary
+                    .resolved
+                    .entry(requested_pool.to_string())
+                    .or_insert(0) += 1;
+                *summary
+                    .unmapped_names
+                    .entry(card.card_pool_type.clone())
+                    .or_insert(0) += 1;
+            }
+        }
+        if summary
+            .earliest
+            .as_deref()
+            .is_none_or(|current| card.time.as_str() < current)
+        {
+            summary.earliest = Some(card.time.clone());
+        }
+        if summary
+            .latest
+            .as_deref()
+            .is_none_or(|current| card.time.as_str() > current)
+        {
+            summary.latest = Some(card.time.clone());
+        }
+        if summary.sample.len() < 5 {
+            summary.sample.push(format!(
+                "{}(id={} {}星 {})@{}",
+                card.name, card.resource_id, card.quality_level, card.resource_type, card.time
+            ));
+        }
+    }
+    summary
+}
+
+fn resolved_pool_ids_outside_request(
+    summary: &PoolResponseSummary,
+    requested: &str,
+) -> Vec<String> {
+    summary
+        .resolved
+        .keys()
+        .filter(|resolved| resolved.as_str() != requested)
+        .cloned()
+        .collect()
+}
+
+/// 按卡池统计记录条数，用于诊断日志里观察每池实际落在多少条。
+fn pool_row_counts(records: &[GachaRecord]) -> BTreeMap<&str, usize> {
+    let mut pools: BTreeMap<&str, usize> = BTreeMap::new();
+    for record in records {
+        *pools.entry(record.card_pool_type.as_str()).or_insert(0) += 1;
+    }
+    pools
+}
+
+/// 同一次导入里，同一（时间、物品、数量）出现在多个卡池，通常意味着某次响应把记录
+/// 放进了错误的卡池。仅用于诊断，不改变任何写入结果。
+fn cross_pool_duplicate_samples(records: &[GachaRecord]) -> Vec<String> {
+    let mut grouped: BTreeMap<(&str, i64, i32), (&str, Vec<&str>)> = BTreeMap::new();
+    for record in records {
+        let entry = grouped
+            .entry((record.time.as_str(), record.resource_id, record.count))
+            .or_insert((record.name.as_str(), Vec::new()));
+        if !entry.1.contains(&record.card_pool_type.as_str()) {
+            entry.1.push(record.card_pool_type.as_str());
+        }
+    }
+    grouped
+        .into_iter()
+        .filter(|(_, (_, pools))| pools.len() > 1)
+        .take(5)
+        .map(|((time, resource_id, count), (name, pools))| {
+            format!(
+                "{} {}(id={})x{} pools={:?}",
+                time, name, resource_id, count, pools
+            )
+        })
+        .collect()
+}
+
 fn build_filler_resources<R: Rng + ?Sized>(
     three_stars: &[&GachaResource],
     four_stars: &[&GachaResource],
@@ -411,9 +528,19 @@ async fn fetch_gacha_data_internal(
     let params = GachaParams::from_url(url)?;
     log::info!(
         target: "app::gacha",
-        "event=sync_started player={} pools={}",
+        "event=sync_started player={} pools={} lang={} region={}",
         masked_player_id(&params.player_id),
-        POOL_TYPES.len()
+        POOL_TYPES.len(),
+        if params.lang.is_empty() {
+            "-"
+        } else {
+            params.lang.as_str()
+        },
+        if params.player_id.starts_with('1') {
+            "cn"
+        } else {
+            "global"
+        }
     );
     let client = reqwest::Client::new();
     let name_to_id = build_pool_name_to_id();
@@ -431,6 +558,51 @@ async fn fetch_gacha_data_internal(
                     pool_type,
                     cards.len()
                 );
+                // 诊断：记录响应里每一行的池归属来源，命中池名表就按名字、否则回退成请求的池。
+                let summary = summarize_pool_response(&name_to_id, pool_type, &cards);
+                log::info!(
+                    target: "app::gacha",
+                    "event=pool_fetch_summary requested={} rows={} role={} weapon={} unknown_type={} resolved={:?} time_range={}..{}",
+                    pool_type,
+                    summary.rows,
+                    summary.role_rows,
+                    summary.weapon_rows,
+                    summary.unknown_type_rows,
+                    summary.resolved,
+                    summary.earliest.as_deref().unwrap_or("-"),
+                    summary.latest.as_deref().unwrap_or("-")
+                );
+                if !summary.unmapped_names.is_empty() {
+                    log::warn!(
+                        target: "app::gacha",
+                        "event=pool_name_unmapped requested={} raw_names={:?} rows={} resolved={:?} sample={:?}",
+                        pool_type,
+                        summary.unmapped_names,
+                        summary.rows,
+                        summary.resolved,
+                        summary.sample
+                    );
+                }
+                let mismatched = resolved_pool_ids_outside_request(&summary, pool_type);
+                if !mismatched.is_empty() {
+                    log::warn!(
+                        target: "app::gacha",
+                        "event=pool_request_mismatch requested={} resolved={:?} rows={} resolved_counts={:?} sample={:?}",
+                        pool_type,
+                        mismatched,
+                        summary.rows,
+                        summary.resolved,
+                        summary.sample
+                    );
+                }
+                if (1..=3).contains(&summary.rows) {
+                    log::info!(
+                        target: "app::gacha",
+                        "event=pool_fetch_sample requested={} records={:?}",
+                        pool_type,
+                        summary.sample
+                    );
+                }
                 for card in cards {
                     // API 返回的 cardPoolType 是中文名，反查 pool type ID
                     let actual_pool_type = name_to_id
@@ -481,6 +653,16 @@ fn merge_and_load_player(
     completed_official_sync: bool,
 ) -> Result<GachaImportResult, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    // 诊断：同一次导入里同一（时间、物品、数量）落在多个卡池，说明某个响应把记录放错了池。
+    let cross_pool = cross_pool_duplicate_samples(imported_records);
+    if !cross_pool.is_empty() {
+        log::warn!(
+            target: "app::gacha",
+            "event=cross_pool_duplicate player={} conflicts={:?}",
+            masked_player_id(player_id),
+            cross_pool
+        );
+    }
     ensure_no_mock_overlap(&db, imported_records)?;
     let stats = db.merge_records(imported_records)?;
     if completed_official_sync {
@@ -495,15 +677,18 @@ fn merge_and_load_player(
         .cloned()
         .collect();
 
+    // 诊断：落库后每个卡池各有多少条，可直接看出某条记录最终进了哪一个池。
+    let pool_rows = pool_row_counts(&records);
     log::info!(
         target: "app::gacha",
-        "event=sync_completed player={} imported={} added={} duplicates={} total={} failed_pools={}",
+        "event=sync_completed player={} imported={} added={} duplicates={} total={} failed_pools={} pools={:?}",
         masked_player_id(player_id),
         stats.imported_count,
         stats.added_count,
         stats.duplicate_count,
         total_count,
-        failed_pools.len()
+        failed_pools.len(),
+        pool_rows
     );
 
     Ok(GachaImportResult {
@@ -701,6 +886,9 @@ fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, S
         serde_json::from_str(&content).map_err(|e| format!("解析 JSON 失败: {}", e))?;
     let name_to_id = build_pool_name_to_id();
     let mut all_records: Vec<GachaRecord> = Vec::new();
+    // 诊断：文件里的两个池标识（WaveTools 的 gacha_id 与 gacha_type 中文名、原生格式的对象键与
+    // cardPoolType 中文名）指向不同池时的样本。仅记录，不改变取哪一个。
+    let mut pool_identity_conflicts: Vec<String> = Vec::new();
     let player_id =
         if root.get("info").and_then(|v| v.get("uid")).is_some()
             && root
@@ -752,6 +940,19 @@ fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, S
                         })?)?,
                     };
                 let pool_name = get_display_pool_name(&pool_type).to_string();
+                if let Some(mapped) = name_to_id.get(&card.card_pool_type) {
+                    if mapped != &pool_type && pool_identity_conflicts.len() < 10 {
+                        pool_identity_conflicts.push(format!(
+                            "gacha_id={} gacha_type={} -> {} {}@{}",
+                            pool_type, card.card_pool_type, mapped, card.name, card.time
+                        ));
+                    }
+                } else if pool_identity_conflicts.len() < 10 {
+                    pool_identity_conflicts.push(format!(
+                        "gacha_id={} gacha_type={} unmapped {}@{}",
+                        pool_type, card.card_pool_type, card.name, card.time
+                    ));
+                }
                 all_records.push(GachaRecord::from_api(&card, &uid, &pool_name, &pool_type));
             }
             uid
@@ -776,6 +977,16 @@ fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, S
                         .get(&card.card_pool_type)
                         .cloned()
                         .unwrap_or_else(|| pool_type_key.clone());
+                    if actual_pool_type != *pool_type_key && pool_identity_conflicts.len() < 10 {
+                        pool_identity_conflicts.push(format!(
+                            "key={} cardPoolType={} -> {} {}@{}",
+                            pool_type_key,
+                            card.card_pool_type,
+                            actual_pool_type,
+                            card.name,
+                            card.time
+                        ));
+                    }
                     let actual_pool_name = get_display_pool_name(&actual_pool_type).to_string();
                     let mut record =
                         GachaRecord::from_api(&card, &uid, &actual_pool_name, &actual_pool_type);
@@ -791,11 +1002,36 @@ fn parse_gacha_json_file(file_path: &str) -> Result<(String, Vec<GachaRecord>, S
             uid
         };
 
+    log_json_import_pool_summary(&player_id, &all_records, &pool_identity_conflicts);
+
     if all_records.is_empty() {
         return Err("JSON 文件中没有有效的抽卡记录".to_string());
     }
 
     Ok((player_id, all_records, file_hash))
+}
+
+/// 诊断：记录一次 JSON 导入的卡池分布与池标识冲突，便于复现“记录落到错误卡池”的问题。
+fn log_json_import_pool_summary(player_id: &str, records: &[GachaRecord], conflicts: &[String]) {
+    let pools = pool_row_counts(records);
+    let official = records.iter().filter(|record| !record.is_mock).count();
+    log::info!(
+        target: "app::gacha",
+        "event=json_import_pools player={} rows={} official={} mock={} pools={:?}",
+        masked_player_id(player_id),
+        records.len(),
+        official,
+        records.len() - official,
+        pools
+    );
+    if !conflicts.is_empty() {
+        log::warn!(
+            target: "app::gacha",
+            "event=json_import_pool_conflict player={} conflicts={:?}",
+            masked_player_id(player_id),
+            conflicts
+        );
+    }
 }
 
 fn json_string(value: &serde_json::Value) -> Result<String, String> {
@@ -1519,6 +1755,111 @@ pub fn validate_game_dir(game_dir: String) -> GameDirValidation {
 mod tests {
     use super::*;
     use rand::SeedableRng;
+
+    #[test]
+    fn pool_response_summary_separates_name_hits_from_request_fallbacks() {
+        let name_to_id = build_pool_name_to_id();
+        let cards = vec![
+            ApiCardInfo {
+                card_pool_type: "角色常驻调谐".to_string(),
+                resource_id: 1102,
+                quality_level: 4,
+                resource_type: "角色".to_string(),
+                name: "白芷".to_string(),
+                count: 1,
+                time: "2026-10-15 08:54:17".to_string(),
+            },
+            ApiCardInfo {
+                card_pool_type: "未知新卡池".to_string(),
+                resource_id: 2001,
+                quality_level: 3,
+                resource_type: "武器".to_string(),
+                name: "武器".to_string(),
+                count: 1,
+                time: "2026-10-16 09:00:00".to_string(),
+            },
+        ];
+
+        let summary = summarize_pool_response(&name_to_id, "2", &cards);
+
+        assert_eq!(summary.rows, 2);
+        assert_eq!(summary.role_rows, 1);
+        assert_eq!(summary.weapon_rows, 1);
+        assert_eq!(summary.resolved.get("3"), Some(&1));
+        assert_eq!(summary.resolved.get("2"), Some(&1));
+        assert_eq!(summary.unmapped_names.get("未知新卡池"), Some(&1));
+        assert_eq!(summary.earliest.as_deref(), Some("2026-10-15 08:54:17"));
+        assert_eq!(summary.latest.as_deref(), Some("2026-10-16 09:00:00"));
+        assert_eq!(summary.sample.len(), 2);
+        assert_eq!(
+            resolved_pool_ids_outside_request(&summary, "2"),
+            vec!["3".to_string()]
+        );
+    }
+
+    #[test]
+    fn pool_response_summary_is_empty_for_an_empty_response() {
+        let summary = summarize_pool_response(&build_pool_name_to_id(), "1", &[]);
+
+        assert_eq!(summary.rows, 0);
+        assert!(summary.resolved.is_empty());
+        assert!(summary.unmapped_names.is_empty());
+        assert!(summary.earliest.is_none());
+        assert!(resolved_pool_ids_outside_request(&summary, "1").is_empty());
+    }
+
+    #[test]
+    fn cross_pool_duplicates_report_the_same_pull_under_two_pools() {
+        let make_record = |pool: &str, time: &str, name: &str| GachaRecord {
+            id: None,
+            player_id: "10001".to_string(),
+            card_pool_type: pool.to_string(),
+            card_pool_name: get_display_pool_name(pool).to_string(),
+            card_pool_group: crate::gacha::fetcher::get_pool_group(pool).to_string(),
+            resource_id: 1102,
+            quality_level: 4,
+            resource_type: "role".to_string(),
+            name: name.to_string(),
+            count: 1,
+            time: time.to_string(),
+            is_off_rate: false,
+            is_mock: false,
+            mock_batch_id: None,
+        };
+
+        let conflicts = cross_pool_duplicate_samples(&[
+            make_record("2", "2026-10-15 08:54:17", "白芷"),
+            make_record("3", "2026-10-15 08:54:17", "白芷"),
+            make_record("1", "2026-10-15 08:54:19", "凌阳"),
+        ]);
+
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].contains("白芷"));
+        assert!(conflicts[0].contains(r#"pools=["2", "3"]"#));
+    }
+
+    #[test]
+    fn cross_pool_duplicates_ignore_repeated_rows_in_the_same_pool() {
+        let record = GachaRecord {
+            id: None,
+            player_id: "10001".to_string(),
+            card_pool_type: "3".to_string(),
+            card_pool_name: "角色常驻唤取".to_string(),
+            card_pool_group: "常驻角色池".to_string(),
+            resource_id: 1102,
+            quality_level: 4,
+            resource_type: "role".to_string(),
+            name: "白芷".to_string(),
+            count: 1,
+            time: "2026-10-15 08:54:17".to_string(),
+            is_off_rate: false,
+            is_mock: false,
+            mock_batch_id: None,
+        };
+
+        assert!(cross_pool_duplicate_samples(&[record.clone(), record]).is_empty());
+        assert!(cross_pool_duplicate_samples(&[]).is_empty());
+    }
 
     fn log_entry(id: i64, path: &str, exists: bool, modified_at: i64) -> LogPathEntry {
         LogPathEntry {
