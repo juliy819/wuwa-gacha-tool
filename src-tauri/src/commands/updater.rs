@@ -36,10 +36,21 @@ fn official_url(url: &str) -> String {
     url.to_string()
 }
 
+/// 建连（含响应头）与首个数据块的探测超时：用来判断这个镜像**活不活**。
+/// 实测挂掉的镜像要么连不上、要么连上后完全不给数据，都会在这个量级内暴露。
+const SOURCE_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// 数据块之间的空闲超时：只有连续这么久收不到任何数据，才算这个源死了。
+/// 这是"空闲"而不是"总时长"——慢但在持续传输的源必须让它下完。
+const SOURCE_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 执行下载的镜像顺序按实测可用性排列：cdn/hk 的 gh-proxy 最快最稳，
+/// cors.isteed.cc、ghproxy.net、edgeone 实测经常连不上或只给几百字节，
+/// 放后面当兜底；GitHub 直连在国内基本不可用，放最后。
 const UPDATE_PROXIES: &[(&str, fn(&str) -> String)] = &[
-    ("cors.isteed.cc", isteed_url),
-    ("hk.gh-proxy.org", hk_proxy_url),
     ("cdn.gh-proxy.org", cdn_proxy_url),
+    ("hk.gh-proxy.org", hk_proxy_url),
+    ("cors.isteed.cc", isteed_url),
     ("ghproxy.net", ghproxy_net_url),
     ("edgeone.gh-proxy.org", edgeone_url),
     ("GitHub 官方", official_url),
@@ -67,7 +78,9 @@ pub async fn download_and_install_update(
     );
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(60))
+        // 这里刻意不设“整请求总截止时间”：reqwest 的 timeout 含响应体，
+        // 24MB 的安装包在 400KB/s 的镜像上要 60s 以上，设总时限会把
+        // “慢但一直在下”的源当成坏源换掉。改用探活超时 + 块间空闲超时。
         .build()
         .map_err(|e| format!("初始化 HTTP 客户端失败: {e}"))?;
 
@@ -140,10 +153,11 @@ async fn try_download_once(
         },
     );
 
-    // 发送请求（3s 超时，快速判断代理是否可用）
-    let mut resp = tokio::time::timeout(Duration::from_secs(3), client.get(url).send())
+    // 建连与首个数据块用探活超时（判断代理是否可用），
+    // 之后每个数据块用空闲超时（只判“卡死”，不限制慢速下载的总时长）。
+    let mut resp = tokio::time::timeout(SOURCE_PROBE_TIMEOUT, client.get(url).send())
         .await
-        .map_err(|_| "请求超时（3s 未响应）".to_string())?
+        .map_err(|_| format!("请求超时（{}s 未响应）", SOURCE_PROBE_TIMEOUT.as_secs()))?
         .map_err(|e| format!("请求失败: {e}"))?;
 
     if !resp.status().is_success() {
@@ -165,13 +179,13 @@ async fn try_download_once(
     let mut downloaded: u64 = 0;
     let mut last_percent: u8 = 0;
 
-    // 首个数据块 3s 超时（防止代理建连后挂起）
-    // 一旦开始接收数据，后续块用 30s 超时（容忍网络抖动）
+    // 首个数据块用探活超时（防止代理建连后挂起），
+    // 一旦开始接收数据就只判“是否卡死”，不再限制总时长。
     loop {
         let timeout_dur = if downloaded == 0 {
-            Duration::from_secs(3)
+            SOURCE_PROBE_TIMEOUT
         } else {
-            Duration::from_secs(30)
+            SOURCE_IDLE_TIMEOUT
         };
 
         let chunk_result = tokio::time::timeout(timeout_dur, resp.chunk()).await;
@@ -207,13 +221,17 @@ async fn try_download_once(
             }
             Ok(Ok(None)) => break, // 流结束
             Ok(Err(e)) => {
-                return Err(format!("下载出错: {e}"));
+                return Err(format!("下载出错（已收到 {downloaded} 字节）: {e}"));
             }
             Err(_) => {
+                // 把"下了多少"带进错误里：换源时能分清是"连不上"还是"下到一半被掐"。
                 return Err(if downloaded == 0 {
-                    "首块超时（3s 无数据）".to_string()
+                    format!("建连后 {}s 未收到数据", SOURCE_PROBE_TIMEOUT.as_secs())
                 } else {
-                    "数据传输超时（30s 无数据）".to_string()
+                    format!(
+                        "传输停滞（{}s 无新数据），已下载 {downloaded} 字节",
+                        SOURCE_IDLE_TIMEOUT.as_secs()
+                    )
                 });
             }
         }
@@ -294,9 +312,9 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "cors.isteed.cc",
-                "hk.gh-proxy.org",
                 "cdn.gh-proxy.org",
+                "hk.gh-proxy.org",
+                "cors.isteed.cc",
                 "ghproxy.net",
                 "edgeone.gh-proxy.org",
                 "GitHub 官方",
@@ -310,14 +328,23 @@ mod tests {
         assert_eq!(
             urls,
             vec![
-                "https://cors.isteed.cc/github.com/example/repo/releases/download/v1/app.exe",
-                "https://hk.gh-proxy.org/https://github.com/example/repo/releases/download/v1/app.exe",
                 "https://cdn.gh-proxy.org/https://github.com/example/repo/releases/download/v1/app.exe",
+                "https://hk.gh-proxy.org/https://github.com/example/repo/releases/download/v1/app.exe",
+                "https://cors.isteed.cc/github.com/example/repo/releases/download/v1/app.exe",
                 "https://ghproxy.net/https://github.com/example/repo/releases/download/v1/app.exe",
                 "https://edgeone.gh-proxy.org/https://github.com/example/repo/releases/download/v1/app.exe",
                 "https://github.com/example/repo/releases/download/v1/app.exe",
             ]
         );
+    }
+
+    /// 大文件下载的超时策略回归：探活可以短，空闲超时要够宽松，而且**不能**
+    /// 给整请求设总截止时间——否则慢但在下的源会被中途掐断并误判成坏源。
+    #[test]
+    fn large_download_timeouts_allow_slow_but_progressing_sources() {
+        assert!(SOURCE_PROBE_TIMEOUT >= Duration::from_secs(5));
+        assert!(SOURCE_PROBE_TIMEOUT <= Duration::from_secs(15));
+        assert!(SOURCE_IDLE_TIMEOUT >= Duration::from_secs(20));
     }
 
     #[test]
@@ -334,10 +361,10 @@ mod tests {
         assert_eq!(
             endpoints,
             vec![
+                "https://cdn.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
+                "https://hk.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
                 "https://cors.isteed.cc/github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
                 "https://ghproxy.net/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
-                "https://hk.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
-                "https://cdn.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
                 "https://edgeone.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
                 "https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
             ]

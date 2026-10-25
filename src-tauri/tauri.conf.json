@@ -39,10 +39,10 @@
   "plugins": {
     "updater": {
       "endpoints": [
+        "https://cdn.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
+        "https://hk.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
         "https://cors.isteed.cc/github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
         "https://ghproxy.net/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
-        "https://hk.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
-        "https://cdn.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
         "https://edgeone.gh-proxy.org/https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json",
         "https://github.com/juliy819/wuwa-gacha-tool/releases/latest/download/latest.json"
       ],

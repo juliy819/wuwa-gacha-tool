@@ -18,6 +18,30 @@ const MAX_ICON_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PORTRAIT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES: usize = 4_096;
 
+/// 建连（含响应头）与首个数据块的探测超时：判断这个镜像**活不活**。
+const SOURCE_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// 数据块之间的空闲超时：只有连续这么久收不到任何数据，才算这个源死了。
+/// 这是"空闲"而不是"总时长"——资源包有 19.5MB，实测最快的镜像也只有
+/// 130~400KB/s，下完需要 50~150s，绝不能用总时长去判定源的健康。
+const SOURCE_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// 资源包/清单下载专用客户端。
+///
+/// 共享的 `state.http` 带 20s 的“整请求总截止时间”（reqwest 的 `timeout()` 是
+/// 含响应体下载完的总时限，不是连接超时），19.5MB 的资源包在慢速镜像上必然
+/// 下到一半就被掐断，表现为“下到一半换源，一路换到直连然后失败”。这里改成
+/// 建连探活 + 数据块空闲超时，不设总时限。
+fn download_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("构建资源包下载客户端失败")
+    })
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 struct ResourceManifest {
     schema: u32,
@@ -42,7 +66,9 @@ pub(crate) async fn refresh(state: &AppState) -> Result<(), String> {
         };
     });
     let result = refresh_inner(
-        &state.http,
+        // 大文件下载用专用客户端：共享的 state.http 有 20s 的整请求总时限，
+        // 会把“慢但在持续下载”的镜像误判成坏源（详见 download_client 的注释）。
+        download_client(),
         &state.asset_cache_dir,
         &state.resource_pack_progress,
     )
@@ -465,11 +491,10 @@ async fn fetch_bytes_once(
     max_size: u64,
     progress: &std::sync::Mutex<ResourcePackProgress>,
 ) -> Result<Vec<u8>, String> {
-    let mut response =
-        tokio::time::timeout(std::time::Duration::from_secs(5), client.get(url).send())
-            .await
-            .map_err(|_| "连接超时".to_string())?
-            .map_err(|error| error.to_string())?;
+    let mut response = tokio::time::timeout(SOURCE_PROBE_TIMEOUT, client.get(url).send())
+        .await
+        .map_err(|_| format!("建连超时（{}s 未响应）", SOURCE_PROBE_TIMEOUT.as_secs()))?
+        .map_err(|error| error.to_string())?;
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
     }
@@ -484,7 +509,23 @@ async fn fetch_bytes_once(
         value.total = expected_length;
     });
     let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+    // 每个数据块只判“是否卡死”：资源包在慢速镜像上要下几十秒到几分钟，
+    // 用总时限判定会把正常下载中途掐断并误判成坏源。
+    loop {
+        let chunk = match tokio::time::timeout(SOURCE_IDLE_TIMEOUT, response.chunk()).await {
+            Ok(Ok(Some(chunk))) => chunk,
+            Ok(Ok(None)) => break,
+            Ok(Err(error)) => {
+                return Err(format!("下载中断（已收到 {} 字节）: {error}", bytes.len()))
+            }
+            Err(_) => {
+                return Err(format!(
+                    "传输停滞（{}s 无新数据），已收到 {} 字节",
+                    SOURCE_IDLE_TIMEOUT.as_secs(),
+                    bytes.len()
+                ))
+            }
+        };
         if bytes.len().saturating_add(chunk.len()) as u64 > max_size {
             return Err("响应超过大小限制".to_string());
         }
@@ -513,16 +554,16 @@ fn github_download_sources(url: &str) -> Vec<(&'static str, String)> {
     }
     vec![
         (
+            "cdn.gh-proxy.org",
+            format!("https://cdn.gh-proxy.org/{url}"),
+        ),
+        ("hk.gh-proxy.org", format!("https://hk.gh-proxy.org/{url}")),
+        (
             "cors.isteed.cc",
             format!(
                 "https://cors.isteed.cc/{}",
                 url.trim_start_matches("https://")
             ),
-        ),
-        ("hk.gh-proxy.org", format!("https://hk.gh-proxy.org/{url}")),
-        (
-            "cdn.gh-proxy.org",
-            format!("https://cdn.gh-proxy.org/{url}"),
         ),
         ("ghproxy.net", format!("https://ghproxy.net/{url}")),
         (
@@ -642,14 +683,24 @@ mod tests {
         assert_eq!(
             sources.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
             vec![
-                "cors.isteed.cc",
-                "hk.gh-proxy.org",
                 "cdn.gh-proxy.org",
+                "hk.gh-proxy.org",
+                "cors.isteed.cc",
                 "ghproxy.net",
                 "edgeone.gh-proxy.org",
                 "GitHub 官方",
             ]
         );
+    }
+
+    /// 大文件下载的超时策略回归：不能有“整请求总时限”把慢但在下完的源掐掉。
+    /// 19.5MB 的包实测最快镜像也只有 130~400KB/s（需要 50~150s），
+    /// 所以策略必须是“探活 + 块间空闲”，而不是总时长。
+    #[test]
+    fn large_download_timeouts_allow_slow_but_progressing_sources() {
+        assert!(SOURCE_PROBE_TIMEOUT >= std::time::Duration::from_secs(5));
+        assert!(SOURCE_PROBE_TIMEOUT <= std::time::Duration::from_secs(15));
+        assert!(SOURCE_IDLE_TIMEOUT >= std::time::Duration::from_secs(20));
     }
 
     fn webp(marker: u8) -> Vec<u8> {
@@ -833,12 +884,11 @@ mod tests {
     #[ignore = "requires the public GitHub Release"]
     async fn installs_the_public_release_end_to_end() {
         let root = test_dir("online");
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap();
+        // 用生产同一套下载客户端：19.5MB 的资源包在实测速率下要 50~150s，
+        // 之前这里用 30s 总超时的客户端，必然下不完（这也是它一直失效的原因）。
+        let client = download_client();
         let progress = std::sync::Mutex::new(ResourcePackProgress::default());
-        refresh_inner(&client, &root, &progress).await.unwrap();
+        refresh_inner(client, &root, &progress).await.unwrap();
         let catalog = load_catalog(&root).unwrap().unwrap();
         assert!(catalog.resources.len() >= 100);
         assert!(catalog.icons.len() >= 100);
